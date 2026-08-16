@@ -1,5 +1,11 @@
 # Veja https://help.github.com/articles/ignoring-files/ para mais detalhes sobre como ignorar arquivos.
 
+# client
+/docs
+/n8n_automation
+/supabase
+*.md
+
 # dependências
 /node_modules
 /.pnp
@@ -44,8 +50,14 @@ yarn-error.log*
 next-env.d.ts
 
 # Claude Code local — credenciais e configurações locais
+/.claude
 .claude/mcp.json
 .mcp.json
 
 # Evidência da sonda da Evolution Go (SPEC 048) — gerada localmente
+/scripts
 scripts/.evolution-*
+
+# vscode
+/.vscode
+*.code-workspace
