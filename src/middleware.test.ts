@@ -118,7 +118,22 @@ describe('middleware — /auth/callback skips the auth gate entirely', () => {
     // out before ever constructing the Supabase client for this path —
     // see SPEC 053 §2.1.2.
     const res = await middleware(
-      new NextRequest('https://app.test/auth/callback?code=abc&next=/reset-password')
+      new NextRequest(
+        'https://app.test/auth/callback?code=abc&next=/reset-password'
+      )
+    );
+
+    expect(getUserCallCount).toBe(0);
+    expect(res.headers.get('location')).toBeNull();
+  });
+});
+
+describe('middleware — /auth/confirm skips the auth gate entirely', () => {
+  it('never calls getUser(), same reasoning as /auth/callback — see SPEC 053 §2.1.3', async () => {
+    const res = await middleware(
+      new NextRequest(
+        'https://app.test/auth/confirm?token_hash=abc&type=recovery&next=/reset-password'
+      )
     );
 
     expect(getUserCallCount).toBe(0);

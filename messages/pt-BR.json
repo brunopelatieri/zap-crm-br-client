@@ -22,7 +22,8 @@
     "errorInvalidEmail": "Este e-mail não é válido ou não pode ser usado.",
     "errorSignupDisabled": "Este recurso está temporariamente indisponível. Tente novamente mais tarde.",
     "errorGeneric": "Não foi possível entrar agora. Tente novamente em instantes ou fale com o suporte.",
-    "errorCallbackFailed": "Este link expirou ou já foi utilizado. Solicite um novo link de redefinição de senha."
+    "errorCallbackFailed": "Este link expirou ou já foi utilizado. Solicite um novo link de redefinição de senha.",
+    "errorLinkExpired": "Este link expirou ou já foi utilizado. Solicite um novo link de redefinição de senha."
   },
   "SignupPage": {
     "title": "Criar conta",
@@ -51,6 +52,7 @@
     "errorInvalidCredentials": "E-mail ou senha inválidos.",
     "errorUserBanned": "Esta conta está temporariamente bloqueada. Fale com o suporte.",
     "errorEmailNotConfirmed": "Confirme seu e-mail antes de continuar. Verifique sua caixa de entrada.",
+    "errorLinkExpired": "Este link expirou ou já foi utilizado. Solicite um novo.",
     "errorGeneric": "Não foi possível criar sua conta agora. Tente novamente em instantes ou fale com o suporte.",
     "successTitle": "Verifique seu e-mail",
     "successDesc": "Enviamos um link de confirmação para <highlight>{email}</highlight>. Verifique sua caixa de entrada e clique no link para verificar sua conta.",
@@ -86,10 +88,29 @@
     "errorInvalidEmail": "Este e-mail não é válido ou não pode ser usado.",
     "errorUserExists": "Já existe uma conta com este e-mail.",
     "errorSignupDisabled": "Este recurso está temporariamente indisponível. Tente novamente mais tarde.",
+    "errorLinkExpired": "Este link expirou ou já foi utilizado. Solicite um novo link de redefinição de senha.",
     "errorGeneric": "Não foi possível salvar sua nova senha agora. Solicite um novo link e tente novamente.",
     "successTitle": "Senha redefinida",
     "successDesc": "Sua senha foi alterada com sucesso. Entre novamente com a nova senha.",
     "goToSignIn": "Ir para o login"
+  },
+  "AuthConfirmPage": {
+    "title": "Confirme a redefinição de senha",
+    "desc": "Clique no botão abaixo para continuar. Essa etapa extra evita que scanners de segurança de e-mail gastem seu link antes de você.",
+    "confirmButton": "Redefinir senha",
+    "confirming": "Confirmando...",
+    "errorInvalidLink": "Este link é inválido. Solicite um novo link de redefinição de senha.",
+    "errorLinkExpired": "Este link expirou ou já foi utilizado. Solicite um novo link de redefinição de senha.",
+    "errorRateLimit": "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente novamente.",
+    "errorUserExists": "Já existe uma conta com este e-mail.",
+    "errorWeakPassword": "Esta senha é muito fraca. Escolha uma senha mais forte.",
+    "errorInvalidEmail": "Este e-mail não é válido ou não pode ser usado.",
+    "errorSignupDisabled": "Este recurso está temporariamente indisponível. Tente novamente mais tarde.",
+    "errorInvalidCredentials": "Não foi possível validar sua identidade. Solicite um novo link de redefinição.",
+    "errorUserBanned": "Esta conta está temporariamente bloqueada. Fale com o suporte.",
+    "errorEmailNotConfirmed": "Confirme seu e-mail antes de continuar. Verifique sua caixa de entrada.",
+    "errorGeneric": "Não foi possível confirmar este link. Solicite um novo link de redefinição de senha.",
+    "requestNewLink": "Solicitar novo link"
   },
   "JoinPage": {
     "verifying": "Verificando convite…",

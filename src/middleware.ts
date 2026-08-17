@@ -10,7 +10,14 @@ export async function middleware(request: NextRequest) {
   // `code-verifier` cookie as a side effect (see auth-js GoTrueClient's
   // `_getUser`), wiping it before the route handler gets to use it. Skip
   // middleware entirely here instead of risking that race.
-  if (request.nextUrl.pathname === '/auth/callback') {
+  // `/auth/confirm` calls `verifyOtp()` client-side on a real button click
+  // to consume the recovery/invite/signup token — same "don't touch
+  // getUser() here" reasoning as `/auth/callback` above, and same
+  // conclusion: no gate below applies to this route either.
+  if (
+    request.nextUrl.pathname === '/auth/callback' ||
+    request.nextUrl.pathname === '/auth/confirm'
+  ) {
     return NextResponse.next();
   }
 

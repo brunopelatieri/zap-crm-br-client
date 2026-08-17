@@ -22,7 +22,8 @@
     "errorInvalidEmail": "This email is invalid or cannot be used.",
     "errorSignupDisabled": "This feature is temporarily unavailable. Please try again later.",
     "errorGeneric": "We couldn't sign you in right now. Please try again shortly or contact support.",
-    "errorCallbackFailed": "This link has expired or was already used. Please request a new password reset link."
+    "errorCallbackFailed": "This link has expired or was already used. Please request a new password reset link.",
+    "errorLinkExpired": "This link has expired or was already used. Please request a new password reset link."
   },
   "SignupPage": {
     "title": "Create account",
@@ -51,6 +52,7 @@
     "errorInvalidCredentials": "Invalid email or password.",
     "errorUserBanned": "This account is temporarily blocked. Please contact support.",
     "errorEmailNotConfirmed": "Please confirm your email before continuing. Check your inbox.",
+    "errorLinkExpired": "This link has expired or was already used. Please request a new one.",
     "errorGeneric": "We couldn't create your account right now. Please try again shortly or contact support.",
     "successTitle": "Check your email",
     "successDesc": "We've sent a confirmation link to <highlight>{email}</highlight>. Please check your inbox and click the link to verify your account.",
@@ -86,10 +88,29 @@
     "errorInvalidEmail": "This email is invalid or cannot be used.",
     "errorUserExists": "An account with this email already exists.",
     "errorSignupDisabled": "This feature is temporarily unavailable. Please try again later.",
+    "errorLinkExpired": "This link has expired or was already used. Please request a new password reset link.",
     "errorGeneric": "We couldn't save your new password right now. Please request a new link and try again.",
     "successTitle": "Password reset",
     "successDesc": "Your password has been changed successfully. Please sign in again with your new password.",
     "goToSignIn": "Go to sign in"
+  },
+  "AuthConfirmPage": {
+    "title": "Confirm password reset",
+    "desc": "Click the button below to continue. This extra step keeps email security scanners from using up your link before you do.",
+    "confirmButton": "Reset password",
+    "confirming": "Confirming...",
+    "errorInvalidLink": "This link is invalid. Please request a new password reset link.",
+    "errorLinkExpired": "This link has expired or was already used. Please request a new password reset link.",
+    "errorRateLimit": "Too many attempts in a short time. Please wait a few minutes and try again.",
+    "errorUserExists": "An account with this email already exists.",
+    "errorWeakPassword": "This password is too weak. Please choose a stronger one.",
+    "errorInvalidEmail": "This email is invalid or cannot be used.",
+    "errorSignupDisabled": "This feature is temporarily unavailable. Please try again later.",
+    "errorInvalidCredentials": "We couldn't verify your identity. Please request a new reset link.",
+    "errorUserBanned": "This account is temporarily blocked. Please contact support.",
+    "errorEmailNotConfirmed": "Please confirm your email before continuing. Check your inbox.",
+    "errorGeneric": "We couldn't confirm this link. Please request a new password reset link.",
+    "requestNewLink": "Request a new link"
   },
   "JoinPage": {
     "verifying": "Verifying invitation…",
