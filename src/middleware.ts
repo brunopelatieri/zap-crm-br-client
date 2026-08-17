@@ -2,6 +2,18 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
+  // `/auth/callback` exchanges a one-time PKCE `code` for a session, which
+  // depends on the `code-verifier` cookie set when the flow started. None
+  // of the gates below apply to this route — but calling getUser() still
+  // isn't harmless: when the browser also carries a stale/revoked session
+  // cookie, GoTrue's AuthSessionMissingError cleanup path deletes the
+  // `code-verifier` cookie as a side effect (see auth-js GoTrueClient's
+  // `_getUser`), wiping it before the route handler gets to use it. Skip
+  // middleware entirely here instead of risking that race.
+  if (request.nextUrl.pathname === '/auth/callback') {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

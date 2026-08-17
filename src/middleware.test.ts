@@ -14,6 +14,7 @@ let refreshedCookies: Array<{
   value: string;
   options: Record<string, unknown>;
 }> = [];
+let getUserCallCount = 0;
 
 vi.mock('@supabase/ssr', () => ({
   createServerClient: (
@@ -28,6 +29,7 @@ vi.mock('@supabase/ssr', () => ({
       // refreshed inside getUser(), which rotates the refresh token and
       // pushes the new cookies through setAll() before resolving.
       getUser: async () => {
+        getUserCallCount += 1;
         if (refreshedCookies.length) opts.cookies.setAll(refreshedCookies);
         return { data: { user: mockUser } };
       },
@@ -43,6 +45,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-key';
   mockUser = null;
   refreshedCookies = [];
+  getUserCallCount = 0;
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -103,5 +106,22 @@ describe('middleware — refreshed auth cookies survive redirects', () => {
     // No redirect — the normal NextResponse.next() already carries cookies.
     expect(res.headers.get('location')).toBeNull();
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
+  });
+});
+
+describe('middleware — /auth/callback skips the auth gate entirely', () => {
+  it('never calls getUser(), so a stale session cannot wipe the PKCE code-verifier cookie first', async () => {
+    // Regression test: auth-js's getUser() deletes the `-code-verifier`
+    // cookie as a side effect when it finds a stale/revoked session
+    // (AuthSessionMissingError cleanup in GoTrueClient#_getUser). None of
+    // this route's gates need getUser() at all, so middleware must bail
+    // out before ever constructing the Supabase client for this path —
+    // see SPEC 053 §2.1.2.
+    const res = await middleware(
+      new NextRequest('https://app.test/auth/callback?code=abc&next=/reset-password')
+    );
+
+    expect(getUserCallCount).toBe(0);
+    expect(res.headers.get('location')).toBeNull();
   });
 });
