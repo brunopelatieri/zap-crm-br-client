@@ -38,7 +38,7 @@ vi.mock('@supabase/ssr', () => ({
 }));
 
 // Imported after the mock is registered.
-const { middleware } = await import('./middleware');
+const { middleware, config } = await import('./middleware');
 
 beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
@@ -125,6 +125,50 @@ describe('middleware — /auth/callback skips the auth gate entirely', () => {
 
     expect(getUserCallCount).toBe(0);
     expect(res.headers.get('location')).toBeNull();
+  });
+});
+
+describe('middleware — matcher exclui os webhooks inbound (Meta e Evolution)', () => {
+  // Reproduz como o Next.js compila `config.matcher` — não `middleware()`
+  // em si, que nunca lê essa string. Só o matcher decide se o Next roda
+  // o middleware pra uma rota; e é RODAR (mesmo sem tocar o corpo) que
+  // aciona o clone do corpo com teto de 10MB (`middlewareClientMaxBodySize`)
+  // — o que truncava vídeo em base64 vindo do webhook da Evolution antes
+  // desta exclusão existir.
+  const matches = (pathname: string) =>
+    new RegExp(`^${config.matcher[0]}$`).test(pathname);
+
+  it('exclui os dois webhooks inbound, inclusive sub-rotas', () => {
+    expect(matches('/api/whatsapp/webhook')).toBe(false);
+    expect(matches('/api/channels/evolution/webhook/some-secret')).toBe(false);
+  });
+
+  it('não exclui rotas de API que precisam do gate de sessão', () => {
+    expect(matches('/api/whatsapp/send')).toBe(true);
+    // API pública de gerenciar webhooks (plural) — rota autenticada
+    // nossa, não um receptor inbound; não deve ser confundida com as
+    // duas exclusões acima.
+    expect(matches('/api/v1/webhooks')).toBe(true);
+  });
+
+  it('exclusão é por SEGMENTO de path, não por prefixo cru', () => {
+    // Sem o `(?:/|$)` depois de cada literal, isto também escaparia do
+    // middleware inteiro (gate de sessão incluído) só por começar com o
+    // mesmo texto — mesmo sendo uma rota hipotética completamente
+    // diferente do receptor inbound que a exclusão foi escrita para.
+    expect(matches('/api/whatsapp/webhook-status')).toBe(true);
+    expect(matches('/api/channels/evolution/webhook-logs')).toBe(true);
+  });
+
+  it('continua excluindo assets estáticos (comportamento anterior)', () => {
+    expect(matches('/_next/static/chunk.js')).toBe(false);
+    expect(matches('/favicon.ico')).toBe(false);
+    expect(matches('/logo.png')).toBe(false);
+  });
+
+  it('continua cobrindo páginas normais', () => {
+    expect(matches('/dashboard')).toBe(true);
+    expect(matches('/login')).toBe(true);
   });
 });
 

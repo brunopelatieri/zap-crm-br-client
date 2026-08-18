@@ -122,6 +122,14 @@ export async function middleware(request: NextRequest) {
   // API error strings stay in English on purpose (see docs/public-api.md
   // and the i18n policy): clients/integrations consume them; UI maps
   // codes to translated copy when showing errors to end users.
+  //
+  // The Meta and Evolution webhooks themselves never reach this check —
+  // `config.matcher` below excludes them from middleware entirely (10MB
+  // body-clone cap). This `.includes('/webhook')` carve-out is defense
+  // in depth for anything ELSE under `/api/whatsapp/` whose path happens
+  // to contain "webhook" but isn't in the matcher's exclusion list — if
+  // you add a real webhook-like route, exclude it in the matcher too;
+  // this line alone does not skip the 10MB clone.
   if (
     !user &&
     request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
@@ -137,6 +145,23 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // Webhooks inbound (Meta e Evolution) ficam de fora do matcher, não
+    // só com um `return NextResponse.next()` cedo dentro da função: o
+    // Next.js 16 cloneia/buffera o corpo da requisição sempre que o
+    // middleware RODA numa rota (mesmo sem tocar no corpo), e esse clone
+    // tem teto de 10MB por padrão (`middlewareClientMaxBodySize`). O
+    // webhook da Evolution manda mídia recebida em base64 dentro do
+    // JSON — um vídeo facilmente estoura 10MB nesse formato — e o corpo
+    // truncado silenciosamente derruba a mensagem antes mesmo do parse.
+    // Nenhum dos dois precisa de cookie de sessão: a Meta assina por
+    // HMAC (`webhook-signature.ts`) e a Evolution por segredo no path +
+    // token da instância — o gate deste arquivo nunca se aplicava a eles.
+    //
+    // `(?:/|$)` depois de cada literal: sem isso a exclusão é por
+    // PREFIXO — qualquer rota futura que só COMECE com o mesmo texto
+    // (ex.: um endpoint de debug em `/api/whatsapp/webhook-status`)
+    // também escaparia do middleware inteiro, gate de sessão incluído,
+    // sem nenhuma rota assim existir hoje para acusar o erro.
+    '/((?!_next/static|_next/image|favicon.ico|api/whatsapp/webhook(?:/|$)|api/channels/evolution/webhook(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
