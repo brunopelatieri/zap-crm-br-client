@@ -26,6 +26,7 @@
  * por que ler o nível errado é um defeito silencioso.
  */
 
+import { after } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
 import {
@@ -38,6 +39,7 @@ import {
   type EvolutionConfig,
 } from '@/lib/evolution/config';
 import { evolutionDebugLog } from '@/lib/evolution/debug';
+import { ensureContactIdentity } from '@/lib/evolution/contact-identity';
 import { pickRecord, pickString } from '@/lib/evolution/payload';
 import { capabilitiesFor } from '../capabilities';
 import type {
@@ -175,6 +177,39 @@ async function send(
       })
     );
     evolutionDebugLog(`${path} → resposta`, data);
+
+    // Fecha a lacuna do backfill puramente reativo do webhook (SPEC 048
+    // §6.4): muitos contatos nunca mandam um inbound identificado por
+    // telefone — chegam SEMPRE por LID, por causa do rollout de
+    // privacidade do WhatsApp — então esperar um inbound phone-identified
+    // pra aprender o vínculo telefone→LID é esperar pra sempre nesses
+    // casos. Aqui o telefone já é conhecido (é `body.number`, pra ONDE
+    // acabamos de mandar), então o vínculo pode nascer ANTES de o
+    // contato precisar responder.
+    //
+    // Vive AQUI, no `send()` compartilhado — não em cada método público
+    // (`sendText`, `sendMedia`, …) — porque todo envio que carrega um
+    // destinatário passa por aqui. Um método novo (ou um já existente
+    // como `sendLocation`/`sendPoll`/`sendReaction`) ganha o backfill de
+    // graça, sem precisar lembrar de chamar nada.
+    //
+    // `after()`, não `void` solto: best-effort e fora do caminho
+    // crítico — nunca pode atrasar o envio —, mas uma promessa solta
+    // ainda corre o risco de ser abortada pelo runtime assim que a
+    // resposta HTTP for enviada (mesma razão pela qual o webhook usa
+    // `after()` pro processamento inteiro). `ensureContactIdentity` já é
+    // idempotente (pula se já tem vínculo).
+    const number = typeof body.number === 'string' ? body.number : null;
+    if (number) {
+      after(() =>
+        ensureContactIdentity({
+          accountId: ctx.accountId,
+          instanceToken,
+          phone: number,
+        })
+      );
+    }
+
     return { providerMessageId: extractProviderMessageId(data) };
   } catch (err) {
     await flagAuthFailureIfNeeded(ctx, err);
