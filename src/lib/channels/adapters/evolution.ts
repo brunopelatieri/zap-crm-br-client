@@ -160,7 +160,8 @@ async function flagAuthFailureIfNeeded(
 async function send(
   ctx: ChannelContext,
   path: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  timeoutMs?: number
 ): Promise<SendResult> {
   const config = requireConfig();
   const { instanceToken } = credentials(ctx);
@@ -170,6 +171,7 @@ async function send(
         method: 'POST',
         key: instanceToken,
         body,
+        timeoutMs,
       })
     );
     evolutionDebugLog(`${path} → resposta`, data);
@@ -195,16 +197,25 @@ export const evolutionAdapter: ChannelAdapter = {
   },
 
   async sendMedia(ctx, p: SendMediaParams): Promise<SendResult> {
-    return send(ctx, '/send/media', {
-      number: toEvolutionNumber(p.to),
-      url: p.url,
-      // Valor livre no schema da Evolution ("não é enum fechado") —
-      // 'image' | 'video' | 'audio' | 'document' bate com o uso comum
-      // documentado.
-      type: p.kind,
-      ...(p.caption ? { caption: p.caption } : {}),
-      ...(p.filename ? { filename: p.filename } : {}),
-    });
+    // Timeout maior: a Evolution baixa `p.url` e sobe pro WhatsApp
+    // dentro da mesma requisição, então o teto genérico de
+    // `requestTimeoutMs` (pensado pra chamadas rápidas de texto/gerência)
+    // aborta vídeos maiores antes da Evolution terminar.
+    return send(
+      ctx,
+      '/send/media',
+      {
+        number: toEvolutionNumber(p.to),
+        url: p.url,
+        // Valor livre no schema da Evolution ("não é enum fechado") —
+        // 'image' | 'video' | 'audio' | 'document' bate com o uso comum
+        // documentado.
+        type: p.kind,
+        ...(p.caption ? { caption: p.caption } : {}),
+        ...(p.filename ? { filename: p.filename } : {}),
+      },
+      requireConfig().mediaRequestTimeoutMs
+    );
   },
 
   async sendLocation(ctx, p: SendLocationParams): Promise<SendResult> {

@@ -28,6 +28,7 @@ vi.mock('@/lib/evolution/config', () => ({
     instancePrefix: 'zapcrm',
     webhookPublicUrl: 'https://crm.example',
     requestTimeoutMs: 15000,
+    mediaRequestTimeoutMs: 60000,
   }),
 }));
 
@@ -220,6 +221,19 @@ describe('sendMedia', () => {
       caption: 'legenda',
       filename: 'foto.jpg',
     });
+  });
+
+  it('usa mediaRequestTimeoutMs (não requestTimeoutMs) — Evolution baixa e sobe o arquivo dentro da mesma requisição', async () => {
+    evolutionRequest.mockResolvedValue({ data: { id: 'EVO2' } });
+
+    await evolutionAdapter.sendMedia(CTX, {
+      to: '5511999999999',
+      kind: 'video',
+      url: 'https://bucket/signed.mp4',
+    });
+
+    const [, , opts] = evolutionRequest.mock.calls[0];
+    expect((opts as { timeoutMs?: number }).timeoutMs).toBe(60000);
   });
 });
 
