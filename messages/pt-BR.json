@@ -657,6 +657,7 @@
       "contactDetailsDesc": "Detalhes do contato",
       "phone": "Telefone",
       "email": "E-mail",
+      "nameLabel": "Nome",
       "company": "Empresa",
       "createdAt": "Criado em",
       "customFields": "Campos personalizados",
@@ -1113,11 +1114,27 @@
       "sending": "Enviando",
       "sent": "Enviado",
       "failed": "Falhou",
+      "streaming": "Em fluxo",
       "pending": "Pendente",
       "delivered": "Entregue",
       "read": "Lida",
       "replied": "Respondido",
       "unknown": "Desconhecido"
+    },
+    "sourceFilter": {
+      "campaigns": "Campanhas",
+      "webhooks": "Funis de webhook",
+      "noneYet": "Ainda sem funis de webhook",
+      "noneYetHint": "Um funil aparece aqui na primeira vez que POST /api/v1/ingest/contact é chamado com um webhook_id novo.",
+      "webhookId": "ID do webhook",
+      "ingested": "Ingeridos",
+      "recipientsSent": "Enviados"
+    },
+    "webhookFunnel": {
+      "copyId": "Copiar webhook_id",
+      "idCopied": "webhook_id copiado",
+      "viewLog": "Ver log",
+      "recipientsNote": "Este funil é acumulativo: \"Enviados\" conta cada tentativa de envio para este webhook_id ao longo do tempo, não pessoas distintas — o mesmo contato pode ser alcançado de novo numa requisição posterior."
     },
     "detail": {
       "backToBroadcasts": "Voltar aos disparos",
@@ -1130,6 +1147,7 @@
       "deleting": "Excluindo…",
       "delete": "Excluir",
       "cannotDeleteSending": "Não é possível excluir enquanto um disparo está sendo enviado",
+      "cannotDeleteStreaming": "Não é possível excluir um funil de webhook enquanto pode haver um envio em andamento",
       "deleteHover": "Excluir este disparo",
       "funnel": "Funil",
       "recipientsHeader": "Destinatários ({filtered} de {total})",
@@ -1178,6 +1196,11 @@
           "pValue": "valor-p"
         },
         "deleteCascade": "Apagar a variante A apaga o teste inteiro, incluindo a variante B. Confirmar?"
+      },
+      "metaErrors": {
+        "experimentUser": "Número do contato faz parte de um experimento",
+        "undeliverable": "Mensagem não foi entregue",
+        "ecosystemProtection": "Mensagem bloqueada para preservar a integridade do sistema"
       }
     },
     "new": {
@@ -2695,7 +2718,8 @@
       "fields": "Campos e etiquetas",
       "deals": "Negócios e moeda",
       "members": "Membros da equipe",
-      "api": "Chaves de API"
+      "api": "Chaves de API",
+      "webhook-log": "Log de webhook"
     },
     "groups": {
       "account": "Conta",
@@ -2826,6 +2850,44 @@
       "accountScopeWarning": "Uma chave enxerga <bold>todas as conversas da conta</bold>, inclusive as atribuídas a outros agentes — ela não equivale a um usuário agente. Trate-a como credencial de administrador e crie uma chave por integração, para poder revogar isoladamente.",
       "done": "Concluído",
       "networkError": "Não foi possível conectar ao servidor"
+    },
+    "webhookLog": {
+      "title": "Log de webhook",
+      "description": "Aqui só entram requisições rejeitadas ou parcialmente processadas do webhook de entrada (POST /api/v1/ingest/contact) — o sucesso fica no funil, em Disparos. Uma requisição rejeitada por chave de API ausente ou inválida também não aparece aqui, pois não há conta a que a linha possa pertencer.",
+      "clear": "Limpar log",
+      "clearConfirmTitle": "Limpar o log de webhook?",
+      "clearConfirmDescription": "Isto apaga permanentemente todas as entradas do log de webhook desta conta. Não afeta nenhum contato, etiqueta ou disparo já criado.",
+      "clearSuccess": "Log de webhook limpo",
+      "clearFailed": "Falha ao limpar o log de webhook",
+      "cancel": "Cancelar",
+      "loadFailed": "Falha ao carregar o log de webhook",
+      "networkError": "Não foi possível conectar ao servidor",
+      "levelAll": "Todos os níveis",
+      "levelError": "Erros",
+      "levelWarning": "Avisos",
+      "webhookAll": "Todos os webhooks",
+      "unnamedWebhook": "Webhook sem nome",
+      "noWebhook": "Sem webhook_id/webhook_name (a própria validação desses campos falhou)",
+      "viewPayload": "Ver payload",
+      "payloadTitle": "Payload da requisição",
+      "payloadWarning": "Este é o corpo bruto da requisição — pode conter dado pessoal (nome, telefone, notas). Truncado em 8 KB.",
+      "loadMore": "Carregar mais",
+      "empty": "Nenhuma falha ou aviso ainda.",
+      "codes": {
+        "bad_request": "Corpo da requisição malformado",
+        "invalid_webhook_id": "webhook_id inválido",
+        "invalid_webhook_name": "webhook_name inválido",
+        "invalid_phone": "Telefone inválido",
+        "template_not_found": "Template não encontrado",
+        "template_not_approved": "Template não aprovado",
+        "channel_not_capable": "Canal não pode enviar isto",
+        "send_failed": "Falha no envio",
+        "custom_field_not_found": "Campo personalizado não encontrado",
+        "custom_field_ambiguous": "Nome de campo personalizado é ambíguo",
+        "custom_fields_malformed": "custom_fields está no formato errado",
+        "note_empty": "Nota vazia ignorada",
+        "payload_truncated": "Payload acima de 8 KB, truncado"
+      }
     },
     "deals": {
       "title": "Negócios e moeda",

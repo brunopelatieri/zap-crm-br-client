@@ -657,6 +657,7 @@
       "contactDetailsDesc": "Contact details",
       "phone": "Phone",
       "email": "Email",
+      "nameLabel": "Name",
       "company": "Company",
       "createdAt": "Created At",
       "customFields": "Custom Fields",
@@ -1113,11 +1114,27 @@
       "sending": "Sending",
       "sent": "Sent",
       "failed": "Failed",
+      "streaming": "Streaming",
       "pending": "Pending",
       "delivered": "Delivered",
       "read": "Read",
       "replied": "Replied",
       "unknown": "Unknown"
+    },
+    "sourceFilter": {
+      "campaigns": "Campaigns",
+      "webhooks": "Webhook funnels",
+      "noneYet": "No webhook funnels yet",
+      "noneYetHint": "A funnel appears here the first time POST /api/v1/ingest/contact is called with a new webhook_id.",
+      "webhookId": "Webhook ID",
+      "ingested": "Ingested",
+      "recipientsSent": "Sent"
+    },
+    "webhookFunnel": {
+      "copyId": "Copy webhook_id",
+      "idCopied": "webhook_id copied",
+      "viewLog": "View log",
+      "recipientsNote": "This funnel is accumulative: \"Sent\" counts every send attempt for this webhook_id over time, not distinct people — the same contact can be reached again in a later request."
     },
     "detail": {
       "backToBroadcasts": "Back to Broadcasts",
@@ -1130,6 +1147,7 @@
       "deleting": "Deleting…",
       "delete": "Delete",
       "cannotDeleteSending": "Cannot delete while a broadcast is actively sending",
+      "cannotDeleteStreaming": "Cannot delete a webhook funnel while it may have a send in flight",
       "deleteHover": "Delete this broadcast",
       "funnel": "Funnel",
       "recipientsHeader": "Recipients ({filtered} of {total})",
@@ -1178,6 +1196,11 @@
           "pValue": "p-value"
         },
         "deleteCascade": "Deleting variant A deletes the whole test, variant B included. Confirm?"
+      },
+      "metaErrors": {
+        "experimentUser": "User's number is part of an experiment",
+        "undeliverable": "Message undeliverable",
+        "ecosystemProtection": "Message blocked to maintain ecosystem integrity"
       }
     },
     "new": {
@@ -2695,7 +2718,8 @@
       "fields": "Fields & tags",
       "deals": "Deals & currency",
       "members": "Team members",
-      "api": "API keys"
+      "api": "API keys",
+      "webhook-log": "Webhook log"
     },
     "groups": {
       "account": "Account",
@@ -2826,6 +2850,44 @@
       "accountScopeWarning": "A key sees <bold>every conversation in the account</bold>, including threads assigned to other agents — it is not equivalent to an agent user. Treat it as an administrator credential, and issue one key per integration so you can revoke it in isolation.",
       "done": "Done",
       "networkError": "Could not reach the server"
+    },
+    "webhookLog": {
+      "title": "Webhook log",
+      "description": "Only failed or partial inbound-webhook requests (POST /api/v1/ingest/contact) show up here — successful sends live in the funnel under Broadcasts. A request rejected for a missing or invalid API key never appears here either, since there is no account to attach it to.",
+      "clear": "Clear log",
+      "clearConfirmTitle": "Clear the webhook log?",
+      "clearConfirmDescription": "This permanently deletes every entry in this account's webhook log. It does not affect any contact, tag, or broadcast that was already created.",
+      "clearSuccess": "Webhook log cleared",
+      "clearFailed": "Failed to clear the webhook log",
+      "cancel": "Cancel",
+      "loadFailed": "Failed to load the webhook log",
+      "networkError": "Could not reach the server",
+      "levelAll": "All levels",
+      "levelError": "Errors",
+      "levelWarning": "Warnings",
+      "webhookAll": "All webhooks",
+      "unnamedWebhook": "Unnamed webhook",
+      "noWebhook": "No webhook_id/webhook_name (validation of those fields itself failed)",
+      "viewPayload": "View payload",
+      "payloadTitle": "Request payload",
+      "payloadWarning": "This is the raw request body — it may contain personal data (name, phone, notes). Truncated at 8 KB.",
+      "loadMore": "Load more",
+      "empty": "No failures or warnings yet.",
+      "codes": {
+        "bad_request": "Malformed request body",
+        "invalid_webhook_id": "Invalid webhook_id",
+        "invalid_webhook_name": "Invalid webhook_name",
+        "invalid_phone": "Invalid phone number",
+        "template_not_found": "Template not found",
+        "template_not_approved": "Template not approved",
+        "channel_not_capable": "Channel cannot send this",
+        "send_failed": "Send failed",
+        "custom_field_not_found": "Custom field not found",
+        "custom_field_ambiguous": "Custom field name is ambiguous",
+        "custom_fields_malformed": "custom_fields has the wrong shape",
+        "note_empty": "Empty note skipped",
+        "payload_truncated": "Payload over 8 KB, truncated"
+      }
     },
     "deals": {
       "title": "Deals & currency",

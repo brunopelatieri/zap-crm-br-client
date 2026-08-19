@@ -498,7 +498,23 @@ export interface Deal {
 }
 
 export type BroadcastStatus =
-  'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
+  | 'draft'
+  | 'scheduled'
+  | 'sending'
+  | 'sent'
+  | 'failed'
+  /**
+   * SPEC 055 (migração 065) — exclusivo de `source = 'webhook'`. Um
+   * funil acumulativo por `webhook_id` nunca "termina", então não
+   * chega a `sent`/`failed`.
+   */
+  | 'streaming';
+
+/** SPEC 055 D-4. `dashboard` (padrão) cobre campanha manual/agendada
+ *  E o disparo público hoje (nada além do webhook de entrada grava um
+ *  valor explícito ainda); `webhook` é o funil acumulado por
+ *  `webhook_id`. */
+export type BroadcastSource = 'dashboard' | 'api' | 'webhook';
 export type RecipientStatus =
   'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
 
@@ -533,6 +549,16 @@ export interface Broadcast {
   variant_label?: 'A' | 'B' | null;
   /** Fatia da audiência sorteada para a variante A. Vive na linha A. */
   ab_split_percent?: number | null;
+  /** SPEC 055 D-4 (migração 065). Ausente em linhas anteriores à
+   *  migração — trate como `'dashboard'`, o próprio `DEFAULT` da coluna. */
+  source?: BroadcastSource;
+  /** SPEC 055 D-5. Só em `source = 'webhook'` — identifica a ORIGEM,
+   *  não é credencial. */
+  webhook_id?: string | null;
+  webhook_name?: string | null;
+  /** SPEC 055 D-15. Conta POSTs aceitos (com ou sem disparo) — distinto
+   *  de `total_recipients`, que só conta envios tentados. */
+  ingested_count?: number;
   status: BroadcastStatus;
   total_recipients: number;
   sent_count: number;

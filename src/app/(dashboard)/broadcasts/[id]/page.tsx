@@ -32,9 +32,12 @@ import {
   Download,
   ChevronDown,
   Trash2,
+  Copy,
+  ScrollText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getBroadcastStatus, getRecipientStatus } from '@/lib/broadcast-status';
+import { getMetaErrorTranslationKey } from '@/lib/meta-errors';
 import { useTranslations } from 'next-intl';
 import { StatCard } from '@/components/broadcasts/stat-card';
 import {
@@ -85,6 +88,7 @@ export default function BroadcastDetailPage() {
   const router = useRouter();
   const t = useTranslations('Broadcasts.detail');
   const tStatus = useTranslations('Broadcasts.status');
+  const tWebhook = useTranslations('Broadcasts.webhookFunnel');
   const broadcastId = params.id as string;
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
@@ -157,14 +161,22 @@ export default function BroadcastDetailPage() {
     fetchData();
   }, [fetchData]);
 
-  // Polling enquanto o disparo está `sending`.
+  // Polling enquanto o disparo está `sending` — OU `streaming`.
   //
   // Passou a ser necessário quando o envio migrou para o servidor (SPEC
   // 044 §6.1): o wizard agora responde assim que as linhas existem e
   // redireciona para cá com tudo em `pending`. Sem isto o usuário veria
   // uma foto congelada de uma campanha que está andando. Espelha o
   // padrão da lista (`/broadcasts`), inclusive a pausa em aba oculta.
-  const isSending = broadcast?.status === 'sending';
+  //
+  // `streaming` (SPEC 055, funil de webhook) INCLUI de propósito, ao
+  // contrário da lista: lá, pollar toda linha `streaming` da tabela é
+  // desperdício (um funil vive meses); aqui é UM funil específico que o
+  // usuário abriu para acompanhar ao vivo — sem isto, novos
+  // destinatários que chegam via POST em segundo plano nunca apareceriam
+  // sem F5 manual.
+  const isSending =
+    broadcast?.status === 'sending' || broadcast?.status === 'streaming';
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -327,22 +339,69 @@ export default function BroadcastDetailPage() {
                 </span>
               )}
             </div>
-            <div className="text-muted-foreground mt-1 flex items-center gap-3 text-sm">
-              <span>{t('template', { name: broadcast.template_name })}</span>
-              <span>-</span>
-              <span>
-                {t('createdAt', {
-                  date: new Date(broadcast.created_at).toLocaleDateString(),
-                })}
-              </span>
-            </div>
+            {broadcast.source === 'webhook' ? (
+              // SPEC 055 D-10 — cabeçalho do funil: o webhook_id (com
+              // copiar) + link pro log já filtrado por ele. Uma linha
+              // curta explica que "recipients" aqui conta ENVIOS, não
+              // pessoas distintas (D-5 nota 1) — sem isso, o número
+              // parece um bug para quem está acostumado com campanha
+              // comum.
+              <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-3 text-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (broadcast.webhook_id) {
+                      navigator.clipboard.writeText(broadcast.webhook_id);
+                      toast.success(tWebhook('idCopied'));
+                    }
+                  }}
+                  className="hover:text-foreground flex items-center gap-1 font-mono text-xs"
+                  title={tWebhook('copyId')}
+                >
+                  {broadcast.webhook_id}
+                  <Copy className="h-3 w-3" />
+                </button>
+                <span>-</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(
+                      `/settings?tab=webhook-log&webhook_id=${broadcast.webhook_id}`
+                    )
+                  }
+                  className="hover:text-foreground flex items-center gap-1"
+                >
+                  <ScrollText className="h-3.5 w-3.5" />
+                  {tWebhook('viewLog')}
+                </button>
+              </div>
+            ) : (
+              <div className="text-muted-foreground mt-1 flex items-center gap-3 text-sm">
+                <span>{t('template', { name: broadcast.template_name })}</span>
+                <span>-</span>
+                <span>
+                  {t('createdAt', {
+                    date: new Date(broadcast.created_at).toLocaleDateString(),
+                  })}
+                </span>
+              </div>
+            )}
+            {broadcast.source === 'webhook' && (
+              <p className="text-muted-foreground mt-1 text-xs">
+                {tWebhook('recipientsNote')}
+              </p>
+            )}
           </div>
         </div>
 
         {/* Delete — inline-confirm pattern matches the pipeline-settings
             "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
             because orphaning in-flight Meta messages would leave the
-            funnel inconsistent. */}
+            funnel inconsistent. 'streaming' (webhook funnels, SPEC 055)
+            is included in that same guard: a POST's after() send can be
+            in flight against this exact broadcast_id at any time, and
+            broadcast_recipients cascades on broadcasts.id (migration
+            001) — deleting mid-send would silently orphan that update. */}
         {confirmDelete ? (
           <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
             <span className="text-red-300">
@@ -375,12 +434,16 @@ export default function BroadcastDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={broadcast.status === 'sending'}
+            disabled={
+              broadcast.status === 'sending' || broadcast.status === 'streaming'
+            }
             onClick={() => setConfirmDelete(true)}
             title={
-              broadcast.status === 'sending'
-                ? t('cannotDeleteSending')
-                : t('deleteHover')
+              broadcast.status === 'streaming'
+                ? t('cannotDeleteStreaming')
+                : broadcast.status === 'sending'
+                  ? t('cannotDeleteSending')
+                  : t('deleteHover')
             }
             className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 disabled:opacity-40"
           >
@@ -588,7 +651,16 @@ export default function BroadcastDetailPage() {
                           : '-'}
                       </TableCell>
                       <TableCell className="max-w-xs truncate text-xs text-red-400">
-                        {recipient.error_message ?? '-'}
+                        {recipient.error_message
+                          ? (() => {
+                              const errorKey = getMetaErrorTranslationKey(
+                                recipient.error_message
+                              );
+                              return errorKey
+                                ? t(`metaErrors.${errorKey}`)
+                                : recipient.error_message;
+                            })()
+                          : '-'}
                       </TableCell>
                     </TableRow>
                   );
