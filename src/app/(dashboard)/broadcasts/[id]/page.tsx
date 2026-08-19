@@ -37,7 +37,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getBroadcastStatus, getRecipientStatus } from '@/lib/broadcast-status';
-import { getMetaErrorTranslationKey } from '@/lib/meta-errors';
 import { useTranslations } from 'next-intl';
 import { StatCard } from '@/components/broadcasts/stat-card';
 import {
@@ -45,6 +44,8 @@ import {
   type FunnelStep,
 } from '@/components/broadcasts/funnel-chart';
 import { VariantComparison } from '@/components/broadcasts/variant-comparison';
+import { RecipientErrorCell } from '@/components/broadcasts/recipient-error-cell';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 /**
  * Cadência do polling enquanto o disparo roda no servidor. Igual à da
@@ -513,163 +514,162 @@ export default function BroadcastDetailPage() {
         <FunnelChart steps={funnelSteps} title={t('funnel')} />
       )}
 
-      {/* Recipients Table */}
-      <div className="border-border bg-card rounded-xl border">
-        <div className="border-border flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-          <h2 className="text-foreground text-sm font-medium">
-            {statusFilter !== 'all'
-              ? t('recipientsHeader', {
-                  filtered: filteredRecipients.length,
-                  total: recipients.length,
-                })
-              : t('recipientsHeaderAll', { total: recipients.length })}
-          </h2>
-          <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-border text-muted-foreground hover:bg-muted"
-                  />
-                }
-              >
-                <Filter className="h-3.5 w-3.5" />
-                {statusFilter === 'all'
-                  ? t('allStatuses')
-                  : tStatus(getRecipientStatus(statusFilter).label)}
-                <ChevronDown className="h-3 w-3" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="border-border bg-popover">
-                <DropdownMenuItem
-                  onClick={() => setStatusFilter('all')}
-                  className={
-                    statusFilter === 'all'
-                      ? 'text-primary'
-                      : 'text-popover-foreground'
+      {/* Recipients Table — TooltipProvider scoped to just this
+            section: it's the only place a Tooltip (RecipientErrorCell)
+            is rendered, so the rest of the page doesn't need to carry
+            the provider. */}
+      <TooltipProvider>
+        <div className="border-border bg-card rounded-xl border">
+          <div className="border-border flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+            <h2 className="text-foreground text-sm font-medium">
+              {statusFilter !== 'all'
+                ? t('recipientsHeader', {
+                    filtered: filteredRecipients.length,
+                    total: recipients.length,
+                  })
+                : t('recipientsHeaderAll', { total: recipients.length })}
+            </h2>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-border text-muted-foreground hover:bg-muted"
+                    />
                   }
                 >
-                  {t('allStatuses')}
-                </DropdownMenuItem>
-                {RECIPIENT_STATUSES.map((s) => (
+                  <Filter className="h-3.5 w-3.5" />
+                  {statusFilter === 'all'
+                    ? t('allStatuses')
+                    : tStatus(getRecipientStatus(statusFilter).label)}
+                  <ChevronDown className="h-3 w-3" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="border-border bg-popover">
                   <DropdownMenuItem
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
+                    onClick={() => setStatusFilter('all')}
                     className={
-                      statusFilter === s
+                      statusFilter === 'all'
                         ? 'text-primary'
                         : 'text-popover-foreground'
                     }
                   >
-                    {tStatus(getRecipientStatus(s).label)}
+                    {t('allStatuses')}
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  {RECIPIENT_STATUSES.map((s) => (
+                    <DropdownMenuItem
+                      key={s}
+                      onClick={() => setStatusFilter(s)}
+                      className={
+                        statusFilter === s
+                          ? 'text-primary'
+                          : 'text-popover-foreground'
+                      }
+                    >
+                      {tStatus(getRecipientStatus(s).label)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-              disabled={recipients.length === 0}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {t('exportCsv')}
-            </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExport}
+                disabled={recipients.length === 0}
+                className="border-border text-muted-foreground hover:bg-muted"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {t('exportCsv')}
+              </Button>
+            </div>
           </div>
+
+          {filteredRecipients.length === 0 ? (
+            <div className="flex h-32 items-center justify-center">
+              <p className="text-muted-foreground text-sm">
+                {recipients.length === 0
+                  ? t('noRecipients')
+                  : t('noRecipientsFilter')}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border hover:bg-transparent">
+                    <TableHead className="text-muted-foreground">
+                      {t('table.contact')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.phone')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.status')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.sent')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.delivered')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.read')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.error')}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredRecipients.map((recipient) => {
+                    const rStatus = getRecipientStatus(recipient.status);
+                    return (
+                      <TableRow key={recipient.id} className="border-border">
+                        <TableCell className="text-foreground font-medium">
+                          {recipient.contact?.name ?? 'Unknown'}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {recipient.contact?.phone ?? '-'}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${rStatus.classes}`}
+                          >
+                            {tStatus(rStatus.label)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {recipient.sent_at
+                            ? new Date(recipient.sent_at).toLocaleString()
+                            : '-'}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {recipient.delivered_at
+                            ? new Date(recipient.delivered_at).toLocaleString()
+                            : '-'}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {recipient.read_at
+                            ? new Date(recipient.read_at).toLocaleString()
+                            : '-'}
+                        </TableCell>
+                        <TableCell className="max-w-xs">
+                          <RecipientErrorCell
+                            errorMessage={recipient.error_message}
+                            t={t}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </div>
-
-        {filteredRecipients.length === 0 ? (
-          <div className="flex h-32 items-center justify-center">
-            <p className="text-muted-foreground text-sm">
-              {recipients.length === 0
-                ? t('noRecipients')
-                : t('noRecipientsFilter')}
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">
-                    {t('table.contact')}
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    {t('table.phone')}
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    {t('table.status')}
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    {t('table.sent')}
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    {t('table.delivered')}
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    {t('table.read')}
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">
-                    {t('table.error')}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredRecipients.map((recipient) => {
-                  const rStatus = getRecipientStatus(recipient.status);
-                  return (
-                    <TableRow key={recipient.id} className="border-border">
-                      <TableCell className="text-foreground font-medium">
-                        {recipient.contact?.name ?? 'Unknown'}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {recipient.contact?.phone ?? '-'}
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${rStatus.classes}`}
-                        >
-                          {tStatus(rStatus.label)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {recipient.sent_at
-                          ? new Date(recipient.sent_at).toLocaleString()
-                          : '-'}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {recipient.delivered_at
-                          ? new Date(recipient.delivered_at).toLocaleString()
-                          : '-'}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {recipient.read_at
-                          ? new Date(recipient.read_at).toLocaleString()
-                          : '-'}
-                      </TableCell>
-                      <TableCell className="max-w-xs truncate text-xs text-red-400">
-                        {recipient.error_message
-                          ? (() => {
-                              const errorKey = getMetaErrorTranslationKey(
-                                recipient.error_message
-                              );
-                              return errorKey
-                                ? t(`metaErrors.${errorKey}`)
-                                : recipient.error_message;
-                            })()
-                          : '-'}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
+      </TooltipProvider>
     </div>
   );
 }

@@ -339,22 +339,20 @@ export default function InboxPage() {
       // então checar as duas é a única forma de não perder uma conexão
       // Cloud recente. Basta UMA das duas estar conectada para o aviso
       // sumir — o requisito é "pelo menos um canal", não "o Cloud".
-      const [{ data: cloudConfig }, { data: qrChannels }] = await Promise.all(
-        [
-          supabase
-            .from('whatsapp_config')
-            .select('status')
-            .eq('account_id', accountId)
-            .maybeSingle(),
-          supabase
-            .from('channels')
-            .select('id')
-            .eq('account_id', accountId)
-            .eq('type', 'whatsapp_qr')
-            .eq('status', 'connected')
-            .limit(1),
-        ]
-      );
+      const [{ data: cloudConfig }, { data: qrChannels }] = await Promise.all([
+        supabase
+          .from('whatsapp_config')
+          .select('status')
+          .eq('account_id', accountId)
+          .maybeSingle(),
+        supabase
+          .from('channels')
+          .select('id')
+          .eq('account_id', accountId)
+          .eq('type', 'whatsapp_qr')
+          .eq('status', 'connected')
+          .limit(1),
+      ]);
 
       setWhatsappConnected(
         cloudConfig?.status === 'connected' || (qrChannels?.length ?? 0) > 0

@@ -29,11 +29,23 @@
   "security": [{ "bearerAuth": [] }],
   "tags": [
     { "name": "Meta", "description": "Identity / key introspection." },
-    { "name": "Messages", "description": "Send WhatsApp messages and read a conversation's message history." },
-    { "name": "Contacts", "description": "List, create, read, and update contacts." },
+    {
+      "name": "Messages",
+      "description": "Send WhatsApp messages and read a conversation's message history."
+    },
+    {
+      "name": "Contacts",
+      "description": "List, create, read, and update contacts."
+    },
     { "name": "Conversations", "description": "List and read conversations." },
-    { "name": "Broadcasts", "description": "Launch and track template broadcast campaigns." },
-    { "name": "Webhooks", "description": "Register and manage outbound event webhook endpoints." }
+    {
+      "name": "Broadcasts",
+      "description": "Launch and track template broadcast campaigns."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Register and manage outbound event webhook endpoints."
+    }
   ],
   "paths": {
     "/me": {
@@ -71,7 +83,9 @@
                             "id": { "type": "string", "format": "uuid" },
                             "scopes": {
                               "type": "array",
-                              "items": { "$ref": "#/components/schemas/ApiScope" }
+                              "items": {
+                                "$ref": "#/components/schemas/ApiScope"
+                              }
                             }
                           }
                         }
@@ -81,8 +95,14 @@
                 },
                 "example": {
                   "data": {
-                    "account": { "id": "8f3c1e2a-0000-4000-8000-000000000001", "name": "Acme Inc" },
-                    "key": { "id": "8f3c1e2a-0000-4000-8000-000000000002", "scopes": ["messages:send"] }
+                    "account": {
+                      "id": "8f3c1e2a-0000-4000-8000-000000000001",
+                      "name": "Acme Inc"
+                    },
+                    "key": {
+                      "id": "8f3c1e2a-0000-4000-8000-000000000002",
+                      "scopes": ["messages:send"]
+                    }
                   }
                 }
               }
@@ -108,14 +128,22 @@
               "examples": {
                 "text": {
                   "summary": "Plain text",
-                  "value": { "to": "+14155550123", "type": "text", "text": "Hi 👋" }
+                  "value": {
+                    "to": "+14155550123",
+                    "type": "text",
+                    "text": "Hi 👋"
+                  }
                 },
                 "template": {
                   "summary": "Approved template",
                   "value": {
                     "to": "+14155550123",
                     "type": "template",
-                    "template": { "name": "order_update", "language": "en_US", "params": ["A123"] }
+                    "template": {
+                      "name": "order_update",
+                      "language": "en_US",
+                      "params": ["A123"]
+                    }
                   }
                 },
                 "media": {
@@ -156,7 +184,11 @@
                         {
                           "title": "Billing",
                           "rows": [
-                            { "id": "invoice", "title": "Get an invoice", "description": "PDF, sent by email" }
+                            {
+                              "id": "invoice",
+                              "title": "Get an invoice",
+                              "description": "PDF, sent by email"
+                            }
                           ]
                         }
                       ]
@@ -203,8 +235,22 @@
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorResponse" },
                 "examples": {
-                  "rateLimited": { "value": { "error": { "code": "rate_limited", "message": "Rate limit exceeded for this API key" } } },
-                  "coldSendLimit": { "value": { "error": { "code": "cold_send_limit", "message": "cold-send hourly limit reached (5/h)" } } }
+                  "rateLimited": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "Rate limit exceeded for this API key"
+                      }
+                    }
+                  },
+                  "coldSendLimit": {
+                    "value": {
+                      "error": {
+                        "code": "cold_send_limit",
+                        "message": "cold-send hourly limit reached (5/h)"
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -215,7 +261,12 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-                "example": { "error": { "code": "meta_error", "message": "(#131026) Message undeliverable" } }
+                "example": {
+                  "error": {
+                    "code": "meta_error",
+                    "message": "(#131026) Message undeliverable"
+                  }
+                }
               }
             }
           }
@@ -254,7 +305,10 @@
                   "type": "object",
                   "required": ["data", "meta"],
                   "properties": {
-                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Contact" } },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Contact" }
+                    },
                     "meta": { "$ref": "#/components/schemas/PaginationMeta" }
                   }
                 }
@@ -277,7 +331,11 @@
           "content": {
             "application/json": {
               "schema": { "$ref": "#/components/schemas/ContactCreateRequest" },
-              "example": { "phone": "+14155550123", "name": "Jane Doe", "tags": ["vip"] }
+              "example": {
+                "phone": "+14155550123",
+                "name": "Jane Doe",
+                "tags": ["vip"]
+              }
             }
           }
         },
@@ -289,7 +347,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/Contact" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/Contact" }
+                  }
                 }
               }
             }
@@ -301,7 +361,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/Contact" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/Contact" }
+                  }
                 }
               }
             }
@@ -328,7 +390,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/Contact" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/Contact" }
+                  }
                 }
               }
             }
@@ -350,7 +414,10 @@
           "content": {
             "application/json": {
               "schema": { "$ref": "#/components/schemas/ContactUpdateRequest" },
-              "example": { "company": "Acme Inc", "tags": ["vip", "newsletter"] }
+              "example": {
+                "company": "Acme Inc",
+                "tags": ["vip", "newsletter"]
+              }
             }
           }
         },
@@ -362,7 +429,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/Contact" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/Contact" }
+                  }
                 }
               }
             }
@@ -388,7 +457,10 @@
           {
             "name": "status",
             "in": "query",
-            "schema": { "type": "string", "enum": ["open", "pending", "closed"] }
+            "schema": {
+              "type": "string",
+              "enum": ["open", "pending", "closed"]
+            }
           },
           {
             "name": "contact_id",
@@ -411,7 +483,10 @@
                   "type": "object",
                   "required": ["data", "meta"],
                   "properties": {
-                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Conversation" } },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Conversation" }
+                    },
                     "meta": { "$ref": "#/components/schemas/PaginationMeta" }
                   }
                 }
@@ -439,7 +514,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/Conversation" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/Conversation" }
+                  }
                 }
               }
             }
@@ -472,7 +549,10 @@
                   "type": "object",
                   "required": ["data", "meta"],
                   "properties": {
-                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Message" }
+                    },
                     "meta": { "$ref": "#/components/schemas/PaginationMeta" }
                   }
                 }
@@ -497,7 +577,9 @@
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/BroadcastCreateRequest" },
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastCreateRequest"
+              },
               "example": {
                 "name": "July promo",
                 "template_name": "promo_july",
@@ -518,7 +600,11 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/BroadcastCreateResult" } }
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BroadcastCreateResult"
+                    }
+                  }
                 },
                 "example": {
                   "data": {
@@ -555,7 +641,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/Broadcast" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/Broadcast" }
+                  }
                 }
               }
             }
@@ -583,7 +671,12 @@
                   "type": "object",
                   "required": ["data", "meta"],
                   "properties": {
-                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEndpoint" } },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebhookEndpoint"
+                      }
+                    },
                     "meta": { "$ref": "#/components/schemas/PaginationMeta" }
                   }
                 }
@@ -606,7 +699,10 @@
           "content": {
             "application/json": {
               "schema": { "$ref": "#/components/schemas/WebhookCreateRequest" },
-              "example": { "url": "https://example.com/hooks/wacrm", "events": ["message.received"] }
+              "example": {
+                "url": "https://example.com/hooks/wacrm",
+                "events": ["message.received"]
+              }
             }
           }
         },
@@ -618,7 +714,11 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/WebhookEndpointWithSecret" } }
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                    }
+                  }
                 },
                 "example": {
                   "data": {
@@ -657,7 +757,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/WebhookEndpoint" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/WebhookEndpoint" }
+                  }
                 }
               }
             }
@@ -691,7 +793,9 @@
                 "schema": {
                   "type": "object",
                   "required": ["data"],
-                  "properties": { "data": { "$ref": "#/components/schemas/WebhookEndpoint" } }
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/WebhookEndpoint" }
+                  }
                 }
               }
             }
@@ -727,7 +831,12 @@
                     }
                   }
                 },
-                "example": { "data": { "id": "8f3c1e2a-0000-4000-8000-000000000030", "deleted": true } }
+                "example": {
+                  "data": {
+                    "id": "8f3c1e2a-0000-4000-8000-000000000030",
+                    "deleted": true
+                  }
+                }
               }
             }
           },
@@ -753,7 +862,12 @@
         "name": "limit",
         "in": "query",
         "description": "Page size.",
-        "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
       },
       "Cursor": {
         "name": "cursor",
@@ -810,7 +924,9 @@
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": { "error": { "code": "bad_request", "message": "'to' is required" } }
+            "example": {
+              "error": { "code": "bad_request", "message": "'to' is required" }
+            }
           }
         }
       },
@@ -819,7 +935,12 @@
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": { "error": { "code": "unauthorized", "message": "Missing or invalid API key" } }
+            "example": {
+              "error": {
+                "code": "unauthorized",
+                "message": "Missing or invalid API key"
+              }
+            }
           }
         }
       },
@@ -828,7 +949,12 @@
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": { "error": { "code": "forbidden", "message": "This API key is missing the 'messages:send' scope" } }
+            "example": {
+              "error": {
+                "code": "forbidden",
+                "message": "This API key is missing the 'messages:send' scope"
+              }
+            }
           }
         }
       },
@@ -837,7 +963,9 @@
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": { "error": { "code": "not_found", "message": "Contact not found" } }
+            "example": {
+              "error": { "code": "not_found", "message": "Contact not found" }
+            }
           }
         }
       },
@@ -845,14 +973,23 @@
         "description": "Per-key rate limit exceeded — 120 requests/minute (`rate_limited`).",
         "headers": {
           "Retry-After": { "$ref": "#/components/headers/RetryAfter" },
-          "X-RateLimit-Limit": { "$ref": "#/components/headers/RateLimitLimit" },
-          "X-RateLimit-Remaining": { "$ref": "#/components/headers/RateLimitRemaining" },
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimitLimit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimitRemaining"
+          },
           "X-RateLimit-Reset": { "$ref": "#/components/headers/RateLimitReset" }
         },
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": { "error": { "code": "rate_limited", "message": "Rate limit exceeded for this API key" } }
+            "example": {
+              "error": {
+                "code": "rate_limited",
+                "message": "Rate limit exceeded for this API key"
+              }
+            }
           }
         }
       },
@@ -861,7 +998,12 @@
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": { "error": { "code": "internal", "message": "Internal server error" } }
+            "example": {
+              "error": {
+                "code": "internal",
+                "message": "Internal server error"
+              }
+            }
           }
         }
       }
@@ -920,15 +1062,32 @@
       },
       "Contact": {
         "type": "object",
-        "required": ["id", "phone", "name", "email", "company", "avatar_url", "tags", "created_at", "updated_at"],
+        "required": [
+          "id",
+          "phone",
+          "name",
+          "email",
+          "company",
+          "avatar_url",
+          "tags",
+          "created_at",
+          "updated_at"
+        ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
-          "phone": { "type": "string", "description": "E.164 format.", "example": "+14155550123" },
+          "phone": {
+            "type": "string",
+            "description": "E.164 format.",
+            "example": "+14155550123"
+          },
           "name": { "type": ["string", "null"] },
           "email": { "type": ["string", "null"], "format": "email" },
           "company": { "type": ["string", "null"] },
           "avatar_url": { "type": ["string", "null"], "format": "uri" },
-          "tags": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } },
+          "tags": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Tag" }
+          },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
         }
@@ -937,7 +1096,11 @@
         "type": "object",
         "required": ["phone"],
         "properties": {
-          "phone": { "type": "string", "description": "E.164 format.", "example": "+14155550123" },
+          "phone": {
+            "type": "string",
+            "description": "E.164 format.",
+            "example": "+14155550123"
+          },
           "name": { "type": "string" },
           "email": { "type": "string", "format": "email" },
           "company": { "type": "string" },
@@ -970,15 +1133,26 @@
           "name": { "type": ["string", "null"] },
           "email": { "type": ["string", "null"] },
           "company": { "type": ["string", "null"] },
-          "tags": { "type": "array", "items": { "$ref": "#/components/schemas/Tag" } }
+          "tags": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Tag" }
+          }
         }
       },
       "Conversation": {
         "type": "object",
         "required": [
-          "id", "contact_id", "status", "assigned_agent_id", "channel_id",
-          "last_message_text", "last_message_at", "unread_count",
-          "created_at", "updated_at", "contact"
+          "id",
+          "contact_id",
+          "status",
+          "assigned_agent_id",
+          "channel_id",
+          "last_message_text",
+          "last_message_at",
+          "unread_count",
+          "created_at",
+          "updated_at",
+          "contact"
         ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
@@ -991,7 +1165,10 @@
             "description": "Which of the account's channels this conversation belongs to (SPEC 049 §5.4). `null` only for a row that predates multi-channel support."
           },
           "last_message_text": { "type": ["string", "null"] },
-          "last_message_at": { "type": ["string", "null"], "format": "date-time" },
+          "last_message_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
           "unread_count": { "type": "integer" },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" },
@@ -1001,22 +1178,47 @@
       "Message": {
         "type": "object",
         "required": [
-          "id", "conversation_id", "direction", "sender_type", "content_type",
-          "content_text", "media_url", "template_name", "whatsapp_message_id",
-          "status", "reply_to_message_id", "interactive_reply_id", "created_at"
+          "id",
+          "conversation_id",
+          "direction",
+          "sender_type",
+          "content_type",
+          "content_text",
+          "media_url",
+          "template_name",
+          "whatsapp_message_id",
+          "status",
+          "reply_to_message_id",
+          "interactive_reply_id",
+          "created_at"
         ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "conversation_id": { "type": "string", "format": "uuid" },
           "direction": { "type": "string", "enum": ["inbound", "outbound"] },
-          "sender_type": { "type": "string", "description": "e.g. `customer`, `agent`, `automation`, `api`." },
-          "content_type": { "type": "string", "description": "e.g. `text`, `template`, `interactive`, `image`, `video`, `document`, `audio`." },
+          "sender_type": {
+            "type": "string",
+            "description": "e.g. `customer`, `agent`, `automation`, `api`."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "e.g. `text`, `template`, `interactive`, `image`, `video`, `document`, `audio`."
+          },
           "content_text": { "type": ["string", "null"] },
           "media_url": { "type": ["string", "null"], "format": "uri" },
           "template_name": { "type": ["string", "null"] },
-          "whatsapp_message_id": { "type": ["string", "null"], "description": "Meta's `wamid.*` id." },
-          "status": { "type": "string", "description": "Delivery state, e.g. `sent`, `delivered`, `read`, `failed`." },
-          "reply_to_message_id": { "type": ["string", "null"], "format": "uuid" },
+          "whatsapp_message_id": {
+            "type": ["string", "null"],
+            "description": "Meta's `wamid.*` id."
+          },
+          "status": {
+            "type": "string",
+            "description": "Delivery state, e.g. `sent`, `delivered`, `read`, `failed`."
+          },
+          "reply_to_message_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
           "interactive_reply_id": {
             "type": ["string", "null"],
             "description": "The `id` of the interactive button/list row the contact tapped, when this message is a reply to one."
@@ -1028,7 +1230,10 @@
         "type": "object",
         "required": ["id", "title"],
         "properties": {
-          "id": { "type": "string", "description": "Stable id, echoed back when the recipient taps this button." },
+          "id": {
+            "type": "string",
+            "description": "Stable id, echoed back when the recipient taps this button."
+          },
           "title": { "type": "string", "maxLength": 20 }
         }
       },
@@ -1053,7 +1258,10 @@
         "type": "object",
         "required": ["id", "title"],
         "properties": {
-          "id": { "type": "string", "description": "Stable id, echoed back when the recipient selects this row." },
+          "id": {
+            "type": "string",
+            "description": "Stable id, echoed back when the recipient selects this row."
+          },
           "title": { "type": "string", "maxLength": 24 },
           "description": { "type": "string", "maxLength": 72 }
         }
@@ -1063,7 +1271,10 @@
         "required": ["rows"],
         "properties": {
           "title": { "type": "string" },
-          "rows": { "type": "array", "items": { "$ref": "#/components/schemas/InteractiveListRow" } }
+          "rows": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/InteractiveListRow" }
+          }
         }
       },
       "InteractiveListPayload": {
@@ -1074,7 +1285,11 @@
           "body": { "type": "string", "maxLength": 1024 },
           "header": { "type": "string", "maxLength": 60 },
           "footer": { "type": "string", "maxLength": 60 },
-          "button_label": { "type": "string", "maxLength": 20, "description": "Label of the tap-to-expand button." },
+          "button_label": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "Label of the tap-to-expand button."
+          },
           "sections": {
             "type": "array",
             "minItems": 1,
@@ -1101,8 +1316,15 @@
         "type": "object",
         "required": ["name"],
         "properties": {
-          "name": { "type": "string", "description": "An approved Meta template name." },
-          "language": { "type": "string", "default": "en_US", "example": "en_US" },
+          "name": {
+            "type": "string",
+            "description": "An approved Meta template name."
+          },
+          "language": {
+            "type": "string",
+            "default": "en_US",
+            "example": "en_US"
+          },
           "params": {
             "description": "Positional body variables as an array, or a structured `{ header, body, buttons }` object.",
             "oneOf": [
@@ -1116,14 +1338,25 @@
         "type": "object",
         "required": ["to"],
         "properties": {
-          "to": { "type": "string", "description": "E.164 phone number. Find-or-creates the contact + conversation.", "example": "+14155550123" },
-          "reply_to_message_id": { "type": "string", "format": "uuid", "description": "Must be a message in the same conversation." },
+          "to": {
+            "type": "string",
+            "description": "E.164 phone number. Find-or-creates the contact + conversation.",
+            "example": "+14155550123"
+          },
+          "reply_to_message_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Must be a message in the same conversation."
+          },
           "channel_id": {
             "type": "string",
             "format": "uuid",
             "description": "Which of the account's channels to send from (SPEC 049 §5.4). Omit to use the account's default channel."
           },
-          "name": { "type": "string", "description": "Name to give a newly-created contact. Ignored if the contact already exists." }
+          "name": {
+            "type": "string",
+            "description": "Name to give a newly-created contact. Ignored if the contact already exists."
+          }
         }
       },
       "TextMessageRequest": {
@@ -1159,10 +1392,19 @@
             "type": "object",
             "required": ["type", "media_url"],
             "properties": {
-              "type": { "type": "string", "enum": ["image", "video", "document", "audio"] },
+              "type": {
+                "type": "string",
+                "enum": ["image", "video", "document", "audio"]
+              },
               "media_url": { "type": "string", "format": "uri" },
-              "filename": { "type": "string", "description": "Document filename." },
-              "text": { "type": "string", "description": "Doubles as the media caption." }
+              "filename": {
+                "type": "string",
+                "description": "Document filename."
+              },
+              "text": {
+                "type": "string",
+                "description": "Doubles as the media caption."
+              }
             }
           }
         ]
@@ -1175,7 +1417,9 @@
             "required": ["type", "interactive_payload"],
             "properties": {
               "type": { "type": "string", "enum": ["interactive"] },
-              "interactive_payload": { "$ref": "#/components/schemas/InteractiveMessagePayload" }
+              "interactive_payload": {
+                "$ref": "#/components/schemas/InteractiveMessagePayload"
+              }
             }
           }
         ]
@@ -1190,20 +1434,36 @@
       },
       "SendMessageResult": {
         "type": "object",
-        "required": ["message_id", "whatsapp_message_id", "conversation_id", "contact_id", "contact_created"],
+        "required": [
+          "message_id",
+          "whatsapp_message_id",
+          "conversation_id",
+          "contact_id",
+          "contact_created"
+        ],
         "properties": {
           "message_id": { "type": "string", "format": "uuid" },
-          "whatsapp_message_id": { "type": ["string", "null"], "description": "Meta's `wamid.*` id." },
+          "whatsapp_message_id": {
+            "type": ["string", "null"],
+            "description": "Meta's `wamid.*` id."
+          },
           "conversation_id": { "type": "string", "format": "uuid" },
           "contact_id": { "type": "string", "format": "uuid" },
-          "contact_created": { "type": "boolean", "description": "True if `to` didn't match an existing contact." }
+          "contact_created": {
+            "type": "boolean",
+            "description": "True if `to` didn't match an existing contact."
+          }
         }
       },
       "BroadcastRecipient": {
         "type": "object",
         "required": ["to"],
         "properties": {
-          "to": { "type": "string", "description": "E.164 phone number.", "example": "+14155550123" },
+          "to": {
+            "type": "string",
+            "description": "E.164 phone number.",
+            "example": "+14155550123"
+          },
           "params": {
             "type": "array",
             "items": { "type": "string" },
@@ -1216,7 +1476,10 @@
         "required": ["template_name", "recipients"],
         "properties": {
           "name": { "type": "string", "description": "Optional label." },
-          "template_name": { "type": "string", "description": "An approved Meta template name." },
+          "template_name": {
+            "type": "string",
+            "description": "An approved Meta template name."
+          },
           "template_language": { "type": "string", "default": "en_US" },
           "recipients": {
             "type": "array",
@@ -1228,28 +1491,50 @@
       },
       "BroadcastCreateResult": {
         "type": "object",
-        "required": ["broadcast_id", "status", "total_recipients", "accepted", "rejected"],
+        "required": [
+          "broadcast_id",
+          "status",
+          "total_recipients",
+          "accepted",
+          "rejected"
+        ],
         "properties": {
           "broadcast_id": { "type": "string", "format": "uuid" },
           "status": { "type": "string", "enum": ["sending"] },
           "total_recipients": { "type": "integer" },
           "accepted": { "type": "integer" },
-          "rejected": { "type": "integer", "description": "Recipients dropped for an invalid phone number." }
+          "rejected": {
+            "type": "integer",
+            "description": "Recipients dropped for an invalid phone number."
+          }
         }
       },
       "Broadcast": {
         "type": "object",
         "required": [
-          "id", "name", "template_name", "template_language", "status",
-          "total_recipients", "sent_count", "delivered_count", "read_count",
-          "replied_count", "failed_count", "created_at", "updated_at"
+          "id",
+          "name",
+          "template_name",
+          "template_language",
+          "status",
+          "total_recipients",
+          "sent_count",
+          "delivered_count",
+          "read_count",
+          "replied_count",
+          "failed_count",
+          "created_at",
+          "updated_at"
         ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "name": { "type": ["string", "null"] },
           "template_name": { "type": "string" },
           "template_language": { "type": "string" },
-          "status": { "type": "string", "enum": ["scheduled", "sending", "sent", "failed"] },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "sending", "sent", "failed"]
+          },
           "total_recipients": { "type": "integer" },
           "sent_count": { "type": "integer" },
           "delivered_count": { "type": "integer" },
@@ -1262,21 +1547,42 @@
       },
       "WebhookEvent": {
         "type": "string",
-        "enum": ["message.received", "message.status_updated", "conversation.created"]
+        "enum": [
+          "message.received",
+          "message.status_updated",
+          "conversation.created"
+        ]
       },
       "WebhookEndpoint": {
         "type": "object",
-        "required": ["id", "url", "events", "is_active", "last_delivery_at", "failure_count", "created_at"],
+        "required": [
+          "id",
+          "url",
+          "events",
+          "is_active",
+          "last_delivery_at",
+          "failure_count",
+          "created_at"
+        ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "url": { "type": "string", "format": "uri" },
-          "events": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEvent" } },
+          "events": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WebhookEvent" }
+          },
           "is_active": {
             "type": "boolean",
             "description": "Auto-set to `false` after 15 consecutive delivery failures. Re-enable with PATCH, which also resets the failure counter."
           },
-          "last_delivery_at": { "type": ["string", "null"], "format": "date-time" },
-          "failure_count": { "type": "integer", "description": "Consecutive delivery failures. Reset to 0 by any successful delivery or by re-enabling via PATCH." },
+          "last_delivery_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "failure_count": {
+            "type": "integer",
+            "description": "Consecutive delivery failures. Reset to 0 by any successful delivery or by re-enabling via PATCH."
+          },
           "created_at": { "type": "string", "format": "date-time" }
         }
       },
@@ -1299,7 +1605,11 @@
         "type": "object",
         "required": ["url", "events"],
         "properties": {
-          "url": { "type": "string", "format": "uri", "description": "Must be `https://` and resolve to a public address." },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Must be `https://` and resolve to a public address."
+          },
           "events": {
             "type": "array",
             "minItems": 1,

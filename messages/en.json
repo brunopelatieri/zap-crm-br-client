@@ -1197,10 +1197,136 @@
         },
         "deleteCascade": "Deleting variant A deletes the whole test, variant B included. Confirm?"
       },
+      "metaErrorCategories": {
+        "delivery_restriction": "Delivery & recipient restrictions",
+        "rate_limit": "Rate limits & spam",
+        "payload_media": "Payload, templates & media",
+        "account_auth": "Account, auth & billing",
+        "internal": "Meta internal errors"
+      },
+      "metaErrorCode": "Code",
+      "metaErrorAction": "Recommended action",
       "metaErrors": {
-        "experimentUser": "User's number is part of an experiment",
-        "undeliverable": "Message undeliverable",
-        "ecosystemProtection": "Message blocked to maintain ecosystem integrity"
+        "131026": {
+          "title": "Message undeliverable",
+          "description": "The recipient's number isn't on WhatsApp, hasn't accepted Meta's current Terms of Service, or is running an unsupported app version.",
+          "action": "Mark the number as invalid and don't retry."
+        },
+        "131047": {
+          "title": "24-hour window closed",
+          "description": "More than 24 hours have passed since the contact's last message, so a free-form message can no longer be sent.",
+          "action": "Use an approved template to reopen the conversation window."
+        },
+        "131049": {
+          "title": "Message blocked to maintain ecosystem integrity",
+          "description": "Meta's anti-spam heuristics blocked this send to protect platform quality.",
+          "action": "Wait 24 hours before retrying and reduce the volume of bulk sends."
+        },
+        "131050": {
+          "title": "Recipient opted out",
+          "description": "The recipient clicked \"Stop promotions\" on a previous marketing template.",
+          "action": "Block automated sends to this number going forward."
+        },
+        "130472": {
+          "title": "User's number is part of an experiment",
+          "description": "This recipient is part of Meta's global test pool (about 1% of numbers).",
+          "action": "None — this is a temporary block imposed by Meta, not an account issue."
+        },
+        "130497": {
+          "title": "Country not allowed",
+          "description": "This WABA isn't authorized to message the recipient's country or region.",
+          "action": "Review the regional settings in Meta Business Manager."
+        },
+        "131021": {
+          "title": "Recipient is the sender",
+          "description": "The message was addressed to the same number that's sending it.",
+          "action": "Fix the routing logic that built this request."
+        },
+        "131060": {
+          "title": "Message temporarily unavailable",
+          "description": "An unspecified, temporary delivery failure on Meta's side.",
+          "action": "Wait 5–10 minutes and retry."
+        },
+        "130429": {
+          "title": "Rate limit exceeded",
+          "description": "The Cloud API's throughput limit (messages per second) was exceeded.",
+          "action": "Add exponential backoff to the send queue."
+        },
+        "131048": {
+          "title": "Spam rate limit",
+          "description": "This WABA received too many user blocks, or exceeded its daily messaging tier.",
+          "action": "Pause cold campaigns and review contact list quality."
+        },
+        "131056": {
+          "title": "Too many messages to the same recipient",
+          "description": "Several messages were sent to the same user in a very short time span.",
+          "action": "Add delays between consecutive automated messages to the same contact."
+        },
+        "80007": {
+          "title": "Too many API calls",
+          "description": "App-level or WABA-level call limits on the Graph API were reached.",
+          "action": "Slow down the overall request rate."
+        },
+        "100": {
+          "title": "Invalid parameter",
+          "description": "A field in the request JSON is incorrect, malformed, or doesn't exist in the API.",
+          "action": "Review the request structure (stray quotes, wrong keys, etc.)."
+        },
+        "131008": {
+          "title": "Required parameter missing",
+          "description": "A required field for this message type is missing from the request body.",
+          "action": "Validate inputs before building the request."
+        },
+        "131051": {
+          "title": "Unsupported message type",
+          "description": "This message type (e.g. sticker, an unsupported location variant) isn't supported by this endpoint.",
+          "action": "Check Meta's reference for supported message types."
+        },
+        "131053": {
+          "title": "Media upload error",
+          "description": "The file exceeds Meta's size limits or has an invalid MIME type.",
+          "action": "Validate the MIME type and compress media before uploading."
+        },
+        "131052": {
+          "title": "Media download error",
+          "description": "Meta couldn't download the media from the external link provided.",
+          "action": "Make sure the URL is public and doesn't require authentication."
+        },
+        "132000": {
+          "title": "Template send error",
+          "description": "The template is paused or rejected, a variable is missing, or the wrong language was used.",
+          "action": "Sync template status (Approved/Paused/Rejected) daily and re-check the variables sent."
+        },
+        "190": {
+          "title": "Access token expired",
+          "description": "The access token (Bearer) has expired or was invalidated in Meta for Developers.",
+          "action": "Renew or replace the permanent access token."
+        },
+        "131005": {
+          "title": "Permission denied",
+          "description": "The current token doesn't have the required scopes (e.g. whatsapp_business_messaging).",
+          "action": "Review the scopes in the Access Token Debugger."
+        },
+        "131042": {
+          "title": "Payment issue",
+          "description": "Billing failure: card declined, insufficient funds, or credit limit reached.",
+          "action": "Resolve billing immediately in Meta Business Manager."
+        },
+        "131031": {
+          "title": "Account locked",
+          "description": "The WABA is temporarily locked pending security checks.",
+          "action": "Resolve directly in WhatsApp Manager."
+        },
+        "130403": {
+          "title": "Business blocked",
+          "description": "The number was banned for a severe violation of Meta's Commerce Policies.",
+          "action": "File an appeal through the Meta panel."
+        },
+        "131000": {
+          "title": "Something went wrong",
+          "description": "Instability on Meta's servers or an internal Graph API error.",
+          "action": "Retry automatically with controlled attempts."
+        }
       }
     },
     "new": {

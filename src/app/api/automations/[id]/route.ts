@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account';
+import {
+  getCurrentAccount,
+  requireRole,
+  toErrorResponse,
+} from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
 import {
   loadStepsTree,

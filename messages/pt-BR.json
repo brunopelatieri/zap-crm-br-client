@@ -1197,10 +1197,136 @@
         },
         "deleteCascade": "Apagar a variante A apaga o teste inteiro, incluindo a variante B. Confirmar?"
       },
+      "metaErrorCategories": {
+        "delivery_restriction": "Entrega e restrições de destinatário",
+        "rate_limit": "Limite de taxa e spam",
+        "payload_media": "Payload, templates e mídia",
+        "account_auth": "Conta, autenticação e faturamento",
+        "internal": "Erros internos da Meta"
+      },
+      "metaErrorCode": "Código",
+      "metaErrorAction": "Ação recomendada",
       "metaErrors": {
-        "experimentUser": "Número do contato faz parte de um experimento",
-        "undeliverable": "Mensagem não foi entregue",
-        "ecosystemProtection": "Mensagem bloqueada para preservar a integridade do sistema"
+        "131026": {
+          "title": "Mensagem não foi entregue",
+          "description": "O número do destinatário não está no WhatsApp, não aceitou os Termos de Serviço atuais da Meta, ou está usando uma versão do app não suportada.",
+          "action": "Marcar o número como inválido e não tentar novamente."
+        },
+        "131047": {
+          "title": "Janela de 24 horas fechada",
+          "description": "Mais de 24 horas se passaram desde a última mensagem do contato, então uma mensagem livre não pode mais ser enviada.",
+          "action": "Usar um template aprovado para reabrir a janela de conversa."
+        },
+        "131049": {
+          "title": "Mensagem bloqueada para preservar a integridade do sistema",
+          "description": "As heurísticas antispam da Meta bloquearam este envio para proteger a qualidade da plataforma.",
+          "action": "Aguardar 24 horas antes de tentar novamente e reduzir o volume de disparos em massa."
+        },
+        "131050": {
+          "title": "Destinatário optou por sair",
+          "description": "O destinatário clicou em \"Parar promoções\" em um template de marketing anterior.",
+          "action": "Bloquear envios automáticos para este número a partir de agora."
+        },
+        "130472": {
+          "title": "Número do contato faz parte de um experimento",
+          "description": "Este destinatário faz parte do grupo de testes globais da Meta (cerca de 1% dos números).",
+          "action": "Nenhuma — é um bloqueio temporário da própria Meta, não um problema da conta."
+        },
+        "130497": {
+          "title": "País não permitido",
+          "description": "Esta WABA não tem permissão para enviar mensagens para o país ou região do destinatário.",
+          "action": "Revisar as configurações regionais no Business Manager."
+        },
+        "131021": {
+          "title": "Destinatário é o remetente",
+          "description": "A mensagem foi endereçada para o mesmo número que está enviando.",
+          "action": "Corrigir a lógica de roteamento que montou esta requisição."
+        },
+        "131060": {
+          "title": "Mensagem temporariamente indisponível",
+          "description": "Uma falha de entrega temporária e não especificada do lado da Meta.",
+          "action": "Aguardar de 5 a 10 minutos e tentar novamente."
+        },
+        "130429": {
+          "title": "Limite de taxa excedido",
+          "description": "O limite de throughput da Cloud API (mensagens por segundo) foi excedido.",
+          "action": "Implementar backoff exponencial na fila de disparos."
+        },
+        "131048": {
+          "title": "Limite de taxa de spam",
+          "description": "Esta WABA recebeu muitos bloqueios de usuários, ou excedeu seu limite diário de mensagens.",
+          "action": "Pausar campanhas frias e revisar a qualidade das listas de contatos."
+        },
+        "131056": {
+          "title": "Muitas mensagens para o mesmo destinatário",
+          "description": "Várias mensagens foram disparadas para o mesmo usuário em um espaço de tempo muito curto.",
+          "action": "Inserir atrasos entre mensagens automáticas seguidas para o mesmo contato."
+        },
+        "80007": {
+          "title": "Excesso de chamadas à API",
+          "description": "Os limites de chamadas em nível de app ou de WABA no Graph API foram atingidos.",
+          "action": "Reduzir a velocidade geral das requisições."
+        },
+        "100": {
+          "title": "Parâmetro inválido",
+          "description": "Um campo do JSON da requisição está incorreto, mal formatado ou não existe na API.",
+          "action": "Revisar a estrutura da requisição (aspas soltas, chaves erradas, etc.)."
+        },
+        "131008": {
+          "title": "Parâmetro obrigatório ausente",
+          "description": "Falta um campo obrigatório no corpo da requisição para este tipo de mensagem.",
+          "action": "Validar os dados de entrada antes de montar a requisição."
+        },
+        "131051": {
+          "title": "Tipo de mensagem não suportado",
+          "description": "Este tipo de mensagem (ex: sticker, variante de localização não suportada) não é suportado neste endpoint.",
+          "action": "Consultar a referência da Meta para tipos de mensagem suportados."
+        },
+        "131053": {
+          "title": "Erro de upload de mídia",
+          "description": "O arquivo excede os limites de tamanho da Meta ou tem um tipo MIME inválido.",
+          "action": "Validar o tipo MIME e comprimir a mídia antes do upload."
+        },
+        "131052": {
+          "title": "Erro de download de mídia",
+          "description": "A Meta não conseguiu baixar a mídia a partir do link externo fornecido.",
+          "action": "Garantir que a URL é pública e não exige autenticação."
+        },
+        "132000": {
+          "title": "Erro no envio do template",
+          "description": "O template está pausado ou rejeitado, falta uma variável, ou o idioma usado está errado.",
+          "action": "Sincronizar o status do template (Aprovado/Pausado/Rejeitado) diariamente e revisar as variáveis enviadas."
+        },
+        "190": {
+          "title": "Token de acesso expirado",
+          "description": "O Token de Acesso (Bearer) expirou ou foi invalidado no Meta for Developers.",
+          "action": "Renovar ou trocar o Token de Acesso permanente."
+        },
+        "131005": {
+          "title": "Permissão negada",
+          "description": "O token atual não possui os escopos necessários (ex: whatsapp_business_messaging).",
+          "action": "Revisar os escopos no Access Token Debugger."
+        },
+        "131042": {
+          "title": "Problema de pagamento",
+          "description": "Falha de faturamento: cartão recusado, sem fundos ou limite de crédito atingido.",
+          "action": "Regularizar imediatamente no Business Manager."
+        },
+        "131031": {
+          "title": "Conta bloqueada",
+          "description": "A WABA está temporariamente bloqueada por verificações de segurança.",
+          "action": "Tratar diretamente no WhatsApp Manager."
+        },
+        "130403": {
+          "title": "Empresa bloqueada",
+          "description": "O número foi banido por violação severa das Políticas de Comércio da Meta.",
+          "action": "Entrar com recurso (Appeal) pelo painel da Meta."
+        },
+        "131000": {
+          "title": "Algo deu errado",
+          "description": "Instabilidade nos servidores da Meta ou erro interno no Graph API.",
+          "action": "Tentar novamente automaticamente, de forma controlada."
+        }
       }
     },
     "new": {

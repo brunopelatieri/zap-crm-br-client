@@ -246,9 +246,7 @@ export function WhatsappQrcodeConfig() {
         className="border-amber-500/40 bg-amber-500/10"
       >
         <AlertTriangle className="text-amber-400" />
-        <AlertTitle>
-          {t('riskBannerTitle')}
-        </AlertTitle>
+        <AlertTitle>{t('riskBannerTitle')}</AlertTitle>
         <AlertDescription className="text-amber-100/80">
           {t('riskBannerBody')}
         </AlertDescription>
