@@ -60,6 +60,8 @@ import {
 import { resolveSessionWindow } from '@/lib/channels/session-window';
 import { deleteAccountMedia } from '@/lib/storage/upload-media';
 import { TemplatePicker } from './template-picker';
+import { TransferChannelDialog } from './transfer-channel-dialog';
+import { useTransferChannels } from '@/hooks/use-transfer-channels';
 import { AiThreadBanner } from './ai-thread-banner';
 import { buildReplyPreview } from './reply-quote';
 import { toast } from 'sonner';
@@ -121,6 +123,13 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  /**
+   * Abre outra thread do mesmo contato (SPEC 049 §4.4 / SPEC 056 §4.2) —
+   * o mesmo handler que a ContactSidebar já usa para "Também neste
+   * contato". A transferência de canal navega para a thread de destino
+   * assim que o envio confirma.
+   */
+  onOpenConversation?: (conversationId: string) => void;
 }
 
 function formatDateSeparator(
@@ -186,6 +195,7 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onOpenConversation,
 }: MessageThreadProps) {
   const t = useTranslations('Inbox.messageThread');
   const tTimer = useTranslations('Inbox.sessionTimer');
@@ -734,6 +744,29 @@ export function MessageThread({
   const handleOpenTemplates = useCallback(() => {
     setTemplateModalOpen(true);
   }, []);
+
+  // ---- SPEC 056 — continuar por outro canal ---------------------------
+
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  // Avaliado mesmo fora da janela expirada: a faixa só PRECISA do
+  // resultado quando `sessionInfo.expired`, mas calcular sempre evita um
+  // hook condicional e o custo é uma consulta cacheável por thread.
+  const { evaluations: transferEvaluations } = useTransferChannels(
+    contact?.id,
+    conversation?.channel_id
+  );
+  const hasTransferOption = transferEvaluations.some((e) => e.eligible);
+
+  const handleOpenTransferDialog = useCallback(() => {
+    setTransferDialogOpen(true);
+  }, []);
+
+  const handleTransferred = useCallback(
+    (newConversationId: string) => {
+      onOpenConversation?.(newConversationId);
+    },
+    [onOpenConversation]
+  );
 
   const handleSendTemplate = useCallback(
     async (
@@ -1446,6 +1479,9 @@ export function MessageThread({
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}
         onOpenTemplates={handleOpenTemplates}
+        onTransferChannel={
+          hasTransferOption ? handleOpenTransferDialog : undefined
+        }
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
       />
@@ -1456,6 +1492,17 @@ export function MessageThread({
         onSelect={handleSendTemplate}
         contact={contact}
       />
+
+      {contact && conversation?.channel_id && (
+        <TransferChannelDialog
+          open={transferDialogOpen}
+          onOpenChange={setTransferDialogOpen}
+          sourceConversationId={conversation.id}
+          contactId={contact.id}
+          currentChannelId={conversation.channel_id}
+          onTransferred={handleTransferred}
+        />
+      )}
 
       <MediaLightbox
         items={lightboxItems}

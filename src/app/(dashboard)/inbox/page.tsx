@@ -1307,6 +1307,7 @@ export default function InboxPage() {
                       onRefresh={handleManualRefresh}
                       contactPanelOpen={contactPanelOpen}
                       onToggleContactPanel={handleToggleContactPanel}
+                      onOpenConversation={handleOpenSiblingConversation}
                     />
                   </div>
 
@@ -1319,6 +1320,9 @@ export default function InboxPage() {
                       <ContactSidebar
                         contact={activeContact}
                         conversationId={activeConversation?.id ?? null}
+                        currentChannelId={
+                          activeConversation?.channel_id ?? null
+                        }
                         onOpenConversation={handleOpenSiblingConversation}
                       />
                     </div>

@@ -45,6 +45,10 @@
     {
       "name": "Webhooks",
       "description": "Register and manage outbound event webhook endpoints."
+    },
+    {
+      "name": "Ingest",
+      "description": "Inbound webhook — a third party creates a contact (and optionally launches a template) by calling ZAP CRM BR. The inverse of Webhooks, which notify third parties about ZAP CRM BR events."
     }
   ],
   "paths": {
@@ -655,6 +659,117 @@
         }
       }
     },
+    "/ingest/contact": {
+      "post": {
+        "tags": ["Ingest"],
+        "summary": "Create a contact from an inbound webhook (and optionally send a template)",
+        "description": "The inverse of `/webhooks`: a third party (n8n, a landing page, an e-commerce platform) POSTs here to create or match a contact, write tags/notes/custom fields, and — when `template_id` is approved — send a template. Every accepted request also feeds a funnel: a `broadcasts` row scoped by `webhook_id`, reused across every request that carries the same id (SPEC 055).\n\n**Phone validation here is stricter than `POST /contacts`:** Brazilian DDD and mobile/landline shape are enforced — this endpoint is new, so tightening the rule breaks no existing integration.\n\n**Failure asymmetry.** Before the contact is created, a failure is `400` — nothing was written. After the contact exists, a failure is always `202`, with the problem reported in `warnings[]` — never a 4xx/5xx, so a caller retry can never duplicate the contact (notes, in particular, are never deduplicated). A request rejected for a missing/invalid key (`401`/`403`/`429`) logs nothing — there's no account to attach a log row to.",
+        "operationId": "ingestContact",
+        "security": [{ "bearerAuth": ["ingest:write"] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestContactRequest"
+              },
+              "example": {
+                "webhook_id": "1234567890123456",
+                "webhook_name": "Landing page — Black Friday",
+                "phone": "(19) 9 9924-9658",
+                "name": "Maria Souza",
+                "email": "maria@empresa.com.br",
+                "company": "Empresa LTDA",
+                "tags": "Cliente VIP, lead quente",
+                "notes": {
+                  "nota_1": "Veio do formulário da LP de Black Friday",
+                  "nota_2": "Pediu contato à tarde"
+                },
+                "custom_fields": [
+                  { "field": "origem", "value": "landing_page_bf" }
+                ],
+                "template_id": "3f2b8c10-2a44-4a7e-9c1e-77c3b2a1d5e0",
+                "template_params": ["Maria"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted — the contact was created or matched. The template send (if any) runs in the background and is never awaited by this response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data"],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IngestContactResult"
+                    }
+                  }
+                },
+                "example": {
+                  "data": {
+                    "contact_id": "b630a43f-0000-4000-8000-000000000040",
+                    "contact_created": true,
+                    "funnel": {
+                      "broadcast_id": "9c1e1e2a-0000-4000-8000-000000000041",
+                      "webhook_id": "1234567890123456"
+                    },
+                    "tags": { "linked": 1, "created": 1 },
+                    "notes": { "inserted": 2 },
+                    "custom_fields": { "matched": 1, "skipped": [] },
+                    "send": {
+                      "attempted": true,
+                      "template_id": "3f2b8c10-2a44-4a7e-9c1e-77c3b2a1d5e0"
+                    },
+                    "warnings": []
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected before the contact was created (`invalid_webhook_id`, `invalid_webhook_name`, `invalid_phone`, or `bad_request`) — nothing was written.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "examples": {
+                  "invalidWebhookId": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_webhook_id",
+                        "message": "'webhook_id' must be a numeric string with at least 16 digits"
+                      }
+                    }
+                  },
+                  "invalidWebhookName": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_webhook_name",
+                        "message": "'webhook_name' is required and must not be empty"
+                      }
+                    }
+                  },
+                  "invalidPhone": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_phone",
+                        "message": "Phone number failed Brazilian validation: invalid_ddd"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
     "/webhooks": {
       "get": {
         "tags": ["Webhooks"],
@@ -1018,7 +1133,8 @@
           "contacts:write",
           "conversations:read",
           "broadcasts:send",
-          "webhooks:manage"
+          "webhooks:manage",
+          "ingest:write"
         ],
         "description": "A key's capabilities are defined entirely by the scopes granted to it at creation."
       },
@@ -1628,6 +1744,166 @@
             "items": { "$ref": "#/components/schemas/WebhookEvent" }
           },
           "is_active": { "type": "boolean" }
+        }
+      },
+      "IngestCustomFieldEntry": {
+        "type": "object",
+        "required": ["field", "value"],
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Matched case-insensitively against an existing custom field name in this account. No match (or an ambiguous one) skips this entry — never fails the request."
+          },
+          "value": { "type": "string" }
+        }
+      },
+      "IngestContactRequest": {
+        "type": "object",
+        "required": ["webhook_id", "webhook_name", "phone"],
+        "properties": {
+          "webhook_id": {
+            "oneOf": [{ "type": "string" }, { "type": "number" }],
+            "description": "Digits only, minimum 16 characters — identifies the FUNNEL this request feeds, reused across every request carrying the same id. Not a credential; the API key is.",
+            "example": "1234567890123456"
+          },
+          "webhook_name": {
+            "type": "string",
+            "description": "Display label for the funnel. Non-empty after trim; truncated (not rejected) past 120 characters. The last request's value wins.",
+            "example": "Landing page — Black Friday"
+          },
+          "phone": {
+            "oneOf": [{ "type": "string" }, { "type": "number" }],
+            "description": "Validated with strict Brazilian rules (DDD against the Anatel list, mobile/landline shape) — stricter than `POST /contacts`.",
+            "example": "(19) 9 9924-9658"
+          },
+          "name": {
+            "type": "string",
+            "description": "Falls back to the normalized phone if omitted."
+          },
+          "email": { "type": "string" },
+          "company": { "type": "string" },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Comma-separated tag names."
+              },
+              { "type": "array", "items": { "type": "string" } }
+            ],
+            "description": "Additive — never removes a tag the contact already has. Creates a tag that doesn't exist yet."
+          },
+          "notes": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "Indexed object, e.g. `{\"nota_1\": \"…\", \"nota_2\": \"…\"}`. Keys are sorted by their NUMERIC SUFFIX (`nota_2` before `nota_10`), not alphabetically."
+              },
+              { "type": "array", "items": { "type": "string" } }
+            ],
+            "description": "Always appends — never dedupes or replaces existing notes."
+          },
+          "custom_fields": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/IngestCustomFieldEntry" }
+          },
+          "template_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A `message_templates.id` in this account, with Meta status `APPROVED`."
+          },
+          "template_params": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Positional body variables (`{{1}}`, `{{2}}`…) for the template. Non-string entries are coerced to string, never dropped — dropping would shift every later placeholder."
+          }
+        }
+      },
+      "IngestWarning": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "e.g. `custom_field_not_found`, `custom_field_ambiguous`, `note_empty`, `payload_truncated`, `template_not_found`, `template_not_approved`, `channel_not_capable`, `send_failed`."
+          },
+          "message": { "type": "string" }
+        }
+      },
+      "IngestFunnelRef": {
+        "type": ["object", "null"],
+        "required": ["broadcast_id", "webhook_id"],
+        "description": "`null` only when the funnel row itself couldn't be created/updated (a rare infra failure) — the contact is still created in that case.",
+        "properties": {
+          "broadcast_id": { "type": "string", "format": "uuid" },
+          "webhook_id": { "type": "string" }
+        }
+      },
+      "IngestContactResult": {
+        "type": "object",
+        "required": [
+          "contact_id",
+          "contact_created",
+          "funnel",
+          "tags",
+          "notes",
+          "custom_fields",
+          "send",
+          "warnings"
+        ],
+        "properties": {
+          "contact_id": { "type": "string", "format": "uuid" },
+          "contact_created": {
+            "type": "boolean",
+            "description": "True if `phone` didn't match an existing contact."
+          },
+          "funnel": { "$ref": "#/components/schemas/IngestFunnelRef" },
+          "tags": {
+            "type": "object",
+            "required": ["linked", "created"],
+            "properties": {
+              "linked": {
+                "type": "integer",
+                "description": "Requested tags that already existed on the account."
+              },
+              "created": {
+                "type": "integer",
+                "description": "Requested tags that were newly created."
+              }
+            }
+          },
+          "notes": {
+            "type": "object",
+            "required": ["inserted"],
+            "properties": { "inserted": { "type": "integer" } }
+          },
+          "custom_fields": {
+            "type": "object",
+            "required": ["matched", "skipped"],
+            "properties": {
+              "matched": { "type": "integer" },
+              "skipped": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Field names that had no match (or an ambiguous one) and were skipped."
+              }
+            }
+          },
+          "send": {
+            "type": "object",
+            "required": ["attempted"],
+            "properties": {
+              "attempted": {
+                "type": "boolean",
+                "description": "True when `template_id` was present and a send was queued — NOT a guarantee it succeeded; see `warnings[]` and the dashboard log for the outcome."
+              },
+              "template_id": { "type": "string", "format": "uuid" }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/IngestWarning" }
+          }
         }
       }
     }

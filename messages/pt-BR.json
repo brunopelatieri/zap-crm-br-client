@@ -427,13 +427,15 @@
       "quickReplySaved": "Salva como resposta rápida.",
       "quickReplySaveError": "Não foi possível salvar a resposta rápida.",
       "audioAsAttachmentHint": "Neste canal, o áudio chega como anexo, não como mensagem de voz.",
-      "quickRepliesAvailable": "{shown} de {total} disponíveis neste canal"
+      "quickRepliesAvailable": "{shown} de {total} disponíveis neste canal",
+      "transferChannel": "Continuar por outro canal"
     },
     "bubble": {
       "photo": "Foto",
       "video": "Vídeo",
       "audio": "Áudio",
       "unavailable": "{label} indisponível",
+      "expired": "{label} não está mais disponível",
       "document": "Documento",
       "locationShared": "Localização compartilhada",
       "template": "Template",
@@ -504,7 +506,26 @@
       "unknownChannel": "Canal desconhecido",
       "siblingMessageCount": "{count} mensagens",
       "siblingLastMessage": "última {time}",
-      "openThread": "Abrir"
+      "openThread": "Abrir",
+      "noThreadYet": "Ainda sem conversa neste canal",
+      "speakOnThisChannel": "Falar por este canal"
+    },
+    "transferChannel": {
+      "title": "Continuar por outro canal",
+      "explanation": "O contato vai receber esta mensagem do número abaixo, e a conversa continua por lá — as respostas dele voltam por esse mesmo canal.",
+      "loadingChannels": "Verificando canais disponíveis…",
+      "noEligibleChannel": "Nenhum canal pode receber esta conversa agora.",
+      "windowClosedHint": "Janela de 24h fechada — uma mensagem livre seria recusada aqui. Envie um template, ou espere o contato escrever para este número.",
+      "riskWarning": "Este é um número não-oficial que o contato ainda não viu. Use só para resgatar quem está em silêncio — o envio conta na cota de envio frio desta instância.",
+      "messagePlaceholder": "Digite a mensagem a enviar por este canal…",
+      "cancel": "Cancelar",
+      "confirm": "Enviar e continuar por lá",
+      "sent": "Enviado por {channel} — a conversa foi para lá.",
+      "networkError": "Não foi possível falar com o servidor.",
+      "errorOptedOut": "Este contato optou por sair — não é permitido contatá-lo por outro número.",
+      "errorWindowClosed": "A janela de 24h desse canal está fechada — uma mensagem livre seria recusada.",
+      "errorNotConnected": "Esse canal não está conectado agora.",
+      "errorGeneric": "Não foi possível transferir esta conversa."
     },
     "tagPicker": {
       "title": "Etiquetas de {name}",

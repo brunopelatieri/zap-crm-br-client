@@ -427,13 +427,15 @@
       "quickReplySaved": "Saved as a quick reply.",
       "quickReplySaveError": "Couldn't save the quick reply.",
       "audioAsAttachmentHint": "In this channel, audio arrives as an attachment, not a voice message.",
-      "quickRepliesAvailable": "{shown} of {total} available in this channel"
+      "quickRepliesAvailable": "{shown} of {total} available in this channel",
+      "transferChannel": "Continue on another channel"
     },
     "bubble": {
       "photo": "Photo",
       "video": "Video",
       "audio": "Audio",
       "unavailable": "{label} unavailable",
+      "expired": "{label} is no longer available",
       "document": "Document",
       "locationShared": "Location shared",
       "template": "Template",
@@ -504,7 +506,26 @@
       "unknownChannel": "Unknown channel",
       "siblingMessageCount": "{count} messages",
       "siblingLastMessage": "last {time}",
-      "openThread": "Open"
+      "openThread": "Open",
+      "noThreadYet": "No conversation yet on this channel",
+      "speakOnThisChannel": "Speak on this channel"
+    },
+    "transferChannel": {
+      "title": "Continue on another channel",
+      "explanation": "The contact will receive this from the number below, and the conversation continues there — replies come back on that same channel.",
+      "loadingChannels": "Checking available channels…",
+      "noEligibleChannel": "No channel can receive this conversation right now.",
+      "windowClosedHint": "24h window closed — free-form messages would be rejected here. Send a template instead, or wait for the contact to write to this number.",
+      "riskWarning": "This is a non-official number the contact hasn't seen before. Use this only to re-engage someone who's gone quiet — it counts toward this instance's cold-send limit.",
+      "messagePlaceholder": "Type the message to send from this channel…",
+      "cancel": "Cancel",
+      "confirm": "Send and continue there",
+      "sent": "Sent via {channel} — conversation moved there.",
+      "networkError": "Couldn't reach the server.",
+      "errorOptedOut": "This contact opted out — reaching them from another number isn't allowed.",
+      "errorWindowClosed": "That channel's 24h window is closed — a free-form message would be rejected.",
+      "errorNotConnected": "That channel isn't connected right now.",
+      "errorGeneric": "Couldn't transfer this conversation."
     },
     "tagPicker": {
       "title": "Tags for {name}",
