@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { QrCode, BadgeCheck, AlertTriangle, Loader2, Send } from 'lucide-react';
@@ -55,7 +55,7 @@ export function TransferChannelDialog({
 }: TransferChannelDialogProps) {
   const t = useTranslations('Inbox.transferChannel');
   const accountChannels = useAccountChannels();
-  const { evaluations, loading } = useTransferChannels(
+  const { evaluations, loading, refetch } = useTransferChannels(
     contactId,
     currentChannelId
   );
@@ -63,6 +63,10 @@ export function TransferChannelDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Selecionado ficou inelegível ENQUANTO o diálogo estava aberto (não
+  // na abertura) — distinto de "nunca houve seleção", para não mostrar
+  // o aviso antes do operador ter escolhido algo.
+  const [selectionLost, setSelectionLost] = useState(false);
 
   const eligible = useMemo(
     () => evaluations.filter((e) => e.eligible),
@@ -73,20 +77,50 @@ export function TransferChannelDialog({
     [evaluations]
   );
 
-  // Ao abrir: pré-seleciona o pedido pela ficha (se elegível), senão o
-  // primeiro elegível. Reseta o rascunho a cada abertura — este diálogo
-  // não guarda estado entre uma transferência e a próxima.
+  // Ao abrir (só na TRANSIÇÃO fechado→aberto, via ref): pré-seleciona o
+  // pedido pela ficha (se elegível), senão o primeiro elegível. Reseta o
+  // rascunho — este diálogo não guarda estado entre uma transferência e
+  // a próxima.
+  //
+  // Antes dependia de `eligible.length` (com eslint-disable) para não
+  // reabrir a cada recálculo de `eligible` — mas contagem igual não
+  // significa MEMBRO igual: se o canal A perde elegibilidade no mesmo
+  // instante em que B ganha, o comprimento não muda e o efeito nunca
+  // rodava de novo, deixando `selectedId` preso em A. O ref abaixo
+  // resolve isso separando "a abertura" (que reseta tudo) de "o
+  // conjunto elegível mudou com o diálogo já aberto" (tratado a seguir,
+  // sem apagar o texto que o operador já digitou).
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    const justOpened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!justOpened) return;
     setText('');
+    setSelectionLost(false);
+    // Releitura forçada — não confia no que `useTransferChannels` já
+    // tinha calculado antes de o diálogo abrir (pode ter minutos/horas,
+    // um canal pode ter caído nesse meio-tempo). Se a resposta mudar o
+    // conjunto elegível, o segundo efeito abaixo corrige a seleção.
+    refetch();
     const preferred =
       initialChannelId &&
       eligible.some((e) => e.channel.id === initialChannelId)
         ? initialChannelId
         : (eligible[0]?.channel.id ?? null);
     setSelectedId(preferred);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialChannelId, eligible.length]);
+  }, [open, initialChannelId, eligible, refetch]);
+
+  // Com o diálogo já aberto, o canal selecionado pode sair de `eligible`
+  // (a janela dele fechou, a instância caiu). Nunca troca por outro
+  // canal em silêncio — isso moveria o destino da mensagem sem o
+  // operador perceber; em vez disso limpa a seleção e avisa, mantendo o
+  // texto já digitado.
+  useEffect(() => {
+    if (!open || !selectedId) return;
+    if (eligible.some((e) => e.channel.id === selectedId)) return;
+    setSelectedId(null);
+    setSelectionLost(true);
+  }, [open, selectedId, eligible]);
 
   const selected = eligible.find((e) => e.channel.id === selectedId);
   // O aviso de risco (§4.1 ponto 3) é sobre o canal não falar com a
@@ -153,7 +187,10 @@ export function TransferChannelDialog({
                 <button
                   key={channel.id}
                   type="button"
-                  onClick={() => setSelectedId(channel.id)}
+                  onClick={() => {
+                    setSelectedId(channel.id);
+                    setSelectionLost(false);
+                  }}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors',
                     isSelected
@@ -204,24 +241,39 @@ export function TransferChannelDialog({
           </div>
         )}
 
-        {selected && (
-          <>
-            {selectedIsRisky && (
-              <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-                <p className="text-xs text-amber-400">{t('riskWarning')}</p>
-              </div>
-            )}
+        {/* O canal escolhido deixou de ser destino válido ENQUANTO o
+            diálogo já estava aberto (janela fechou, instância caiu).
+            Nunca troca por outro em silêncio — o operador escolhe de
+            novo, com o texto que já digitou preservado. */}
+        {selectionLost && !selected && (
+          <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <p className="text-xs text-amber-400">
+              {t('selectionBecameUnavailable')}
+            </p>
+          </div>
+        )}
 
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={t('messagePlaceholder')}
-              rows={3}
-              autoFocus
-              className="border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 w-full resize-none rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none"
-            />
-          </>
+        {selected && selectedIsRisky && (
+          <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <p className="text-xs text-amber-400">{t('riskWarning')}</p>
+          </div>
+        )}
+
+        {/* Fica visível mesmo sem seleção válida (não só quando
+            `selected`) — se não fosse, perder a seleção no meio do
+            preenchimento (acima) apagaria o rascunho da tela junto,
+            mesmo com o texto preservado em memória. */}
+        {eligible.length > 0 && (
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={t('messagePlaceholder')}
+            rows={3}
+            autoFocus
+            className="border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 w-full resize-none rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none"
+          />
         )}
 
         <DialogFooter>

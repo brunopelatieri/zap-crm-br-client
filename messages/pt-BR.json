@@ -517,6 +517,7 @@
       "noEligibleChannel": "Nenhum canal pode receber esta conversa agora.",
       "windowClosedHint": "Janela de 24h fechada — uma mensagem livre seria recusada aqui. Envie um template, ou espere o contato escrever para este número.",
       "riskWarning": "Este é um número não-oficial que o contato ainda não viu. Use só para resgatar quem está em silêncio — o envio conta na cota de envio frio desta instância.",
+      "selectionBecameUnavailable": "O canal escolhido deixou de estar disponível — escolha outro abaixo.",
       "messagePlaceholder": "Digite a mensagem a enviar por este canal…",
       "cancel": "Cancelar",
       "confirm": "Enviar e continuar por lá",

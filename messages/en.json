@@ -517,6 +517,7 @@
       "noEligibleChannel": "No channel can receive this conversation right now.",
       "windowClosedHint": "24h window closed — free-form messages would be rejected here. Send a template instead, or wait for the contact to write to this number.",
       "riskWarning": "This is a non-official number the contact hasn't seen before. Use this only to re-engage someone who's gone quiet — it counts toward this instance's cold-send limit.",
+      "selectionBecameUnavailable": "The channel you picked is no longer available — choose another one below.",
       "messagePlaceholder": "Type the message to send from this channel…",
       "cancel": "Cancel",
       "confirm": "Send and continue there",

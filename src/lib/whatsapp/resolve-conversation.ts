@@ -201,11 +201,14 @@ export async function resolveConversationByPhone(
  * the same way the inbound webhook does: on a 23505 from a concurrent
  * create, re-resolve the winning row rather than failing the send.
  *
- * Exported (SPEC 056 §1.4/§5): this is the piece the channel-transfer
- * flow needed all along — find-or-create the contact's thread on
- * ANOTHER channel. Everything above it in this file is phone-number
- * resolution the transfer flow doesn't need, since it already has a
- * `contact_id` in hand from the inbox.
+ * Exported for `resolveConversationByPhone` above (its only caller) —
+ * service-role, no assignment on create, re-resolves on race. This is
+ * NOT what the SPEC 056 channel-transfer flow uses: that flow runs
+ * under the CALLER's RLS and needs the thread to be born ASSIGNED to
+ * whoever transferred it, with a 409 (not a silent re-resolve) when the
+ * unique index collides — see `findOrCreateInboxConversation` in
+ * `@/lib/inbox/find-or-create-conversation.ts`, whose header explains
+ * why the two can't share one implementation.
  */
 export async function findOrCreateConversation(
   db: SupabaseClient,
