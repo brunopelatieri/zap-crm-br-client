@@ -349,7 +349,10 @@ export function MessageThread({
 
       const { data, error } = await supabase
         .from('messages')
-        .select('*')
+        // SPEC 057 F6 — o join traz o nome da campanha para o banner de
+        // origem; mensagens sem `broadcast_id` resolvem `broadcast: null`
+        // sem custo extra (LEFT JOIN implícito do PostgREST).
+        .select('*, broadcast:broadcasts(name)')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 

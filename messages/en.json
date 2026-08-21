@@ -445,6 +445,8 @@
       "aiBadge": "AI",
       "aiBadgeTitle": "Sent automatically by the AI assistant",
       "channelBadgeTitle": "Delivered via {channel} — a different channel than the one this conversation normally uses",
+      "broadcastOrigin": "Campaign: {name}",
+      "broadcastOriginDate": "Sent on {date}",
       "bot": "Automation",
       "customerFallback": "Customer",
       "download": "Download",
@@ -1703,7 +1705,13 @@
         "consentFilters": "Consent",
         "removeOptedOut": "Remove opted out",
         "removeCooldown": "Remove those in cooldown",
-        "overrideCooldown": "Include those in cooldown"
+        "overrideCooldown": "Include those in cooldown",
+        "dataSaveNotice": {
+          "contactsWillBeSaved": "{count} contacts will be saved to your contact list when you send.",
+          "tagsWillBeCreated": "{count} new tags will be created: {names}.",
+          "tagsSkippedNoPermission": "You don't have permission to create tags. These will be skipped: {names}",
+          "repliesWillShowCampaign": "When contacts reply, the conversation will show this campaign."
+        }
       },
       "consent": {
         "excludedFromMarketing": "Contacts who asked to stop receiving marketing are already excluded from this count."

@@ -445,6 +445,8 @@
       "aiBadge": "IA",
       "aiBadgeTitle": "Enviado automaticamente pelo assistente de IA",
       "channelBadgeTitle": "Entregue via {channel} — um canal diferente do que esta conversa normalmente usa",
+      "broadcastOrigin": "Campanha: {name}",
+      "broadcastOriginDate": "Enviada em {date}",
       "bot": "Automação",
       "customerFallback": "Cliente",
       "download": "Baixar",
@@ -1703,7 +1705,13 @@
         "consentFilters": "Consentimento",
         "removeOptedOut": "Remover quem pediu para sair",
         "removeCooldown": "Remover quem está em espera",
-        "overrideCooldown": "Incluir quem está em espera"
+        "overrideCooldown": "Incluir quem está em espera",
+        "dataSaveNotice": {
+          "contactsWillBeSaved": "{count} contatos serão salvos na sua base de contatos ao disparar.",
+          "tagsWillBeCreated": "{count} etiquetas novas serão criadas: {names}.",
+          "tagsSkippedNoPermission": "Você não tem permissão para criar etiquetas. Estas serão ignoradas: {names}",
+          "repliesWillShowCampaign": "Quando os contatos responderem, a conversa mostrará esta campanha."
+        }
       },
       "consent": {
         "excludedFromMarketing": "Contatos que pediram para não receber marketing já estão fora desta contagem."

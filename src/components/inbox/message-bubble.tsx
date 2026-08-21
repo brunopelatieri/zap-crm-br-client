@@ -480,6 +480,29 @@ function MessageContent({
               </p>
             )
           )}
+          {message.broadcast_id && (
+            // SPEC 057 F6 — rastreabilidade: esta bolha foi hidratada
+            // retroativamente quando o cliente respondeu a um disparo
+            // (D-4). `message.broadcast` só existe quando o join da
+            // busca de mensagens o trouxe — uma mensagem que chega pelo
+            // canal realtime (INSERT cru do Postgres) nunca carrega o
+            // embed, só as colunas da própria linha. `template_name`
+            // (sempre presente numa mensagem de campanha) é o fallback
+            // até o próximo refetch trazer o embed com o nome real;
+            // `t('template')` só entra se nem isso existir.
+            <p className="text-muted-foreground mt-1 text-[11px]">
+              {t('broadcastOrigin', {
+                name:
+                  message.broadcast?.name ??
+                  message.template_name ??
+                  t('template'),
+              })}
+              {' · '}
+              {t('broadcastOriginDate', {
+                date: format(new Date(message.created_at), 'dd/MM'),
+              })}
+            </p>
+          )}
         </div>
       );
 

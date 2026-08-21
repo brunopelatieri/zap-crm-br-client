@@ -344,6 +344,20 @@ export interface Message {
    * que o cliente recebeu de um número diferente. Migração 063.
    */
   channel_id?: string | null;
+  /**
+   * Campanha que originou esta mensagem de SAÍDA (migração 066, SPEC
+   * 057 D-3). Nula para toda mensagem que não veio de um disparo —
+   * inclusive qualquer mensagem de cliente, por construção (CHECK
+   * `messages_broadcast_outbound_only`).
+   */
+  broadcast_id?: string | null;
+  /**
+   * Nome da campanha, quando a busca de mensagens embute o join
+   * `broadcasts(name)` (SPEC 057 F6 — banner de origem no inbox).
+   * `undefined` quando o embed não foi pedido; `null` quando foi pedido
+   * mas a campanha já foi apagada (`ON DELETE SET NULL`).
+   */
+  broadcast?: { name: string } | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';
