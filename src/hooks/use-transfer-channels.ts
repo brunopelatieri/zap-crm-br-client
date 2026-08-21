@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAccountChannels } from '@/lib/channels/use-account-channels';
@@ -10,6 +10,57 @@ import {
   evaluateTransferChannels,
   type TransferChannelEvaluation,
 } from '@/lib/channels/transfer';
+
+// ------------------------------------------------------------
+// Deduplicação de chamadas simultâneas (achado do code-review da SPEC
+// 056): `message-thread.tsx` e `contact-sidebar.tsx` montam ao mesmo
+// tempo com os MESMOS argumentos e cada um chamava `load()` por conta
+// própria, duplicando a consulta. Diferente do cache de
+// `useAccountChannels()`, este NÃO sobrevive depois de resolver — só
+// junta chamadas que caem no mesmo instante; a próxima rodada de
+// `load()` (ex.: o `refetch()` do diálogo ao abrir) volta a bater no
+// banco, porque a leitura precisa continuar fresca (outro achado desta
+// mesma revisão).
+// ------------------------------------------------------------
+// `async` de propósito, não só decoração: o query builder do Supabase é
+// thenable mas não é um `Promise` de verdade (sem `.finally`) — a
+// função `async` embrulha o retorno num `Promise` real, que é o que
+// `loadAnchorsDeduped`/`loadChannelRowsDeduped` abaixo precisam para
+// limpar o cache quando a chamada resolve.
+async function fetchAnchors(contactId: string) {
+  return createClient()
+    .from('conversations')
+    .select('channel_id, last_customer_message_at')
+    .eq('contact_id', contactId)
+    .not('channel_id', 'is', null);
+}
+
+async function fetchChannelRows() {
+  return createClient().from('channels').select('id, name, type, status');
+}
+
+const anchorsInFlight = new Map<string, ReturnType<typeof fetchAnchors>>();
+let channelsInFlight: ReturnType<typeof fetchChannelRows> | null = null;
+
+function loadAnchorsDeduped(contactId: string) {
+  let promise = anchorsInFlight.get(contactId);
+  if (!promise) {
+    promise = fetchAnchors(contactId).finally(() =>
+      anchorsInFlight.delete(contactId)
+    );
+    anchorsInFlight.set(contactId, promise);
+  }
+  return promise;
+}
+
+function loadChannelRowsDeduped() {
+  if (!channelsInFlight) {
+    channelsInFlight = fetchChannelRows().finally(() => {
+      channelsInFlight = null;
+    });
+  }
+  return channelsInFlight;
+}
 
 /**
  * Canais candidatos a destino de transferência para ESTE contato,
@@ -63,17 +114,13 @@ export function useTransferChannels(
     }
 
     setLoading(true);
-    const supabase = createClient();
     // Duas consultas independentes, em paralelo: as âncoras de janela
     // por canal, e o status/tipo dos canais em si (fresco — ver o
-    // porquê acima).
+    // porquê acima). Deduplicadas contra chamadas simultâneas de outro
+    // consumidor deste hook (ver comentário no topo do arquivo).
     const [anchors, channelsRows] = await Promise.all([
-      supabase
-        .from('conversations')
-        .select('channel_id, last_customer_message_at')
-        .eq('contact_id', contactId)
-        .not('channel_id', 'is', null),
-      supabase.from('channels').select('id, name, type, status'),
+      loadAnchorsDeduped(contactId),
+      loadChannelRowsDeduped(),
     ]);
 
     if (anchors.error || channelsRows.error) {
@@ -127,5 +174,13 @@ export function useTransferChannels(
     void load();
   }, [load]);
 
-  return { evaluations, loading, refetch: load };
+  // Memoizado (achado do code-review): sem isto, este hook devolvia um
+  // objeto novo a cada render — exatamente o padrão que causou o loop
+  // infinito já corrigido em `useAccountChannels()`. Nenhum consumidor
+  // aciona o bug hoje (todos desestruturam), mas o próximo `useEffect`
+  // que capturar o objeto inteiro em vez de um campo faria de novo.
+  return useMemo(
+    () => ({ evaluations, loading, refetch: load }),
+    [evaluations, loading, load]
+  );
 }

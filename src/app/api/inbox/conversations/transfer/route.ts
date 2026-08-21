@@ -173,13 +173,27 @@ export async function POST(request: Request) {
     // `evaluateTransferChannel` trata como fechada — recusar de menos
     // é o lado seguro aqui, porque o outro lado é uma cobrança de
     // template que o operador não pediu.
-    const { data: targetThread } = await supabase
+    const { data: targetThread, error: targetThreadErr } = await supabase
       .from('conversations')
       .select('last_customer_message_at')
       .eq('account_id', accountId)
       .eq('contact_id', source.contact_id)
       .eq('channel_id', targetChannelId)
       .maybeSingle();
+
+    // Não aborta a requisição — o índice único da 059 garante no máximo
+    // uma linha, então "sem thread" (a leitura acima já cobre isso) e
+    // "erro de verdade" são igualmente raros e o lado seguro é o mesmo:
+    // negar a transferência. Mas um erro de infraestrutura não pode
+    // ficar indistinguível de "canal legitimamente sem janela aberta"
+    // nos logs — é a diferença entre um operador tentar de novo e um
+    // engenheiro descobrir que o Supabase estava fora do ar.
+    if (targetThreadErr) {
+      console.error(
+        '[transfer] failed to read target channel session window:',
+        targetThreadErr.message
+      );
+    }
 
     const evaluation = evaluateTransferChannel(
       {
