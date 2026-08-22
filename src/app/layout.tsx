@@ -42,7 +42,7 @@ const inter = Inter({
 //   colorScheme: 'light dark',
 // };
 
-const SITE_URL = 'https://zap-crm.br';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
 const SITE_NAME = 'Zap CRM BR';
 const SITE_DESCRIPTION =
   'Transforme o WhatsApp da sua empresa em uma máquina de vendas. Caixa de entrada compartilhada, funil de vendas visual, disparos em massa e automações — tudo pelo canal oficial do WhatsApp Business (Meta), sem risco de bloqueio do número.';
@@ -93,7 +93,7 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: SITE_NAME,
       images: [
         {
-          url: '/public/og-image.webp',
+          url: '/og-image.webp',
           width: 1200,
           height: 630,
           alt: `${SITE_NAME} — CRM para WhatsApp Business`,
@@ -105,7 +105,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: 'summary_large_image',
       title: `${SITE_NAME} — CRM para WhatsApp Business`,
       description: 'CRM para WhatsApp feito para o mercado brasileiro.',
-      images: ['/public/og-image.webp'],
+      images: ['/og-image.webp'],
     },
 
     // ⚠️ Ainda bloqueado para indexação (staging/dev).
