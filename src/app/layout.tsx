@@ -93,7 +93,7 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: SITE_NAME,
       images: [
         {
-          url: '/og-image.webp',
+          url: '/public/og-image.webp',
           width: 1200,
           height: 630,
           alt: `${SITE_NAME} — CRM para WhatsApp Business`,
@@ -105,7 +105,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: 'summary_large_image',
       title: `${SITE_NAME} — CRM para WhatsApp Business`,
       description: 'CRM para WhatsApp feito para o mercado brasileiro.',
-      images: ['/og-image.webp'],
+      images: ['/public/og-image.webp'],
     },
 
     // ⚠️ Ainda bloqueado para indexação (staging/dev).
@@ -122,12 +122,7 @@ export async function generateMetadata(): Promise<Metadata> {
       },
     },
 
-    icons: {
-      icon: '/favicon.ico',
-      shortcut: '/favicon-16x16.png',
-      apple: '/apple-touch-icon.png',
-    },
-    manifest: '/site.webmanifest',
+    // manifest: '/site.webmanifest',
   };
 }
 
