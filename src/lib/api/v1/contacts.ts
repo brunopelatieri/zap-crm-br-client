@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
+import { parseQuotaError } from '@/lib/plans/errors';
 
 /** Row select that embeds the contact's tags for serialization. */
 export const CONTACT_SELECT = '*, contact_tags(tags(*))';
@@ -28,13 +29,16 @@ export interface ApiContact {
   updated_at: string;
 }
 
-/** Thrown by the helpers below; routes map `.status`/`.message`. */
+/** Thrown by the helpers below; routes map `.status`/`.message`/`.code`. */
 export class ContactError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** SPEC 059 §8: `'quota_exceeded'` maps to the public API's error envelope. */
+  readonly code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ContactError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -132,6 +136,9 @@ export async function findOrCreateContact(
       name: input.name ?? sanitized,
       email: input.email ?? null,
       company: input.company ?? null,
+      // API pública e webhook de entrada são caminhos que o operador
+      // controla — a quota bloqueia (SPEC 059 §4, itens 3 e 5).
+      created_via: 'api',
     })
     .select('id')
     .single();
@@ -142,6 +149,14 @@ export async function findOrCreateContact(
     if (isUniqueViolation(error)) {
       const raced = await findExistingContact(db, accountId, sanitized);
       if (raced) return { id: raced.id, created: false };
+    }
+    const quotaError = parseQuotaError(error);
+    if (quotaError && quotaError.metric === 'contacts') {
+      throw new ContactError(
+        `Contact quota exceeded (${quotaError.used}/${quotaError.limit})`,
+        403,
+        'quota_exceeded'
+      );
     }
     console.error('[api/v1/contacts] create error:', error);
     throw new ContactError('Failed to create contact', 500);

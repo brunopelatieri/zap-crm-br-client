@@ -25,6 +25,7 @@ import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import { SendMessageError } from '@/lib/whatsapp/send-message';
 import { resolveAuditUserId, ContactError } from '@/lib/api/v1/contacts';
 import { resolveDefaultChannelId } from '@/lib/channels/send';
+import { parseQuotaError } from '@/lib/plans/errors';
 
 export interface ResolvedConversation {
   conversationId: string;
@@ -147,6 +148,13 @@ export async function resolveConversationByPhone(
         user_id: ownerUserId,
         phone: sanitized,
         name: name || sanitized,
+        // Este é o caminho de POST /api/v1/messages — a API pública
+        // enviando para um número novo, não uma mensagem recebida. É
+        // um caminho operator-controlled (D-5 só isenta o INBOUND de
+        // verdade, tratado em src/lib/channels/ingest.ts), então a
+        // quota tem que valer aqui — 'api', igual ao findOrCreateContact
+        // de src/lib/api/v1/contacts.ts.
+        created_via: 'api',
       })
       .select('id')
       .single();
@@ -166,6 +174,14 @@ export async function resolveConversationByPhone(
           );
         }
       } else {
+        const quotaError = parseQuotaError(createErr);
+        if (quotaError && quotaError.metric === 'contacts') {
+          throw new SendMessageError(
+            'quota_exceeded',
+            `Contact quota exceeded (${quotaError.used}/${quotaError.limit})`,
+            403
+          );
+        }
         console.error(
           '[resolve-conversation] contact create error:',
           createErr

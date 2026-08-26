@@ -3,7 +3,10 @@
  *
  * Regra efetiva:
  *
- *   limite = COALESCE(accounts.evolution_instance_limit, EVOLUTION_MAX_INSTANCES_PER_ACCOUNT)
+ *   limite = COALESCE(plan_limit(account_id, 'channels_whatsapp_qr'), EVOLUTION_MAX_INSTANCES_PER_ACCOUNT)
+ *
+ * (fonte do override desde SPEC 059 F6 — antes era `accounts.evolution_instance_limit`,
+ * coluna obsoleta desde a migração 067.)
  *
  * e a criação também falha se o total do DEPLOYMENT já atingiu
  * `EVOLUTION_MAX_INSTANCES_TOTAL` — o env por conta não protege a VPS
@@ -16,7 +19,7 @@
 export interface InstanceLimitCheck {
   accountCount: number;
   totalCount: number;
-  /** `accounts.evolution_instance_limit` — `null` = usa o padrão do `.env`. */
+  /** `plan_limit(account_id, 'channels_whatsapp_qr')` — `null` = usa o padrão do `.env`. */
   accountOverride: number | null;
   defaultPerAccount: number;
   maxTotal: number;

@@ -9,6 +9,8 @@ import {
   isUniqueViolation,
   normalizeKey,
 } from '@/lib/contacts/dedupe';
+import { checkQuota } from '@/lib/plans/gate';
+import { parseQuotaError } from '@/lib/plans/errors';
 import {
   assignImportedContactTags,
   resolveImportTagIds,
@@ -331,13 +333,59 @@ export function ImportModal({
         }
       }
 
-      const toInsert = unique.filter((row) => {
+      let toInsert = unique.filter((row) => {
         if (existing.has(normalizeKey(row.phone))) {
           skipped++;
           return false;
         }
         return true;
       });
+
+      // 2.5) Pré-checagem de quota (SPEC 059 §7.2) — sem isto, a quota
+      // estourando no meio de um bloco de 50 vira "48 pulados" sem
+      // explicação nenhuma (o erro real fica indistinguível de 23505).
+      const planRes = await fetch('/api/account/plan', { cache: 'no-store' });
+      if (planRes.ok) {
+        const planData = (await planRes.json()) as {
+          usage: {
+            buckets: { key: string; used: number; limit: number | null }[];
+          };
+        };
+        const contactsBucket = planData.usage.buckets.find(
+          (b) => b.key === 'contacts'
+        );
+        if (contactsBucket) {
+          const decision = checkQuota({
+            limit: contactsBucket.limit,
+            used: contactsBucket.used,
+            requested: toInsert.length,
+          });
+          if (!decision.allowed) {
+            const available = decision.remaining ?? 0;
+            if (available === 0) {
+              toast.error(
+                t('toastQuotaBlocked', {
+                  used: contactsBucket.used,
+                  limit: contactsBucket.limit ?? 0,
+                })
+              );
+              setImporting(false);
+              return;
+            }
+            const proceed = window.confirm(
+              t('toastQuotaPartial', {
+                available,
+                total: toInsert.length,
+              })
+            );
+            if (!proceed) {
+              setImporting(false);
+              return;
+            }
+            toInsert = toInsert.slice(0, available);
+          }
+        }
+      }
 
       // 3) Resolve tag names → ids (admin+ may auto-create missing tags).
       //    Skip the round-trip when the import carries no tag names.
@@ -359,8 +407,9 @@ export function ImportModal({
       //    unique index is the backstop: a 23505 (race, or a format
       //    that normalizes equal) counts as skipped, not failed.
       const chunkSize = 50;
+      let quotaStopped = false;
 
-      for (let i = 0; i < toInsert.length; i += chunkSize) {
+      for (let i = 0; i < toInsert.length && !quotaStopped; i += chunkSize) {
         const chunk = toInsert.slice(i, i + chunkSize);
         const insertRows = chunk.map((row) => ({
           user_id: user.id,
@@ -369,6 +418,7 @@ export function ImportModal({
           name: row.name || null,
           email: row.email || null,
           company: row.company || null,
+          created_via: 'import',
         }));
 
         const { data, error } = await supabase
@@ -398,6 +448,12 @@ export function ImportModal({
               }
             } else if (isUniqueViolation(singleErr)) {
               skipped++;
+            } else if (parseQuotaError(singleErr)?.metric === 'contacts') {
+              // A pré-checagem já devia ter evitado isto (corrida com
+              // outra importação/criação simultânea) — para o laço em
+              // vez de produzir uma fileira de falhas idênticas (§7.2).
+              quotaStopped = true;
+              break;
             } else {
               failed++;
             }
@@ -436,6 +492,9 @@ export function ImportModal({
       if (imported > 0) {
         toast.success(t('toastImported', { count: imported }));
         onImported();
+      }
+      if (quotaStopped) {
+        toast.error(t('toastQuotaStopped', { count: imported }));
       }
       if (tagsAssigned > 0) {
         toast.success(t('toastTagsAssigned', { count: tagsAssigned }));

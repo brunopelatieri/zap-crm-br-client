@@ -13,6 +13,7 @@ import {
   isUniqueViolation,
   type ExistingContact,
 } from '@/lib/contacts/dedupe';
+import { parseQuotaError } from '@/lib/plans/errors';
 import { isBrDeployment } from '@/lib/i18n/deployment-locale';
 import { normalizeContactPhone, type PhoneRejectReason } from '@/lib/phone/br';
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
@@ -268,6 +269,7 @@ export function ContactForm({
             phone: normalizedPhone,
             email: email.trim() || null,
             company: company.trim() || null,
+            created_via: 'manual',
           })
           .select('id')
           .single();
@@ -312,6 +314,16 @@ export function ContactForm({
           );
           if (existing) setDupMatch({ contact: existing, exact: true });
         }
+        return;
+      }
+      const quotaError = parseQuotaError(err);
+      if (quotaError && quotaError.metric === 'contacts') {
+        toast.error(
+          t('toastQuotaExceeded', {
+            used: quotaError.used,
+            limit: quotaError.limit,
+          })
+        );
         return;
       }
       const message = err instanceof Error ? err.message : t('toastError');

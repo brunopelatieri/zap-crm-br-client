@@ -628,6 +628,9 @@ async function findOrCreateContact(
       user_id: ctx.ownerUserId,
       phone,
       name: name || phone,
+      // D-5 (SPEC 059): contato criado por mensagem recebida nunca é
+      // bloqueado pela quota — conta para o uso, mas sempre passa.
+      created_via: 'inbound',
     })
     .select()
     .single();

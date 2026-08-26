@@ -105,6 +105,9 @@ const ERROR_CODES = new Set([
   'channel_not_capable',
   'empty_audience',
   'quota_exceeded',
+  // SPEC 059 — teto de CONTATOS do plano (permanente), distinto de
+  // 'quota_exceeded' (teto de ENVIO do Meta, temporário).
+  'contact_quota_exceeded',
   'too_many_recipients',
   'template_malformed',
   'template_not_found',

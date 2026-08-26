@@ -92,6 +92,39 @@
                               }
                             }
                           }
+                        },
+                        "plan": {
+                          "type": ["object", "null"],
+                          "description": "O plano da conta (SPEC 059). `null` se o motor de planos falhar ao resolvê-lo — este endpoint nunca falha só por causa disso.",
+                          "properties": {
+                            "code": { "type": "string" },
+                            "name": { "type": "string" },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "trialing",
+                                "active",
+                                "past_due",
+                                "suspended",
+                                "canceled"
+                              ]
+                            }
+                          }
+                        },
+                        "usage": {
+                          "type": "array",
+                          "description": "Vazio quando o deployment não tem quotas de plano ligadas (D-1) — toda quota é efetivamente ilimitada.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": { "type": "string" },
+                              "used": { "type": "integer" },
+                              "limit": {
+                                "type": ["integer", "null"],
+                                "description": "null = ilimitado para o plano desta conta"
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -106,7 +139,16 @@
                     "key": {
                       "id": "8f3c1e2a-0000-4000-8000-000000000002",
                       "scopes": ["messages:send"]
-                    }
+                    },
+                    "plan": {
+                      "code": "professional",
+                      "name": "Profissional",
+                      "status": "active"
+                    },
+                    "usage": [
+                      { "key": "contacts", "used": 1847, "limit": 10000 },
+                      { "key": "channels_whatsapp_qr", "used": 1, "limit": 2 }
+                    ]
                   }
                 }
               }
@@ -374,7 +416,7 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
+          "403": { "$ref": "#/components/responses/ForbiddenOrQuota" },
           "429": { "$ref": "#/components/responses/RateLimited" }
         }
       }
@@ -764,7 +806,7 @@
             }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
+          "403": { "$ref": "#/components/responses/ForbiddenOrQuota" },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "500": { "$ref": "#/components/responses/InternalError" }
         }
@@ -1068,6 +1110,34 @@
               "error": {
                 "code": "forbidden",
                 "message": "This API key is missing the 'messages:send' scope"
+              }
+            }
+          }
+        }
+      },
+      "ForbiddenOrQuota": {
+        "description": "Ou a chave não tem o escopo exigido (`forbidden`), ou — num deployment com quotas de plano ligadas, SPEC 059 — a quota de `contacts` da conta já está no limite (`quota_exceeded`). Decida por `error.code`; nada foi criado em nenhum dos dois casos.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "examples": {
+              "forbidden": {
+                "summary": "Escopo ausente",
+                "value": {
+                  "error": {
+                    "code": "forbidden",
+                    "message": "This API key is missing the 'contacts:write' scope"
+                  }
+                }
+              },
+              "quota_exceeded": {
+                "summary": "Quota do plano atingida",
+                "value": {
+                  "error": {
+                    "code": "quota_exceeded",
+                    "message": "Contact quota exceeded (2000/2000)"
+                  }
+                }
               }
             }
           }

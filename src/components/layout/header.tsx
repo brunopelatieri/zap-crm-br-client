@@ -3,7 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
-import { LogOut, Menu, Settings as SettingsIcon, User } from 'lucide-react';
+import {
+  CreditCard,
+  LogOut,
+  Menu,
+  Settings as SettingsIcon,
+  User,
+} from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -22,6 +28,7 @@ const pageTitles: Record<string, string> = {
   '/pipelines': 'pipelines',
   '/broadcasts': 'broadcasts',
   '/automations': 'automations',
+  '/plan': 'plan',
   '/settings': 'settings',
 };
 
@@ -37,11 +44,13 @@ interface HeaderProps {
   /** Wired to the shell's drawer state. Used only on mobile — the
    *  hamburger button is hidden on lg+. */
   onOpenSidebar?: () => void;
+  /** SPEC 059 D-1: "Plano e uso" só aparece com o interruptor de quotas ligado. */
+  showPlanLink?: boolean;
 }
 
 import { useTranslations } from 'next-intl';
 
-export function Header({ onOpenSidebar }: HeaderProps) {
+export function Header({ onOpenSidebar, showPlanLink = false }: HeaderProps) {
   const t = useTranslations('Header');
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
@@ -117,6 +126,19 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               <User className="size-4" />
               {t('menuProfile')}
             </DropdownMenuItem>
+            {showPlanLink ? (
+              <DropdownMenuItem
+                render={
+                  <Link
+                    href="/plan"
+                    className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+                  />
+                }
+              >
+                <CreditCard className="size-4" />
+                {t('menuPlan')}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               render={
                 <Link

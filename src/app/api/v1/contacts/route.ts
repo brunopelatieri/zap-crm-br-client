@@ -139,7 +139,7 @@ export async function POST(request: Request) {
   } catch (err) {
     if (err instanceof ContactError) {
       return fail(
-        err.status === 400 ? 'bad_request' : 'internal',
+        err.code ?? (err.status === 400 ? 'bad_request' : 'internal'),
         err.message,
         err.status
       );

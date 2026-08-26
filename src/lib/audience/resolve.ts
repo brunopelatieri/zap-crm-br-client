@@ -47,6 +47,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isUniqueViolation, normalizeKey } from '@/lib/contacts/dedupe';
+import { parseQuotaError } from '@/lib/plans/errors';
 import {
   assignImportedContactTags,
   resolveImportTagIds,
@@ -234,6 +235,7 @@ export async function upsertImportedContacts(
         name: row.name ?? null,
         email: row.email?.trim() || null,
         company: row.company?.trim() || null,
+        created_via: 'audience',
       };
     });
 
@@ -248,6 +250,19 @@ export async function upsertImportedContacts(
       // falha — relê o lote e segue. Abortar o disparo inteiro porque um
       // número foi cadastrado concorrentemente seria pior do que enviar.
       if (!isUniqueViolation(insertErr)) {
+        // Código distinto de 'quota_exceeded' (o cron de agendamento já
+        // usa esse código para COTA DE ENVIO — reagenda em vez de
+        // falhar). Quota de CONTATO é um teto permanente do plano, não
+        // uma janela que desliza; misturar os dois faria o cron
+        // reagendar para sempre uma campanha que nunca vai caber.
+        const quotaError = parseQuotaError(insertErr);
+        if (quotaError && quotaError.metric === 'contacts') {
+          throw new BroadcastError(
+            'contact_quota_exceeded',
+            `Contact quota exceeded while creating imported contacts (${quotaError.used}/${quotaError.limit})`,
+            403
+          );
+        }
         throw new BroadcastError(
           'internal',
           `Failed to create imported contacts: ${insertErr.message}`,

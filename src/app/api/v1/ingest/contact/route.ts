@@ -196,7 +196,7 @@ export async function POST(request: Request) {
     // exatamente o que D-14 reserva para "antes de criar o contato".
     if (err instanceof ContactError) {
       return fail(
-        err.status === 400 ? 'bad_request' : 'internal',
+        err.code ?? (err.status === 400 ? 'bad_request' : 'internal'),
         err.message,
         err.status
       );

@@ -23,6 +23,7 @@ export type ApiErrorCode =
   | 'rate_limited' // per-key budget exhausted
   | 'bad_request' // malformed input
   | 'not_found'
+  | 'quota_exceeded' // SPEC 059 — account plan quota reached (e.g. contacts)
   | 'internal';
 
 /**

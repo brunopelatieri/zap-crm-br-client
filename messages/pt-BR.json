@@ -174,6 +174,7 @@
     "automations": "Automações",
     "flows": "Fluxos",
     "aiAgents": "Agentes de IA",
+    "plan": "Plano e uso",
     "settings": "Configurações",
     "beta": "Beta",
     "unreadConversations": "{count} {count, plural, =1 {conversa não lida} other {conversas não lidas}}",
@@ -186,6 +187,7 @@
     "defaultUser": "Usuário",
     "defaultAvatar": "Avatar",
     "menuProfile": "Perfil",
+    "menuPlan": "Plano e uso",
     "menuSettings": "Configurações",
     "menuSignOut": "Sair"
   },
@@ -197,14 +199,65 @@
     "pipelines": "Funis",
     "broadcasts": "Disparos",
     "automations": "Automações",
+    "plan": "Plano e uso",
     "settings": "Configurações",
     "openMenu": "Abrir menu",
     "openAccountMenu": "Abrir menu da conta",
     "defaultUser": "Usuário",
     "defaultAvatar": "Avatar",
     "menuProfile": "Perfil",
+    "menuPlan": "Plano e uso",
     "menuSettings": "Configurações",
     "menuSignOut": "Sair"
+  },
+  "Plan": {
+    "title": "Plano e uso",
+    "description": "Seu plano atual, o uso contra as quotas dele e o catálogo disponível.",
+    "loading": "Carregando plano...",
+    "loadFailed": "Falha ao carregar seu plano.",
+    "free": "Grátis",
+    "currentPlan": "Plano atual",
+    "catalogTitle": "Planos disponíveis",
+    "choosePlan": "Escolher este plano",
+    "requestSent": "Solicitação enviada",
+    "requestFailed": "Falha ao enviar a solicitação de plano",
+    "requestPending": "Solicitação pendente: {plan}",
+    "requestPendingSince": "Solicitado em {date} — aguardando o operador",
+    "requestCancel": "Cancelar solicitação",
+    "requestCanceled": "Solicitação cancelada",
+    "requestCancelFailed": "Falha ao cancelar a solicitação",
+    "suspendedNotice": "Sua conta está suspensa. Envio e criação de novos registros estão bloqueados até isso ser resolvido — entre em contato com o suporte.",
+    "usageUnlimited": "{used} (ilimitado)",
+    "overageNotice": "{amount} acima do limite do plano — nada foi apagado, mas novos itens ficam bloqueados até você fazer upgrade ou liberar espaço.",
+    "billingPeriod": {
+      "monthly": "mês",
+      "yearly": "ano",
+      "custom": "personalizado",
+      "none": "—"
+    },
+    "status": {
+      "trialing": "Teste",
+      "active": "Ativo",
+      "past_due": "Pagamento pendente",
+      "suspended": "Suspenso",
+      "canceled": "Cancelado"
+    },
+    "quotaLabel": {
+      "contacts": "Contatos",
+      "members_total": "Usuários (total)",
+      "members_admin": "Admins",
+      "members_agent": "Agentes",
+      "members_viewer": "Visualizadores",
+      "channels_whatsapp_qr": "Instâncias WhatsApp QRCode",
+      "channels_whatsapp_cloud": "Números oficiais do WhatsApp"
+    },
+    "featureLabel": {
+      "ai_enabled": "IA (rascunho / auto-resposta)",
+      "api_v1_enabled": "API pública",
+      "flows_enabled": "Flows",
+      "broadcasts_enabled": "Disparos em massa",
+      "webhooks_out_enabled": "Webhooks de saída"
+    }
   },
   "ModeToggle": {
     "switchMode": "Mudar para o modo {mode}"
@@ -652,6 +705,7 @@
       "toastSuccessEdit": "Contato atualizado com sucesso",
       "toastError": "Falha ao salvar contato",
       "toastConflict": "Já existe um contato com este número de telefone",
+      "toastQuotaExceeded": "Limite de contatos atingido ({used}/{limit}). Faça upgrade do plano para adicionar mais contatos.",
       "viewExisting": "Ver {name}",
       "dupExact": "Já existe um contato com este número de telefone.",
       "dupSimilar": "Já existe um contato com um número muito parecido.",
@@ -833,7 +887,10 @@
       "toastSkipped_plural": "{count} duplicados ignorados",
       "toastFailed": "{count} contato falhou ao importar",
       "toastFailed_plural": "{count} contatos falharam ao importar",
-      "toastError": "Falha na importação"
+      "toastError": "Falha na importação",
+      "toastQuotaBlocked": "Limite de contatos atingido ({used}/{limit}). Faça upgrade do plano para importar mais contatos.",
+      "toastQuotaPartial": "Seu plano tem espaço para mais {available} contato(s), mas este arquivo tem {total}. Importar os primeiros {available} e parar por aí?",
+      "toastQuotaStopped": "Importação interrompida: limite de contatos atingido depois de {count} importados."
     },
     "exportModal": {
       "title": "Exportar contatos",
@@ -1589,6 +1646,7 @@
         "channel_not_capable": "Disparo em massa só está disponível no WhatsApp Oficial. Instâncias conectadas por QRCode não podem enviar campanhas — é a regra que mais protege o número de banimento.",
         "empty_audience": "Nenhum contato com telefone válido corresponde a esta audiência.",
         "quota_exceeded": "Esta audiência é maior do que o seu tier de mensageria na Meta permite em um único disparo. Remova contatos ou divida a campanha.",
+        "contact_quota_exceeded": "Criar esta audiência excederia o limite de contatos do seu plano. Faça upgrade do plano ou reduza a audiência.",
         "too_many_recipients": "Esta audiência é grande demais para um único disparo. Divida em envios menores.",
         "template_malformed": "Este template está dessincronizado. Rode \"Sincronizar com a Meta\" em Ajustes e tente de novo.",
         "draft_not_found": "Este rascunho não existe mais ou já foi enviado. Refaça a seleção de audiência.",

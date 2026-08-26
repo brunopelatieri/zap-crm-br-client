@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -37,6 +37,17 @@ export default function SettingsPage() {
   // app sidebar/header working. Legacy tab values (tags, custom-fields)
   // resolve onto their new home; unknown/empty → the Overview landing.
   const section = resolveSection(searchParams.get('tab'));
+
+  // "Plano e uso" deixou de ser uma aba daqui (SPEC 059) e virou a rota
+  // própria /plan — sem isto, um link salvo/favoritado com
+  // ?tab=plan cairia silenciosamente na Overview em vez de levar o
+  // usuário à página nova (achado de code review).
+  useEffect(() => {
+    if (searchParams.get('tab') === 'plan') {
+      router.replace('/plan');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());

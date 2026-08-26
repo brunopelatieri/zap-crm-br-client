@@ -293,6 +293,32 @@ export async function POST(request: Request) {
       existing?.phone_number_id === phone_number_id &&
       existing?.registered_at != null;
 
+    // SPEC 059 F6 / D-7: channels_whatsapp_cloud só vale 0 ou 1 — só
+    // checa ao criar a PRIMEIRA config da conta. Atualizar credenciais
+    // de um número já conectado (rotação de token, novo PIN) nunca
+    // pode ser bloqueado pela quota.
+    if (!existing) {
+      // plan_limit() confia cegamente em p_account_id (sem checar
+      // is_account_member) — por isso EXECUTE é só de service_role
+      // (migração 067), nunca de authenticated. accountId já foi
+      // resolvido para o USUÁRIO LOGADO acima; não é um parâmetro
+      // vindo do cliente.
+      const { data: cloudLimit } = await supabaseAdmin().rpc('plan_limit', {
+        p_account_id: accountId,
+        p_key: 'channels_whatsapp_cloud',
+      });
+      if (cloudLimit === 0) {
+        return NextResponse.json(
+          {
+            error:
+              'Your plan does not include an official WhatsApp number. Upgrade your plan to connect one.',
+            code: 'quota_exceeded',
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     // Step 1: register the phone number for inbound webhooks.
     //
     // Attempted on first save AND whenever the user supplies a fresh

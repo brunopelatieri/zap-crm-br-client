@@ -32,6 +32,8 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
+import { checkQuota } from '@/lib/plans/gate';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 // Resolve the base URL we publish invite links under.
 //
@@ -214,6 +216,118 @@ export async function POST(request: Request) {
         );
       }
       label = trimmed === '' ? null : trimmed;
+    }
+
+    // SPEC 059 §4.1: convite pendente ocupa vaga. Sem isto, um plano de
+    // 5 usuários emite 20 convites (cada um passando por esta checagem
+    // ANTES de qualquer um ser aceito) e recebe 20 pessoas — o
+    // `redeem_invitation` final (migração 067 §12) é o backstop, não a
+    // pré-checagem. Owner conta em members_total e também no bucket
+    // 'admin' (D-6) — count_members_role() já resolve isso.
+    const nowIso = new Date().toISOString();
+    const [
+      membersTotalRes,
+      pendingTotalRes,
+      roleMembersCountRes,
+      pendingRoleRes,
+      limitTotalRes,
+      limitRoleRes,
+    ] = await Promise.all([
+      ctx.supabase
+        .from('profiles')
+        .select('user_id', { count: 'exact', head: true })
+        .eq('account_id', ctx.accountId),
+      ctx.supabase
+        .from('account_invitations')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', ctx.accountId)
+        .is('accepted_at', null)
+        .gt('expires_at', nowIso),
+      // count_members_role/plan_limit confiam cegamente em
+      // p_account_id (sem checar is_account_member) — por isso EXECUTE
+      // é só de service_role (migração 067), nunca de authenticated.
+      // ctx.accountId já veio de requireRole('admin') acima, não de
+      // input do cliente.
+      supabaseAdmin().rpc('count_members_role', {
+        p_account_id: ctx.accountId,
+        p_role: role,
+      }),
+      ctx.supabase
+        .from('account_invitations')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', ctx.accountId)
+        .eq('role', role)
+        .is('accepted_at', null)
+        .gt('expires_at', nowIso),
+      supabaseAdmin().rpc('plan_limit', {
+        p_account_id: ctx.accountId,
+        p_key: 'members_total',
+      }),
+      supabaseAdmin().rpc('plan_limit', {
+        p_account_id: ctx.accountId,
+        p_key: `members_${role}`,
+      }),
+    ]);
+
+    // Achado de code review: antes, só { data }/{ count } eram
+    // desestruturados e o `error` de cada consulta era descartado — uma
+    // falha transitória em qualquer uma virava `undefined`, que
+    // checkQuota() trata como "sem limite" (falha aberta indevida,
+    // diferente da falha aberta intencional de "plano sem a chave").
+    const failedQuery = [
+      membersTotalRes,
+      pendingTotalRes,
+      roleMembersCountRes,
+      pendingRoleRes,
+      limitTotalRes,
+      limitRoleRes,
+    ].find((res) => res.error);
+    if (failedQuery) {
+      console.error(
+        '[POST /api/account/invitations] quota precheck query failed:',
+        failedQuery.error
+      );
+      return NextResponse.json(
+        { error: 'Failed to check member quota' },
+        { status: 500 }
+      );
+    }
+
+    const { count: membersTotal } = membersTotalRes;
+    const { count: pendingTotal } = pendingTotalRes;
+    const { data: roleMembersCount } = roleMembersCountRes;
+    const { count: pendingRole } = pendingRoleRes;
+    const { data: limitTotal } = limitTotalRes;
+    const { data: limitRole } = limitRoleRes;
+
+    const totalDecision = checkQuota({
+      limit: limitTotal ?? null,
+      used: (membersTotal ?? 0) + (pendingTotal ?? 0),
+      requested: 1,
+    });
+    if (!totalDecision.allowed) {
+      return NextResponse.json(
+        {
+          error: `Member limit reached (${totalDecision.used}/${totalDecision.limit})`,
+          code: 'quota_exceeded',
+        },
+        { status: 403 }
+      );
+    }
+
+    const roleDecision = checkQuota({
+      limit: limitRole ?? null,
+      used: (roleMembersCount ?? 0) + (pendingRole ?? 0),
+      requested: 1,
+    });
+    if (!roleDecision.allowed) {
+      return NextResponse.json(
+        {
+          error: `Member limit reached for role '${role}' (${roleDecision.used}/${roleDecision.limit})`,
+          code: 'quota_exceeded',
+        },
+        { status: 403 }
+      );
     }
 
     const { token, hash } = generateInviteToken();

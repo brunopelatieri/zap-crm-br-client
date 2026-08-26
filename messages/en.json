@@ -174,6 +174,7 @@
     "automations": "Automations",
     "flows": "Flows",
     "aiAgents": "AI Agents",
+    "plan": "Plan & usage",
     "settings": "Settings",
     "beta": "Beta",
     "unreadConversations": "{count} unread {count, plural, =1 {conversation} other {conversations}}",
@@ -186,6 +187,7 @@
     "defaultUser": "User",
     "defaultAvatar": "Avatar",
     "menuProfile": "Profile",
+    "menuPlan": "Plan & usage",
     "menuSettings": "Settings",
     "menuSignOut": "Sign out"
   },
@@ -197,14 +199,65 @@
     "pipelines": "Pipelines",
     "broadcasts": "Broadcasts",
     "automations": "Automations",
+    "plan": "Plan & usage",
     "settings": "Settings",
     "openMenu": "Open menu",
     "openAccountMenu": "Open account menu",
     "defaultUser": "User",
     "defaultAvatar": "Avatar",
     "menuProfile": "Profile",
+    "menuPlan": "Plan & usage",
     "menuSettings": "Settings",
     "menuSignOut": "Sign out"
+  },
+  "Plan": {
+    "title": "Plan & usage",
+    "description": "Your current plan, usage against its quotas, and the available catalog.",
+    "loading": "Loading plan...",
+    "loadFailed": "Failed to load your plan.",
+    "free": "Free",
+    "currentPlan": "Current plan",
+    "catalogTitle": "Available plans",
+    "choosePlan": "Choose this plan",
+    "requestSent": "Request sent",
+    "requestFailed": "Failed to send plan request",
+    "requestPending": "Request pending: {plan}",
+    "requestPendingSince": "Requested on {date} — awaiting the operator",
+    "requestCancel": "Cancel request",
+    "requestCanceled": "Request canceled",
+    "requestCancelFailed": "Failed to cancel request",
+    "suspendedNotice": "Your account is suspended. Sending and creating new records is blocked until this is resolved — contact support.",
+    "usageUnlimited": "{used} (unlimited)",
+    "overageNotice": "{amount} over the plan limit — nothing was deleted, but new ones are blocked until you upgrade or free up room.",
+    "billingPeriod": {
+      "monthly": "month",
+      "yearly": "year",
+      "custom": "custom",
+      "none": "—"
+    },
+    "status": {
+      "trialing": "Trial",
+      "active": "Active",
+      "past_due": "Past due",
+      "suspended": "Suspended",
+      "canceled": "Canceled"
+    },
+    "quotaLabel": {
+      "contacts": "Contacts",
+      "members_total": "Users (total)",
+      "members_admin": "Admins",
+      "members_agent": "Agents",
+      "members_viewer": "Viewers",
+      "channels_whatsapp_qr": "WhatsApp QRCode instances",
+      "channels_whatsapp_cloud": "Official WhatsApp numbers"
+    },
+    "featureLabel": {
+      "ai_enabled": "AI (draft / auto-reply)",
+      "api_v1_enabled": "Public API",
+      "flows_enabled": "Flows",
+      "broadcasts_enabled": "Bulk broadcasts",
+      "webhooks_out_enabled": "Outbound webhooks"
+    }
   },
   "ModeToggle": {
     "switchMode": "Switch to {mode} mode"
@@ -652,6 +705,7 @@
       "toastSuccessEdit": "Contact updated successfully",
       "toastError": "Failed to save contact",
       "toastConflict": "A contact with this phone number already exists",
+      "toastQuotaExceeded": "Contact limit reached ({used}/{limit}). Upgrade your plan to add more contacts.",
       "viewExisting": "View {name}",
       "dupExact": "A contact with this phone number already exists.",
       "dupSimilar": "A contact with a very similar number already exists.",
@@ -833,7 +887,10 @@
       "toastSkipped_plural": "{count} duplicates skipped",
       "toastFailed": "{count} contact failed to import",
       "toastFailed_plural": "{count} contacts failed to import",
-      "toastError": "Import failed"
+      "toastError": "Import failed",
+      "toastQuotaBlocked": "Contact limit reached ({used}/{limit}). Upgrade your plan to import more contacts.",
+      "toastQuotaPartial": "Your plan has room for {available} more contact(s), but this file has {total}. Import the first {available} and stop there?",
+      "toastQuotaStopped": "Import stopped: contact limit reached after {count} imported."
     },
     "exportModal": {
       "title": "Export contacts",
@@ -1589,6 +1646,7 @@
         "channel_not_capable": "Bulk broadcast is only available on WhatsApp Oficial. QR code instances cannot send campaigns — it's the rule that most protects the number from being banned.",
         "empty_audience": "No contacts with a valid phone number matched this audience.",
         "quota_exceeded": "This audience is larger than your Meta messaging tier allows in a single broadcast. Remove contacts or split the campaign.",
+        "contact_quota_exceeded": "Creating this audience would exceed your plan's contact limit. Upgrade your plan or shrink the audience.",
         "too_many_recipients": "This audience is too large for a single broadcast. Split it into smaller sends.",
         "template_malformed": "This template is out of sync. Run \"Sync from Meta\" in Settings and try again.",
         "draft_not_found": "This draft no longer exists or was already sent. Start the audience over.",

@@ -180,26 +180,48 @@ export async function getInstanceLimitStatus(
   const config = requireConfig();
   const db = supabaseAdmin();
 
-  const [{ count: accountCount }, { count: totalCount }, { data: account }] =
-    await Promise.all([
-      db
-        .from('evolution_instances')
-        .select('id', { count: 'exact', head: true })
-        .eq('account_id', accountId),
-      db
-        .from('evolution_instances')
-        .select('id', { count: 'exact', head: true }),
-      db
-        .from('accounts')
-        .select('evolution_instance_limit')
-        .eq('id', accountId)
-        .maybeSingle(),
-    ]);
+  const [
+    { count: accountCount },
+    { count: totalCount },
+    { data: planLimit },
+    { data: account },
+  ] = await Promise.all([
+    db
+      .from('evolution_instances')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId),
+    db.from('evolution_instances').select('id', { count: 'exact', head: true }),
+    // SPEC 059 F6: accountOverride passa a considerar também o plano.
+    // NULL cobre os dois casos "sem override do plano": quota
+    // desligada (D-1) e plano que não define a chave (D-3).
+    db.rpc('plan_limit', {
+      p_account_id: accountId,
+      p_key: 'channels_whatsapp_qr',
+    }),
+    // accounts.evolution_instance_limit (056) continua sendo lida e
+    // combinada com plan_limit (a mais restritiva vence) — não pode
+    // ser a ÚNICA fonte (obsoleta desde a 067), mas também não pode
+    // sumir sozinha: enquanto quotas_enforced=FALSE (padrão, D-1),
+    // plan_limit() sempre devolve NULL, e uma conta que já tinha um
+    // teto negociado nesta coluna perderia esse teto em silêncio se
+    // ela deixasse de ser lida. Achado de code review, corrigido.
+    db
+      .from('accounts')
+      .select('evolution_instance_limit')
+      .eq('id', accountId)
+      .maybeSingle(),
+  ]);
+
+  const legacyLimit = account?.evolution_instance_limit ?? null;
+  const accountOverride =
+    legacyLimit !== null && planLimit !== null
+      ? Math.min(legacyLimit, planLimit)
+      : (legacyLimit ?? planLimit ?? null);
 
   return checkInstanceLimit({
     accountCount: accountCount ?? 0,
     totalCount: totalCount ?? 0,
-    accountOverride: account?.evolution_instance_limit ?? null,
+    accountOverride,
     defaultPerAccount: config.maxInstancesPerAccount,
     maxTotal: config.maxInstancesTotal,
   });

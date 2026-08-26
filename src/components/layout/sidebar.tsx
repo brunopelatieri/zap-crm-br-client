@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { useTotalUnread } from '@/hooks/use-total-unread';
@@ -11,6 +11,7 @@ import { useUnreadNotifications } from '@/hooks/use-unread-notifications';
 import {
   Bell,
   Bot,
+  CreditCard,
   Crown,
   GitBranch,
   LayoutDashboard,
@@ -94,20 +95,31 @@ const navItems: NavItem[] = [
   { href: '/agents', labelKey: 'aiAgents', icon: Bot },
 ];
 
-const bottomNavItems = [
-  { href: '/settings', labelKey: 'settings', icon: Settings },
-];
-
 interface SidebarProps {
   /** Controlled on mobile by the Header's hamburger button. Ignored on lg+. */
   open?: boolean;
   onClose?: () => void;
+  /** SPEC 059 D-1: "Plano e uso" só aparece com o interruptor de quotas ligado. */
+  showPlanLink?: boolean;
 }
 
 import { useTranslations } from 'next-intl';
 
-export function Sidebar({ open = false, onClose }: SidebarProps) {
+export function Sidebar({
+  open = false,
+  onClose,
+  showPlanLink = false,
+}: SidebarProps) {
   const t = useTranslations('Sidebar');
+  const bottomNavItems: NavItem[] = useMemo(
+    () => [
+      ...(showPlanLink
+        ? [{ href: '/plan', labelKey: 'plan', icon: CreditCard }]
+        : []),
+      { href: '/settings', labelKey: 'settings', icon: Settings },
+    ],
+    [showPlanLink]
+  );
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
   const totalUnread = useTotalUnread();
@@ -375,6 +387,20 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 <User className="size-4" />
                 {t('menuProfile')}
               </DropdownMenuItem>
+              {showPlanLink ? (
+                <DropdownMenuItem
+                  render={
+                    <Link
+                      href="/plan"
+                      onClick={onClose}
+                      className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+                    />
+                  }
+                >
+                  <CreditCard className="size-4" />
+                  {t('menuPlan')}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 render={
                   <Link
