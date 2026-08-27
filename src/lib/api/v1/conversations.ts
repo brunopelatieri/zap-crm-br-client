@@ -50,6 +50,13 @@ export interface ApiMessage {
   reply_to_message_id: string | null;
   interactive_reply_id: string | null;
   created_at: string;
+  /**
+   * Somente leitura (SPEC 060 §10) — a política de retenção da conta
+   * nunca remove uma mensagem favoritada. Uma integração que pagina o
+   * histórico esperando-o imutável precisa saber que o resto PODE ter
+   * sido podado; ver docs/public-api.md.
+   */
+  is_favorite: boolean;
 }
 
 /**
@@ -103,5 +110,6 @@ export function serializeMessage(m: Message): ApiMessage {
     reply_to_message_id: m.reply_to_message_id ?? null,
     interactive_reply_id: m.interactive_reply_id ?? null,
     created_at: m.created_at,
+    is_favorite: m.is_favorite ?? false,
   };
 }

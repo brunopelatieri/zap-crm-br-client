@@ -433,11 +433,13 @@
       "assign": "Assign",
       "assigned": "Assigned",
       "assignUpdateFailed": "Failed to update assignment",
+      "favoriteUpdateFailed": "Failed to update favorite",
       "unassign": "Unassign",
       "noTeammates": "No teammates available",
       "me": " (me)",
       "noMessagesYet": "No messages yet",
       "sendTemplateHint": "Send a template to start the conversation",
+      "retentionNotice": "Older messages were removed by the retention policy",
       "selectConversation": "Select a conversation",
       "selectConversationHint": "Choose a conversation from the left to start messaging",
       "today": "Today",
@@ -495,6 +497,7 @@
       "buttonReply": "Button reply",
       "interactiveReply": "[Interactive reply]",
       "unsupported": "[Unsupported message type]",
+      "favorited": "Favorited — protected from retention cleanup",
       "aiBadge": "AI",
       "aiBadgeTitle": "Sent automatically by the AI assistant",
       "channelBadgeTitle": "Delivered via {channel} — a different channel than the one this conversation normally uses",
@@ -519,7 +522,9 @@
       "reactWith": "React with {emoji}",
       "nothingToCopy": "Nothing to copy",
       "copied": "Copied",
-      "copyFailed": "Copy failed"
+      "copyFailed": "Copy failed",
+      "favorite": "Favorite",
+      "unfavorite": "Remove from favorites"
     },
     "replyQuote": {
       "photo": "[Photo]",
@@ -2933,7 +2938,8 @@
       "deals": "Deals & currency",
       "members": "Team members",
       "api": "API keys",
-      "webhook-log": "Webhook log"
+      "webhook-log": "Webhook log",
+      "retention": "Retention"
     },
     "groups": {
       "account": "Account",
@@ -3102,6 +3108,38 @@
         "note_empty": "Empty note skipped",
         "payload_truncated": "Payload over 8 KB, truncated"
       }
+    },
+    "retention": {
+      "title": "Retention",
+      "description": "Set how long messages are kept, per channel. Deleting is the only operation here with no undo — check the preview before saving a new limit.",
+      "floorNotice": "Messages newer than {hours}h are never removed, no matter how the limits below are set — this protects delivery retries, flows waiting on a reply, and campaign attribution.",
+      "disabledNotice": "Automatic cleanup is turned off on this server (MESSAGE_RETENTION_ENABLED is not set). The policies below are saved, but nothing is removed until the server operator turns the switch on.",
+      "lastRunNever": "The cleanup sweep hasn't run yet.",
+      "lastRun": "Last cleanup: {date} · {count} messages removed",
+      "noChannels": "No channel connected yet.",
+      "accessDenied": "You don't have permission to view this section.",
+      "loadFailed": "Failed to load retention settings",
+      "networkError": "Could not reach the server",
+      "channelType": {
+        "whatsapp_cloud": "Official WhatsApp",
+        "whatsapp_qr": "WhatsApp QRCode"
+      },
+      "fieldMaxMessages": "Max messages",
+      "fieldRetentionDays": "Retention (days)",
+      "fieldMaxFavorites": "Max favorites",
+      "fieldsHint": "Type 0 for no limit on that field. Leave it empty to use the system default shown in gray.",
+      "saveButton": "Save",
+      "saveSuccess": "Policy saved",
+      "saveFailed": "Failed to save the retention policy",
+      "previewButton": "See what would be removed",
+      "previewFailed": "Failed to compute the preview",
+      "previewNothingToRemove": "Nothing would be removed with these limits.",
+      "previewResult": "This would remove {byAge} message(s) by age and {byCount} by the message-count limit, and demote {favoritesDemoted} favorite(s) above the favorites cap.",
+      "previewTruncated": "This channel has more to clean up than one cleanup batch handles — the rest will go in the next cycle.",
+      "usageMessages": "Messages",
+      "usageFavorites": "Favorites",
+      "usageLoadFailed": "Couldn't load usage for this channel. Try refreshing the page in a moment.",
+      "favoritesOverCapHint": "Above the cap — the oldest favorites will lose their star on the next cleanup cycle (they aren't removed right away)."
     },
     "deals": {
       "title": "Deals & currency",

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { CornerUpLeft, Copy, SmilePlus } from 'lucide-react';
+import { CornerUpLeft, Copy, SmilePlus, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -20,6 +20,13 @@ interface MessageActionsProps {
   message: Message;
   onReply: () => void;
   onReact: (emoji: string) => void;
+  /**
+   * Ausente numa mensagem `temp-` (ainda sem id real) — o botão da
+   * estrela some enquanto o envio otimista não confirma, mesma regra
+   * que `handleCopy`/`onReact` já seguem para conteúdo que ainda não
+   * existe no servidor (SPEC 060 §8.1).
+   */
+  onToggleFavorite?: () => void;
   children: ReactNode;
 }
 
@@ -32,6 +39,7 @@ export function MessageActions({
   message,
   onReply,
   onReact,
+  onToggleFavorite,
   children,
 }: MessageActionsProps) {
   const t = useTranslations('Inbox.actions');
@@ -73,6 +81,11 @@ export function MessageActions({
 
   const handleReply = () => {
     onReply();
+    setTouchOpen(false);
+  };
+
+  const handleToggleFavorite = () => {
+    onToggleFavorite?.();
     setTouchOpen(false);
   };
 
@@ -133,6 +146,24 @@ export function MessageActions({
           >
             <CornerUpLeft className="h-3.5 w-3.5" />
           </button>
+          {onToggleFavorite && (
+            <button
+              type="button"
+              onClick={handleToggleFavorite}
+              className={cn(
+                'flex h-5 w-5 items-center justify-center rounded-full',
+                message.is_favorite
+                  ? 'hover:bg-muted text-amber-500'
+                  : 'text-popover-foreground hover:bg-muted hover:text-foreground'
+              )}
+              aria-label={message.is_favorite ? t('unfavorite') : t('favorite')}
+            >
+              <Star
+                className="h-3.5 w-3.5"
+                fill={message.is_favorite ? 'currentColor' : 'none'}
+              />
+            </button>
+          )}
           <button
             type="button"
             onClick={handleCopy}

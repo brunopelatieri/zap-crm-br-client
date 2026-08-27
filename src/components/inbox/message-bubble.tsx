@@ -18,6 +18,7 @@ import {
   Maximize2,
   QrCode,
   BadgeCheck,
+  Star,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ReplyQuote } from './reply-quote';
@@ -612,6 +613,18 @@ export function MessageBubble({
             isAgent ? 'justify-end' : 'justify-start'
           )}
         >
+          {/* Selo de favorita (SPEC 060 §8.1) — sem ele, sair da barra
+              de ações apaga a única evidência de que a mensagem está
+              protegida da limpeza de retenção. */}
+          {message.is_favorite && (
+            <Star
+              className="h-3 w-3 shrink-0 text-amber-500"
+              fill="currentColor"
+              aria-label={t('favorited')}
+            >
+              <title>{t('favorited')}</title>
+            </Star>
+          )}
           {/* AI badge — only on replies the auto-reply bot generated
               (always outbound, so it sits on the primary fill). Lets
               agents tell an AI reply from their own / a Flow's at a

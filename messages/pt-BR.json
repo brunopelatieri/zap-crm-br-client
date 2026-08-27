@@ -433,11 +433,13 @@
       "assign": "Atribuir",
       "assigned": "Atribuído",
       "assignUpdateFailed": "Falha ao atualizar a atribuição",
+      "favoriteUpdateFailed": "Falha ao atualizar favorita",
       "unassign": "Remover atribuição",
       "noTeammates": "Nenhum colega de equipe disponível",
       "me": " (eu)",
       "noMessagesYet": "Ainda sem mensagens",
       "sendTemplateHint": "Envie um template para iniciar a conversa",
+      "retentionNotice": "Mensagens antigas foram removidas pela política de retenção",
       "selectConversation": "Selecione uma conversa",
       "selectConversationHint": "Escolha uma conversa à esquerda para começar a conversar",
       "today": "Hoje",
@@ -495,6 +497,7 @@
       "buttonReply": "Resposta de botão",
       "interactiveReply": "[Resposta interativa]",
       "unsupported": "[Tipo de mensagem não suportado]",
+      "favorited": "Favoritada — protegida da limpeza de retenção",
       "aiBadge": "IA",
       "aiBadgeTitle": "Enviado automaticamente pelo assistente de IA",
       "channelBadgeTitle": "Entregue via {channel} — um canal diferente do que esta conversa normalmente usa",
@@ -519,7 +522,9 @@
       "reactWith": "Reagir com {emoji}",
       "nothingToCopy": "Nada para copiar",
       "copied": "Copiado",
-      "copyFailed": "Falha ao copiar"
+      "copyFailed": "Falha ao copiar",
+      "favorite": "Favoritar",
+      "unfavorite": "Remover dos favoritos"
     },
     "replyQuote": {
       "photo": "[Foto]",
@@ -2933,7 +2938,8 @@
       "deals": "Negócios e moeda",
       "members": "Membros da equipe",
       "api": "Chaves de API",
-      "webhook-log": "Log de webhook"
+      "webhook-log": "Log de webhook",
+      "retention": "Retenção"
     },
     "groups": {
       "account": "Conta",
@@ -3102,6 +3108,38 @@
         "note_empty": "Nota vazia ignorada",
         "payload_truncated": "Payload acima de 8 KB, truncado"
       }
+    },
+    "retention": {
+      "title": "Retenção",
+      "description": "Defina por quanto tempo as mensagens ficam guardadas, por canal. Apagar é a única operação daqui sem desfazer — confira a prévia antes de salvar um limite novo.",
+      "floorNotice": "Mensagens mais novas que {hours}h nunca são removidas, não importa como os limites abaixo estejam configurados — isso protege reentregas de entrega, fluxos esperando resposta e a atribuição de campanha.",
+      "disabledNotice": "A limpeza automática está desligada neste servidor (MESSAGE_RETENTION_ENABLED ausente). As políticas abaixo ficam salvas, mas nada é removido até o administrador do servidor ligar o interruptor.",
+      "lastRunNever": "A varredura de limpeza ainda não rodou.",
+      "lastRun": "Última limpeza: {date} · {count} mensagens removidas",
+      "noChannels": "Nenhum canal conectado ainda.",
+      "accessDenied": "Você não tem permissão para ver esta seção.",
+      "loadFailed": "Falha ao carregar as configurações de retenção",
+      "networkError": "Não foi possível conectar ao servidor",
+      "channelType": {
+        "whatsapp_cloud": "WhatsApp Oficial",
+        "whatsapp_qr": "WhatsApp QRCode"
+      },
+      "fieldMaxMessages": "Máximo de mensagens",
+      "fieldRetentionDays": "Retenção (dias)",
+      "fieldMaxFavorites": "Máximo de favoritas",
+      "fieldsHint": "Digite 0 para não ter limite naquele campo. Deixe vazio para usar o padrão do sistema mostrado em cinza.",
+      "saveButton": "Salvar",
+      "saveSuccess": "Política salva",
+      "saveFailed": "Falha ao salvar a política de retenção",
+      "previewButton": "Ver o que seria removido",
+      "previewFailed": "Falha ao calcular a prévia",
+      "previewNothingToRemove": "Nada seria removido com esses limites.",
+      "previewResult": "Isso removeria {byAge} mensagem(ns) por idade e {byCount} pelo limite de quantidade, e rebaixaria {favoritesDemoted} favorita(s) acima do teto.",
+      "previewTruncated": "Este canal tem mais para limpar do que um lote de limpeza processa — o restante fica para o próximo ciclo.",
+      "usageMessages": "Mensagens",
+      "usageFavorites": "Favoritas",
+      "usageLoadFailed": "Não foi possível carregar o uso deste canal. Tente atualizar a página daqui a pouco.",
+      "favoritesOverCapHint": "Acima do teto — as favoritas mais antigas perdem a estrela no próximo ciclo de limpeza (não são removidas agora)."
     },
     "deals": {
       "title": "Negócios e moeda",

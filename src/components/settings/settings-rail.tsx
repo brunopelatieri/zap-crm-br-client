@@ -4,6 +4,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth';
+import { hasMinRole } from '@/lib/auth/roles';
 import {
   RAIL_GROUPS,
   SECTION_META,
@@ -33,6 +35,7 @@ export function SettingsRail({
 }) {
   const t = useTranslations('Settings');
   const activeRef = useRef<HTMLButtonElement>(null);
+  const { accountRole } = useAuth();
 
   // When horizontal (mobile), keep the active chip in view. On desktop
   // the rail is a static column, so skip.
@@ -57,9 +60,17 @@ export function SettingsRail({
       )}
     >
       {RAIL_GROUPS.map(({ label, group }) => {
-        const items = SETTINGS_SECTIONS.filter(
-          (s) => SECTION_META[s].group === group
-        );
+        // `minRole` esconde o item do rail para quem não atinge o
+        // papel — falha fechada: enquanto `accountRole` ainda não
+        // resolveu (`profileLoading`), ele é `null` e `hasMinRole`
+        // nunca é chamado, então o item some até a role ser conhecida
+        // (SPEC 060 §8.2 — "a seção só entra na lista quando é owner").
+        const items = SETTINGS_SECTIONS.filter((s) => {
+          if (SECTION_META[s].group !== group) return false;
+          const minRole = SECTION_META[s].minRole;
+          if (!minRole) return true;
+          return accountRole !== null && hasMinRole(accountRole, minRole);
+        });
         return (
           <div
             key={group}

@@ -552,6 +552,19 @@ export default function InboxPage() {
           prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
         );
       }
+
+      // SPEC 060 introduziu o primeiro `DELETE FROM messages` real do
+      // app (a varredura de retenção) — achado de code review: sem este
+      // ramo, uma bolha apagada pelo servidor ficava presa na thread
+      // aberta até o agente navegar para fora e voltar. `event.old` só
+      // garante `id` (REPLICA IDENTITY padrão, ver o comentário em
+      // `use-realtime.ts`), que é tudo que um filtro precisa.
+      if (event.eventType === 'DELETE') {
+        const deletedId = event.old.id;
+        if (deletedId) {
+          setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+        }
+      }
     },
     [patchFeed, hydrateConversation]
   );

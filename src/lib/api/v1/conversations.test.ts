@@ -74,4 +74,27 @@ describe('serializeMessage', () => {
     const agent = { ...inbound, sender_type: 'agent' } as unknown as Message;
     expect(serializeMessage(agent).direction).toBe('outbound');
   });
+
+  it('projects is_favorite, defaulting to false for a row that predates the column (SPEC 060 §10)', () => {
+    const favorited = {
+      id: 'm2',
+      conversation_id: 'conv1',
+      sender_type: 'customer',
+      content_type: 'text',
+      status: 'delivered',
+      created_at: '2026-01-01T00:00:00Z',
+      is_favorite: true,
+    } as unknown as Message;
+    expect(serializeMessage(favorited).is_favorite).toBe(true);
+
+    const noColumn = {
+      id: 'm3',
+      conversation_id: 'conv1',
+      sender_type: 'customer',
+      content_type: 'text',
+      status: 'delivered',
+      created_at: '2026-01-01T00:00:00Z',
+    } as unknown as Message;
+    expect(serializeMessage(noColumn).is_favorite).toBe(false);
+  });
 });

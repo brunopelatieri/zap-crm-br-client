@@ -4,6 +4,7 @@ import { resumePendingExecution } from '@/lib/automations/engine';
 import type { AutomationContext } from '@/lib/automations/engine';
 import { scanSessionWindows } from '@/lib/automations/window-scan';
 import { scanSchedules } from '@/lib/automations/schedule-scan';
+import { runMessageRetention } from '@/lib/retention/sweep';
 
 /**
  * Três fases, um único agendamento:
@@ -12,9 +13,12 @@ import { scanSchedules } from '@/lib/automations/schedule-scan';
  *      `wait`). Comportamento original desta rota.
  *   2. **Varrer** as janelas de 24h prestes a fechar (SPEC 045 §5.5).
  *   3. **Varrer** os agendamentos do gatilho `time_based` (SPEC 046 §6).
+ *   4. **Varrer** a retenção de mensagens, respeitando o intervalo
+ *      configurado (SPEC 060 §6, porta 1 — a padrão).
  *
  * Por que a varredura mora AQUI e não numa rota nova (§5.5.1, e o mesmo
- * argumento vale para a fase 3 — SPEC 046 §6.1)
+ * argumento vale para a fase 3 — SPEC 046 §6.1 — e para a fase 4 —
+ * SPEC 060 §6)
  *
  *   O agendamento não é código: vive em `supabase/setup/cron-jobs.sql`,
  *   que não é uma migração — é configuração de ambiente, carrega a URL e
@@ -105,7 +109,7 @@ export async function GET(request: Request) {
     processed++;
   }
 
-  // ── Fases 2 e 3: varreduras de janela e de agendamento ────────────
+  // ── Fases 2, 3 e 4: varreduras de janela, agendamento e retenção ──
   //
   // Depois da drenagem (a ordem que §5.5.1 pede) e FORA do caminho da
   // resposta. `after()` casa com o `timeout_milliseconds := 20000` do
@@ -113,10 +117,11 @@ export async function GET(request: Request) {
   // trabalho no servidor: o HTTP responde assim que a drenagem termina e
   // as varreduras seguem dentro do `maxDuration` acima.
   //
-  // Sequenciais, não `Promise.all` — as duas competem pelo mesmo teto
+  // Sequenciais, não `Promise.all` — todas competem pelo mesmo teto
   // de `maxDuration`, e rodá-las em série mantém o corte previsível
-  // (a fase 3 nunca começa sem saber quanto tempo a 2 já consumiu).
-  // Nenhuma das duas lança — aqui dentro não há quem leia uma exceção.
+  // (cada fase nunca começa sem saber quanto tempo a anterior já
+  // consumiu). Nenhuma delas lança — aqui dentro não há quem leia uma
+  // exceção.
   after(async () => {
     const windowResult = await scanSessionWindows();
     if (windowResult.dispatched > 0 || windowResult.failed > 0) {
@@ -138,6 +143,18 @@ export async function GET(request: Request) {
       console.log(
         '[automations-cron] schedule scan:',
         JSON.stringify(scheduleResult)
+      );
+    }
+
+    // Porta 1 da retenção (SPEC 060 §6) — respeita
+    // `MESSAGE_RETENTION_INTERVAL_HOURS` (`ignoreInterval` não passado)
+    // e sai cedo, sem custo, enquanto `MESSAGE_RETENTION_ENABLED`
+    // estiver ausente.
+    const retentionOutcome = await runMessageRetention(new Date());
+    if (retentionOutcome.ran) {
+      console.log(
+        '[automations-cron] retention sweep:',
+        JSON.stringify(retentionOutcome.result)
       );
     }
   });

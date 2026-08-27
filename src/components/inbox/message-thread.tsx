@@ -216,6 +216,9 @@ export function MessageThread({
   const canSend = useCan('send-messages');
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
+  // SPEC 060 §8.3 — distingue "a busca falhou" de "a política de retenção
+  // limpou esta conversa". Sem isto as duas produzem a mesma UI vazia.
+  const [fetchError, setFetchError] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const { members: profiles } = useAccountMembers();
@@ -344,6 +347,8 @@ export function MessageThread({
     const supabase = createClient();
     let cancelled = false;
 
+    setFetchError(false);
+
     (async () => {
       setLoading(true);
 
@@ -360,6 +365,12 @@ export function MessageThread({
 
       if (error) {
         console.error('Failed to fetch messages:', error);
+        // SPEC 060 §8.3 — sem isto, uma falha de rede/RLS transitória
+        // (mensagens continuam `[]`) fica indistinguível de "a política
+        // de retenção limpou esta conversa": as duas produzem
+        // `messages.length === 0 && conversation.last_message_at`
+        // truthy, e o aviso de retenção mentiria sobre a causa real.
+        setFetchError(true);
       } else {
         onMessagesLoadedRef.current(data ?? []);
       }
@@ -1036,6 +1047,51 @@ export function MessageThread({
     [conversation, user?.id]
   );
 
+  // Favoritar/desfavoritar (SPEC 060 §8.1). UPDATE direto do cliente —
+  // a política `messages_update` (039) já libera agent+ da conta, e a
+  // estrela não ganha rota própria (§7: "rota nova seria cerimônia sem
+  // ganho de segurança"). Otimista, revertido no erro — mesmo formato
+  // de `handleStatusChange` acima. Propaga para o colega ao lado via a
+  // assinatura de `messages` que `useRealtime` (inbox/page.tsx) já
+  // mantém sobre `event: '*'` — nenhum canal novo é preciso aqui.
+  const handleToggleFavorite = useCallback(
+    async (msg: Message) => {
+      if (!user?.id) return;
+
+      const nextFavorite = !msg.is_favorite;
+      const previous = {
+        is_favorite: msg.is_favorite ?? false,
+        favorited_at: msg.favorited_at ?? null,
+        favorited_by: msg.favorited_by ?? null,
+      };
+      const updates = nextFavorite
+        ? {
+            is_favorite: true,
+            favorited_at: new Date().toISOString(),
+            favorited_by: user.id,
+          }
+        : { is_favorite: false, favorited_at: null, favorited_by: null };
+
+      onUpdateMessage(msg.id, updates);
+
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('messages')
+        .update(updates)
+        // `.select()` para acusar recusa silenciosa da RLS — mesmo
+        // motivo do `handleStatusChange` acima.
+        .eq('id', msg.id)
+        .select('id');
+
+      if (error || !data || data.length === 0) {
+        console.error('Failed to toggle favorite:', error);
+        onUpdateMessage(msg.id, previous);
+        toast.error(t('favoriteUpdateFailed'));
+      }
+    },
+    [user?.id, onUpdateMessage, t]
+  );
+
   const handleAssignChange = useCallback(
     async (agentId: string | null) => {
       if (!conversation) return;
@@ -1351,6 +1407,30 @@ export function MessageThread({
           <div className="flex items-center justify-center py-12">
             <div className="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent" />
           </div>
+        ) : messages.length === 0 && fetchError ? (
+          // A lista veio vazia porque a BUSCA falhou (rede/RLS/DB), não
+          // porque a retenção limpou algo — nunca mostrar o aviso de
+          // retenção aqui, ele mentiria sobre a causa (achado de code
+          // review, SPEC 060). `noMessagesYet` já é ambíguo o bastante
+          // para não alarmar, mas ao menos não afirma algo específico
+          // e errado.
+          <div className="flex flex-col items-center justify-center py-12">
+            <p className="text-muted-foreground text-sm">
+              {t('noMessagesYet')}
+            </p>
+          </div>
+        ) : messages.length === 0 && conversation.last_message_at ? (
+          // SPEC 060 §8.3 — a conversa NÃO é nova: já teve mensagem
+          // (`last_message_at` sobrevive à limpeza, D-3), mas a lista
+          // veio vazia. Branco sem explicação é indistinguível de bug,
+          // então diz QUE houve limpeza — nunca QUAL é a política:
+          // agente e viewer não têm acesso a `channel_retention_policies`
+          // (§3.2), e a UI não pode saber mais do que quem a lê.
+          <div className="flex flex-col items-center justify-center py-12">
+            <p className="text-muted-foreground text-sm">
+              {t('retentionNotice')}
+            </p>
+          </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <p className="text-muted-foreground text-sm">
@@ -1405,6 +1485,11 @@ export function MessageThread({
                         onReact={(emoji) => {
                           if (emoji) void postReaction(msg.id, emoji);
                         }}
+                        onToggleFavorite={
+                          msg.id.startsWith('temp-')
+                            ? undefined
+                            : () => void handleToggleFavorite(msg)
+                        }
                       >
                         <MessageBubble
                           message={msg}

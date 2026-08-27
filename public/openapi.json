@@ -578,7 +578,7 @@
       "get": {
         "tags": ["Messages"],
         "summary": "List a conversation's messages",
-        "description": "List a conversation's messages, newest first. The conversation is verified to belong to your account before any message is returned (`404` otherwise).",
+        "description": "List a conversation's messages, newest first. The conversation is verified to belong to your account before any message is returned (`404` otherwise).\n\nMessage history can be pruned: accounts may configure a retention policy (per channel type) that periodically removes older messages. A message an agent starred (`is_favorite: true`) is never removed by that policy. An integration polling this endpoint should not assume the history only grows.",
         "operationId": "listConversationMessages",
         "security": [{ "bearerAuth": ["messages:read"] }],
         "parameters": [
@@ -1376,7 +1376,8 @@
           "status",
           "reply_to_message_id",
           "interactive_reply_id",
-          "created_at"
+          "created_at",
+          "is_favorite"
         ],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
@@ -1409,7 +1410,11 @@
             "type": ["string", "null"],
             "description": "The `id` of the interactive button/list row the contact tapped, when this message is a reply to one."
           },
-          "created_at": { "type": "string", "format": "date-time" }
+          "created_at": { "type": "string", "format": "date-time" },
+          "is_favorite": {
+            "type": "boolean",
+            "description": "Read-only. True when an agent starred this message in the inbox — the account's message retention policy never removes a favorited message."
+          }
         }
       },
       "InteractiveButton": {

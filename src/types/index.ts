@@ -358,6 +358,14 @@ export interface Message {
    * mas a campanha já foi apagada (`ON DELETE SET NULL`).
    */
   broadcast?: { name: string } | null;
+  /**
+   * A limpeza de retenção nunca leva uma mensagem favoritada (SPEC 060
+   * §3.1, migração 068). Favorita é DA CONTA, não de quem marcou — o
+   * mesmo selo aparece para o colega ao lado (D-6).
+   */
+  is_favorite?: boolean;
+  favorited_at?: string | null;
+  favorited_by?: string | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';

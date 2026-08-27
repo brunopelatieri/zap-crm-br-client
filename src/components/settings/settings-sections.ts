@@ -1,4 +1,5 @@
 import {
+  Archive,
   Coins,
   FileText,
   KeyRound,
@@ -14,6 +15,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
+import type { AccountRole } from '@/lib/auth/roles';
 
 /**
  * Settings information architecture for the redesigned page.
@@ -37,18 +39,27 @@ export const SETTINGS_SECTIONS = [
   'members',
   'api',
   'webhook-log',
+  'retention',
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const DEFAULT_SECTION: SettingsSection = 'overview';
 
-/** Rail grouping. `adminOnly` items are hidden for non-admins. */
+/**
+ * Rail grouping. `minRole`, when set, hides the item from the rail
+ * (`settings-rail.tsx`) for anyone below that role — used for
+ * "Retention" (SPEC 060 §8.2: "a seção só entra na lista quando o
+ * papel é owner"). Every other section has no floor and is visible to
+ * any member; per-action gating inside the panel (`<RequireRole>`)
+ * still applies where relevant.
+ */
 export interface SectionMeta {
   id: SettingsSection;
   label: string;
   icon: LucideIcon;
   group: 'top' | 'account' | 'workspace';
+  minRole?: AccountRole;
 }
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
@@ -124,6 +135,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     label: 'Webhook log',
     icon: ScrollText,
     group: 'workspace',
+  },
+  retention: {
+    id: 'retention',
+    label: 'Retention',
+    icon: Archive,
+    group: 'account',
+    minRole: 'owner',
   },
 };
 
