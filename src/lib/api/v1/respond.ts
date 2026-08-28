@@ -24,6 +24,7 @@ export type ApiErrorCode =
   | 'bad_request' // malformed input
   | 'not_found'
   | 'quota_exceeded' // SPEC 059 — account plan quota reached (e.g. contacts)
+  | 'account_blocked' // SPEC 062 — the key's account was blocked by the operator
   | 'internal';
 
 /**
@@ -59,6 +60,22 @@ export function unauthorized(message = 'Missing or invalid API key'): ApiError {
 /** 403 — authenticated, but the key lacks the scope this route needs. */
 export function forbidden(message: string): ApiError {
   return new ApiError('forbidden', message, 403);
+}
+
+/**
+ * 403 — the key is valid and scoped, but the operator blocked its
+ * account (SPEC 062 §4.3 ponto 6).
+ *
+ * A distinct code from `forbidden` on purpose: an integration that
+ * receives `forbidden` will (correctly) go look at its scopes, and find
+ * nothing wrong with them. `account_blocked` says the key is fine and
+ * the account is not — a key that stops working WITHOUT having been
+ * revoked. Documented in `docs/public-api.md`.
+ */
+export function accountBlocked(
+  message = 'This account is blocked. Contact the operator.'
+): ApiError {
+  return new ApiError('account_blocked', message, 403);
 }
 
 /** 400 — bad input. */

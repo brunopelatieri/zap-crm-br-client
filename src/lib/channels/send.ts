@@ -41,6 +41,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { resolveInstanceByChannelId } from '@/lib/evolution/instances';
+import { assertAccountNotBlocked } from '@/lib/platform/blocked';
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive';
 import {
   sanitizePhoneForMeta,
@@ -171,6 +172,22 @@ export async function resolveChannelContext(
    */
   channelId?: string
 ): Promise<ResolvedChannel> {
+  // SPEC 062 §4.3 ponto 4 — o backstop de envio.
+  //
+  // Aqui passam automação, flow, envio manual do inbox, reação e
+  // transferência: todo caminho de SAÍDA que resolve credencial de
+  // canal. É o último ponto antes de a mensagem existir, e por isso
+  // vale mesmo quando um dos pontos 1–3 falhou em pular a conta (a
+  // lista de bloqueados daquelas varreduras pode degradar para vazia
+  // num erro de consulta — ver `loadBlockedAccountIds`).
+  //
+  // ⚠️ NÃO cobre disparo em massa: `deliverBroadcast` monta o
+  // `ChannelContext` direto por `cloudChannelContext()` e nunca chega
+  // aqui. O funil equivalente daquele caminho é
+  // `assertAccountCanBroadcast` (broadcast-core.ts), que tem a mesma
+  // checagem.
+  await assertAccountNotBlocked(db, accountId);
+
   if (channelType === 'whatsapp_qr') {
     if (!channelId) {
       throw new ChannelNotConfiguredError(

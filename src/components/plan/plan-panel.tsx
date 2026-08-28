@@ -1,9 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
+import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAccountPlanContext } from '@/hooks/use-account-plan-context';
 import { useAuth } from '@/hooks/use-auth';
@@ -28,6 +31,7 @@ export function PlanPanel() {
   const locale = useLocale();
   const { accountRole } = useAuth();
   const { data, loading, error, refetch } = useAccountPlanContext();
+  const [cancelBusy, setCancelBusy] = useState(false);
   const canRequest = accountRole !== null && canEditSettings(accountRole);
 
   if (loading) {
@@ -46,6 +50,37 @@ export function PlanPanel() {
   const requestedPlan = data.pendingRequest
     ? data.catalog.find((p) => p.id === data.pendingRequest?.requestedPlanId)
     : null;
+
+  const currentUsage = Object.fromEntries(
+    data.usage.buckets.map((b) => [b.key, b.used])
+  );
+
+  async function handleCancelToggle(schedule: boolean) {
+    setCancelBusy(true);
+    try {
+      const res = await fetch('/api/account/plan/cancel', {
+        method: schedule ? 'POST' : 'DELETE',
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(
+          payload.code === 'no_period_end'
+            ? t('cancel.errorNoPeriodEnd')
+            : payload.error || t('cancel.errorGeneric')
+        );
+        return;
+      }
+      toast.success(
+        schedule ? t('cancel.scheduleSuccess') : t('cancel.resumeSuccess')
+      );
+      refetch();
+    } catch (err) {
+      console.error('[PlanPanel] cancel toggle failed:', err);
+      toast.error(t('cancel.errorGeneric'));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -83,6 +118,81 @@ export function PlanPanel() {
             </p>
           ) : null}
 
+          {/* Bloco de assinatura (SPEC 062 §7.6): ciclo, adesão,
+              vencimento e o estado de cancelamento agendado — só
+              aparece quando o plano realmente vence (um plano
+              `billing_period: 'none'`/`'custom'` não tem nada disto
+              para mostrar). */}
+          {data.accountPlan.currentPeriodEnd ? (
+            <div className="border-border grid gap-1.5 border-t pt-4 text-sm">
+              <div className="text-muted-foreground flex justify-between gap-2">
+                <span>{t('cycleLabel')}</span>
+                <span className="text-foreground">
+                  {t(`billingPeriod.${data.accountPlan.billingCycle}`)}
+                </span>
+              </div>
+              <div className="text-muted-foreground flex justify-between gap-2">
+                <span>{t('startedAtLabel')}</span>
+                <span className="text-foreground">
+                  {new Date(data.accountPlan.startedAt).toLocaleDateString(
+                    locale,
+                    { dateStyle: 'medium' }
+                  )}
+                </span>
+              </div>
+              <div className="text-muted-foreground flex justify-between gap-2">
+                <span>{t('renewsAtLabel')}</span>
+                <span className="text-foreground">
+                  {new Date(
+                    data.accountPlan.currentPeriodEnd
+                  ).toLocaleDateString(locale, { dateStyle: 'medium' })}
+                </span>
+              </div>
+
+              {data.accountPlan.cancelAtPeriodEnd ? (
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-amber-600 dark:text-amber-400">
+                    {t('cancel.scheduledFor', {
+                      date: new Date(
+                        data.accountPlan.currentPeriodEnd
+                      ).toLocaleDateString(locale, { dateStyle: 'medium' }),
+                    })}
+                  </p>
+                  {canRequest ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={cancelBusy}
+                      onClick={() => handleCancelToggle(false)}
+                    >
+                      {cancelBusy ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : null}
+                      {t('cancel.resumeButton')}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : canRequest ? (
+                <div className="mt-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    disabled={cancelBusy}
+                    onClick={() => handleCancelToggle(true)}
+                  >
+                    {cancelBusy ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : null}
+                    {t('cancel.cancelButton')}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <PlanUsageBars buckets={data.usage.buckets} />
         </CardContent>
       </Card>
@@ -106,6 +216,9 @@ export function PlanPanel() {
             currentPlanId={data.plan.id}
             canRequest={canRequest}
             hasPendingRequest={data.pendingRequest !== null}
+            selfServiceEnabled={data.selfServiceEnabled}
+            defaultYearlyDiscountPercent={data.defaultYearlyDiscountPercent}
+            currentUsage={currentUsage}
             onRequested={refetch}
           />
         </div>

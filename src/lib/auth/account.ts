@@ -29,7 +29,17 @@ import { NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createClient } from '@/lib/supabase/server';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { AccountBlockedError } from '@/lib/platform/blocked';
+import { emitSystemEvent } from '@/lib/notifications/emit';
 import { hasMinRole, isAccountRole, type AccountRole } from './roles';
+
+// Reexport so dashboard call sites read exactly as SPEC 062 §4.1
+// writes it (`import { AccountBlockedError } from '@/lib/auth/account'`).
+// The class itself lives in `@/lib/platform/blocked` because engines and
+// webhooks — which run outside a request scope — must be able to throw
+// and catch it without importing `next/headers` through this module.
+export { AccountBlockedError };
 
 // ------------------------------------------------------------
 // Errors
@@ -67,6 +77,16 @@ export class ForbiddenError extends Error {
  * server internals out of the wire.
  */
 export function toErrorResponse(err: unknown): NextResponse {
+  // Blocked carries a machine `code` alongside the message: the UI has
+  // to tell "blocked" apart from "insufficient role" (SPEC 062 §4.1) —
+  // they mean different things to the person on the other side, and
+  // only one of them is fixable by asking a colleague for a promotion.
+  if (err instanceof AccountBlockedError) {
+    return NextResponse.json(
+      { error: err.message, code: err.code },
+      { status: err.status }
+    );
+  }
   if (err instanceof UnauthorizedError || err instanceof ForbiddenError) {
     return NextResponse.json({ error: err.message }, { status: err.status });
   }
@@ -116,13 +136,21 @@ export async function getCurrentAccount(): Promise<AccountContext> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('account_id, account_role')
+    .select('account_id, account_role, blocked_at')
     .eq('user_id', user.id)
     .maybeSingle();
 
   if (error) {
     console.error('[getCurrentAccount] profile fetch error:', error);
     throw new ForbiddenError('Could not load account context');
+  }
+
+  // SPEC 062 §4.1, camada 2. The profile row stays readable while
+  // blocked (`profiles_select` matches on `auth.uid() = user_id`, which
+  // never goes through `is_account_member`), so this check runs before
+  // anything else and gives the precise reason.
+  if (data?.blocked_at) {
+    throw new AccountBlockedError('user_blocked', 'This user is blocked');
   }
   if (!data || !data.account_id || !data.account_role) {
     // Pre-migration profile, or a manual insert that skipped the
@@ -158,10 +186,59 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     throw new ForbiddenError('Could not load account context');
   }
   if (!account) {
-    // account_id points at no readable account row — orphaned profile
-    // or an RLS gap. Same "can't scope this user" outcome as above.
+    // Two very different situations look identical from here, because
+    // after migration 069 `accounts_select` runs through
+    // `is_account_member()` and a BLOCKED account stops returning its
+    // own row:
+    //
+    //   (a) the account is blocked — the person needs `/blocked` and an
+    //       email address to write to;
+    //   (b) the profile really is orphaned / an RLS gap — "shouldn't
+    //       happen post-017".
+    //
+    // Guessing sends half the cases to the wrong support conversation,
+    // which is exactly what the `/blocked` page (§4.2) exists to
+    // prevent. One service-role point lookup settles it, and it only
+    // ever runs on this already-degraded path — never on the happy one.
+    // Se o service-role não estiver disponível (variável ausente num
+    // ambiente que não a configura), não dá para desempatar — e não
+    // saber é motivo para manter o erro que já existia, nunca para
+    // inventar um bloqueio que talvez não exista.
+    try {
+      const { data: blockedRow } = await supabaseAdmin()
+        .from('accounts')
+        .select('blocked_at')
+        .eq('id', data.account_id)
+        .maybeSingle();
+
+      if (blockedRow?.blocked_at) {
+        throw new AccountBlockedError('account_blocked');
+      }
+    } catch (err) {
+      if (err instanceof AccountBlockedError) throw err;
+      console.error('[getCurrentAccount] blocked-account probe failed:', err);
+    }
     throw new ForbiddenError('Profile is not linked to an account');
   }
+
+  // SPEC 063 §3.3 — emitido pelo primeiro `getCurrentAccount()`
+  // bem-sucedido da conta, sem tocar em `handle_new_user` (trigger não
+  // faz HTTP). Chamado em TODA resolução bem-sucedida, mas nunca
+  // `await`-ado: o `dedupe_key` (`account.created:<accountId>`) garante
+  // uma única emissão para sempre via `UNIQUE INDEX`, então o custo aqui
+  // é um `INSERT` que falha rápido por violação de unicidade em todas as
+  // chamadas depois da primeira — barato, e nunca no caminho crítico
+  // desta função (ver §1: o aviso nunca pode atrasar nem derrubar a ação
+  // que o originou).
+  void emitSystemEvent({
+    type: 'account.created',
+    accountId: account.id,
+    account: {
+      id: account.id,
+      name: account.name,
+      ownerEmail: user.email ?? null,
+    },
+  });
 
   return {
     supabase,

@@ -26,9 +26,16 @@
       }
     }
   ],
-  "security": [{ "bearerAuth": [] }],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
   "tags": [
-    { "name": "Meta", "description": "Identity / key introspection." },
+    {
+      "name": "Meta",
+      "description": "Identity / key introspection."
+    },
     {
       "name": "Messages",
       "description": "Send WhatsApp messages and read a conversation's message history."
@@ -37,7 +44,10 @@
       "name": "Contacts",
       "description": "List, create, read, and update contacts."
     },
-    { "name": "Conversations", "description": "List and read conversations." },
+    {
+      "name": "Conversations",
+      "description": "List and read conversations."
+    },
     {
       "name": "Broadcasts",
       "description": "Launch and track template broadcast campaigns."
@@ -58,7 +68,11 @@
         "summary": "Verify a key and discover its scopes",
         "description": "Returns the account a key is bound to and the scopes it carries. Requires only a valid key — no scope. Use it to verify a key works before wiring up real calls; it also exercises the entire public-API auth stack end to end (bearer parse → hash lookup → liveness → rate limit → envelope).",
         "operationId": "getMe",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "The account and scopes this key is bound to.",
@@ -76,15 +90,23 @@
                           "type": "object",
                           "required": ["id", "name"],
                           "properties": {
-                            "id": { "type": "string", "format": "uuid" },
-                            "name": { "type": "string" }
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
                           }
                         },
                         "key": {
                           "type": "object",
                           "required": ["id", "scopes"],
                           "properties": {
-                            "id": { "type": "string", "format": "uuid" },
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
                             "scopes": {
                               "type": "array",
                               "items": {
@@ -97,8 +119,12 @@
                           "type": ["object", "null"],
                           "description": "The account's plan (SPEC 059). `null` if the plan engine failed to resolve it — this endpoint never fails just because of that.",
                           "properties": {
-                            "code": { "type": "string" },
-                            "name": { "type": "string" },
+                            "code": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
                             "status": {
                               "type": "string",
                               "enum": [
@@ -108,6 +134,24 @@
                                 "suspended",
                                 "canceled"
                               ]
+                            },
+                            "billingCycle": {
+                              "type": "string",
+                              "enum": ["monthly", "yearly"],
+                              "description": "SPEC 062."
+                            },
+                            "startedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "currentPeriodEnd": {
+                              "type": ["string", "null"],
+                              "format": "date-time",
+                              "description": "null when the plan does not expire (a free or custom plan)."
+                            },
+                            "cancelAtPeriodEnd": {
+                              "type": "boolean",
+                              "description": "true when a cancellation is scheduled to take effect at currentPeriodEnd."
                             }
                           }
                         },
@@ -117,8 +161,12 @@
                           "items": {
                             "type": "object",
                             "properties": {
-                              "key": { "type": "string" },
-                              "used": { "type": "integer" },
+                              "key": {
+                                "type": "string"
+                              },
+                              "used": {
+                                "type": "integer"
+                              },
                               "limit": {
                                 "type": ["integer", "null"],
                                 "description": "null = unlimited for this account's plan"
@@ -143,19 +191,35 @@
                     "plan": {
                       "code": "professional",
                       "name": "Profissional",
-                      "status": "active"
+                      "status": "active",
+                      "billingCycle": "monthly",
+                      "startedAt": "2026-08-01T00:00:00Z",
+                      "currentPeriodEnd": "2026-09-01T00:00:00Z",
+                      "cancelAtPeriodEnd": false
                     },
                     "usage": [
-                      { "key": "contacts", "used": 1847, "limit": 10000 },
-                      { "key": "channels_whatsapp_qr", "used": 1, "limit": 2 }
+                      {
+                        "key": "contacts",
+                        "used": 1847,
+                        "limit": 10000
+                      },
+                      {
+                        "key": "channels_whatsapp_qr",
+                        "used": 1,
+                        "limit": 2
+                      }
                     ]
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -165,12 +229,18 @@
         "summary": "Send a WhatsApp message",
         "description": "Send a WhatsApp message to a phone number. You pass an **E.164 number**, not an internal conversation id — the endpoint finds-or-creates the contact + conversation, then sends.\n\n**`cold_send_limit` (429).** On a WhatsApp QRCode (Evolution) channel with no active 24h Meta session window, outbound-to-a-cold-contact is throttled by a per-instance daily/hourly cap and a minimum interval between cold sends (SPEC 049 §6.2). This path **always blocks** when the limit is hit — stricter than the dashboard inbox, which only warns a human agent. Retry after the `Retry-After` header.",
         "operationId": "sendMessage",
-        "security": [{ "bearerAuth": ["messages:send"] }],
+        "security": [
+          {
+            "bearerAuth": ["messages:send"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/SendMessageRequest" },
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              },
               "examples": {
                 "text": {
                   "summary": "Plain text",
@@ -211,8 +281,14 @@
                       "kind": "buttons",
                       "body": "How can we help?",
                       "buttons": [
-                        { "id": "track_order", "title": "Track order" },
-                        { "id": "talk_to_human", "title": "Talk to a human" }
+                        {
+                          "id": "track_order",
+                          "title": "Track order"
+                        },
+                        {
+                          "id": "talk_to_human",
+                          "title": "Talk to a human"
+                        }
                       ]
                     }
                   }
@@ -254,7 +330,9 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/SendMessageResult" }
+                    "data": {
+                      "$ref": "#/components/schemas/SendMessageResult"
+                    }
                   }
                 },
                 "example": {
@@ -269,17 +347,27 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "429": {
             "description": "Per-key rate limit exceeded (`rate_limited`), or the WhatsApp QRCode cold-send limit was hit (`cold_send_limit`). Both carry `Retry-After`.",
             "headers": {
-              "Retry-After": { "$ref": "#/components/headers/RetryAfter" }
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
             },
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
                 "examples": {
                   "rateLimited": {
                     "value": {
@@ -301,12 +389,16 @@
               }
             }
           },
-          "500": { "$ref": "#/components/responses/InternalError" },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
           "502": {
             "description": "The request reached Meta and Meta rejected the send (`meta_error`).",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
                 "example": {
                   "error": {
                     "code": "meta_error",
@@ -325,21 +417,34 @@
         "summary": "List contacts",
         "description": "List contacts, newest first.",
         "operationId": "listContacts",
-        "security": [{ "bearerAuth": ["contacts:read"] }],
+        "security": [
+          {
+            "bearerAuth": ["contacts:read"]
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/Limit" },
-          { "$ref": "#/components/parameters/Cursor" },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
           {
             "name": "search",
             "in": "query",
             "description": "Free-text filter, matched against contact name or phone.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "tag",
             "in": "query",
             "description": "Restrict to contacts carrying this tag id.",
-            "schema": { "type": "string", "format": "uuid" }
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -353,17 +458,27 @@
                   "properties": {
                     "data": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/Contact" }
+                      "items": {
+                        "$ref": "#/components/schemas/Contact"
+                      }
                     },
-                    "meta": { "$ref": "#/components/schemas/PaginationMeta" }
+                    "meta": {
+                      "$ref": "#/components/schemas/PaginationMeta"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       },
       "post": {
@@ -371,12 +486,18 @@
         "summary": "Create a contact (find-or-create by phone)",
         "description": "Create a contact. An existing match by phone returns `200` with the existing contact (no duplicate is created); a genuinely new contact returns `201`.",
         "operationId": "createContact",
-        "security": [{ "bearerAuth": ["contacts:write"] }],
+        "security": [
+          {
+            "bearerAuth": ["contacts:write"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/ContactCreateRequest" },
+              "schema": {
+                "$ref": "#/components/schemas/ContactCreateRequest"
+              },
               "example": {
                 "phone": "+14155550123",
                 "name": "Jane Doe",
@@ -394,7 +515,9 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/Contact" }
+                    "data": {
+                      "$ref": "#/components/schemas/Contact"
+                    }
                   }
                 }
               }
@@ -408,26 +531,44 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/Contact" }
+                    "data": {
+                      "$ref": "#/components/schemas/Contact"
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/ForbiddenOrQuota" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenOrQuota"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
     "/contacts/{id}": {
-      "parameters": [{ "$ref": "#/components/parameters/ContactId" }],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ContactId"
+        }
+      ],
       "get": {
         "tags": ["Contacts"],
         "summary": "Read a contact",
         "operationId": "getContact",
-        "security": [{ "bearerAuth": ["contacts:read"] }],
+        "security": [
+          {
+            "bearerAuth": ["contacts:read"]
+          }
+        ],
         "responses": {
           "200": {
             "description": "The contact.",
@@ -437,16 +578,26 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/Contact" }
+                    "data": {
+                      "$ref": "#/components/schemas/Contact"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       },
       "patch": {
@@ -454,12 +605,18 @@
         "summary": "Update a contact",
         "description": "Updates only the fields present in the request body — omitted fields are left untouched. Pass `tags` (an array of tag names, created if missing) to **replace** the contact's full tag set.",
         "operationId": "updateContact",
-        "security": [{ "bearerAuth": ["contacts:write"] }],
+        "security": [
+          {
+            "bearerAuth": ["contacts:write"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/ContactUpdateRequest" },
+              "schema": {
+                "$ref": "#/components/schemas/ContactUpdateRequest"
+              },
               "example": {
                 "company": "Acme Inc",
                 "tags": ["vip", "newsletter"]
@@ -476,17 +633,29 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/Contact" }
+                    "data": {
+                      "$ref": "#/components/schemas/Contact"
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -496,10 +665,18 @@
         "summary": "List conversations",
         "description": "List conversations, newest first. **An API key sees the whole account** — assigned and unassigned conversations alike, regardless of which agent they're assigned to.",
         "operationId": "listConversations",
-        "security": [{ "bearerAuth": ["conversations:read"] }],
+        "security": [
+          {
+            "bearerAuth": ["conversations:read"]
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/Limit" },
-          { "$ref": "#/components/parameters/Cursor" },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
           {
             "name": "status",
             "in": "query",
@@ -511,13 +688,19 @@
           {
             "name": "contact_id",
             "in": "query",
-            "schema": { "type": "string", "format": "uuid" }
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           },
           {
             "name": "channel_id",
             "in": "query",
             "description": "Restrict to conversations on this channel (SPEC 049 §5.4) — e.g. one specific WhatsApp QRCode instance.",
-            "schema": { "type": "string", "format": "uuid" }
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -531,17 +714,27 @@
                   "properties": {
                     "data": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/Conversation" }
+                      "items": {
+                        "$ref": "#/components/schemas/Conversation"
+                      }
                     },
-                    "meta": { "$ref": "#/components/schemas/PaginationMeta" }
+                    "meta": {
+                      "$ref": "#/components/schemas/PaginationMeta"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -550,8 +743,16 @@
         "tags": ["Conversations"],
         "summary": "Read a conversation",
         "operationId": "getConversation",
-        "security": [{ "bearerAuth": ["conversations:read"] }],
-        "parameters": [{ "$ref": "#/components/parameters/ConversationId" }],
+        "security": [
+          {
+            "bearerAuth": ["conversations:read"]
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConversationId"
+          }
+        ],
         "responses": {
           "200": {
             "description": "The conversation.",
@@ -561,16 +762,26 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/Conversation" }
+                    "data": {
+                      "$ref": "#/components/schemas/Conversation"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -580,11 +791,21 @@
         "summary": "List a conversation's messages",
         "description": "List a conversation's messages, newest first. The conversation is verified to belong to your account before any message is returned (`404` otherwise).\n\nMessage history can be pruned: accounts may configure a retention policy (per channel type) that periodically removes older messages. A message an agent starred (`is_favorite: true`) is never removed by that policy. An integration polling this endpoint should not assume the history only grows.",
         "operationId": "listConversationMessages",
-        "security": [{ "bearerAuth": ["messages:read"] }],
+        "security": [
+          {
+            "bearerAuth": ["messages:read"]
+          }
+        ],
         "parameters": [
-          { "$ref": "#/components/parameters/ConversationId" },
-          { "$ref": "#/components/parameters/Limit" },
-          { "$ref": "#/components/parameters/Cursor" }
+          {
+            "$ref": "#/components/parameters/ConversationId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
         ],
         "responses": {
           "200": {
@@ -597,18 +818,30 @@
                   "properties": {
                     "data": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/Message" }
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
                     },
-                    "meta": { "$ref": "#/components/schemas/PaginationMeta" }
+                    "meta": {
+                      "$ref": "#/components/schemas/PaginationMeta"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -618,7 +851,11 @@
         "summary": "Launch a template broadcast",
         "description": "Launch a template broadcast to a list of recipients. The broadcast + its recipient rows are persisted immediately and the sends fan out in the background with a soft 60-second budget, so the call returns fast — poll `GET /broadcasts/{id}` for progress. Recipients are capped at **1000 per request**; invalid phone numbers are dropped and counted as `rejected` rather than failing the whole call.\n\nA request near the 1000-recipient cap can exceed the fan-out's 60-second budget — there is no durable retry queue yet, so recipients still `pending` when the budget runs out stay `pending` rather than resuming automatically. Prefer splitting large sends into a few smaller requests.",
         "operationId": "createBroadcast",
-        "security": [{ "bearerAuth": ["broadcasts:send"] }],
+        "security": [
+          {
+            "bearerAuth": ["broadcasts:send"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -631,8 +868,13 @@
                 "template_name": "promo_july",
                 "template_language": "en_US",
                 "recipients": [
-                  { "to": "+14155550123", "params": ["Jane"] },
-                  { "to": "+14155550124" }
+                  {
+                    "to": "+14155550123",
+                    "params": ["Jane"]
+                  },
+                  {
+                    "to": "+14155550124"
+                  }
                 ]
               }
             }
@@ -664,10 +906,18 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -677,8 +927,16 @@
         "summary": "Get broadcast status + counts",
         "description": "`status` moves `sending` → `sent`; `delivered_count` / `read_count` keep climbing as Meta delivery webhooks arrive after the initial send completes.",
         "operationId": "getBroadcast",
-        "security": [{ "bearerAuth": ["broadcasts:send"] }],
-        "parameters": [{ "$ref": "#/components/parameters/BroadcastId" }],
+        "security": [
+          {
+            "bearerAuth": ["broadcasts:send"]
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BroadcastId"
+          }
+        ],
         "responses": {
           "200": {
             "description": "The broadcast's current status and counters.",
@@ -688,16 +946,26 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/Broadcast" }
+                    "data": {
+                      "$ref": "#/components/schemas/Broadcast"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
@@ -707,7 +975,11 @@
         "summary": "Create a contact from an inbound webhook (and optionally send a template)",
         "description": "The inverse of `/webhooks`: a third party (n8n, a landing page, an e-commerce platform) POSTs here to create or match a contact, write tags/notes/custom fields, and — when `template_id` is approved — send a template. Every accepted request also feeds a funnel: a `broadcasts` row scoped by `webhook_id`, reused across every request that carries the same id (SPEC 055).\n\n**Phone validation here is stricter than `POST /contacts`:** Brazilian DDD and mobile/landline shape are enforced — this endpoint is new, so tightening the rule breaks no existing integration.\n\n**Failure asymmetry.** Before the contact is created, a failure is `400` — nothing was written. After the contact exists, a failure is always `202`, with the problem reported in `warnings[]` — never a 4xx/5xx, so a caller retry can never duplicate the contact (notes, in particular, are never deduplicated). A request rejected for a missing/invalid key (`401`/`403`/`429`) logs nothing — there's no account to attach a log row to.",
         "operationId": "ingestContact",
-        "security": [{ "bearerAuth": ["ingest:write"] }],
+        "security": [
+          {
+            "bearerAuth": ["ingest:write"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -728,7 +1000,10 @@
                   "nota_2": "Pediu contato à tarde"
                 },
                 "custom_fields": [
-                  { "field": "origem", "value": "landing_page_bf" }
+                  {
+                    "field": "origem",
+                    "value": "landing_page_bf"
+                  }
                 ],
                 "template_id": "3f2b8c10-2a44-4a7e-9c1e-77c3b2a1d5e0",
                 "template_params": ["Maria"]
@@ -758,9 +1033,17 @@
                       "broadcast_id": "9c1e1e2a-0000-4000-8000-000000000041",
                       "webhook_id": "1234567890123456"
                     },
-                    "tags": { "linked": 1, "created": 1 },
-                    "notes": { "inserted": 2 },
-                    "custom_fields": { "matched": 1, "skipped": [] },
+                    "tags": {
+                      "linked": 1,
+                      "created": 1
+                    },
+                    "notes": {
+                      "inserted": 2
+                    },
+                    "custom_fields": {
+                      "matched": 1,
+                      "skipped": []
+                    },
                     "send": {
                       "attempted": true,
                       "template_id": "3f2b8c10-2a44-4a7e-9c1e-77c3b2a1d5e0"
@@ -775,7 +1058,9 @@
             "description": "Rejected before the contact was created (`invalid_webhook_id`, `invalid_webhook_name`, `invalid_phone`, or `bad_request`) — nothing was written.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
                 "examples": {
                   "invalidWebhookId": {
                     "value": {
@@ -805,10 +1090,18 @@
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/ForbiddenOrQuota" },
-          "429": { "$ref": "#/components/responses/RateLimited" },
-          "500": { "$ref": "#/components/responses/InternalError" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ForbiddenOrQuota"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
         }
       }
     },
@@ -818,7 +1111,11 @@
         "summary": "List webhook endpoints",
         "description": "List your account's registered webhook endpoints. Never returns the signing secret.",
         "operationId": "listWebhooks",
-        "security": [{ "bearerAuth": ["webhooks:manage"] }],
+        "security": [
+          {
+            "bearerAuth": ["webhooks:manage"]
+          }
+        ],
         "responses": {
           "200": {
             "description": "The account's webhook endpoints.",
@@ -834,15 +1131,23 @@
                         "$ref": "#/components/schemas/WebhookEndpoint"
                       }
                     },
-                    "meta": { "$ref": "#/components/schemas/PaginationMeta" }
+                    "meta": {
+                      "$ref": "#/components/schemas/PaginationMeta"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       },
       "post": {
@@ -850,12 +1155,18 @@
         "summary": "Register a webhook endpoint",
         "description": "Register an HTTPS endpoint to receive event deliveries. **The response includes `secret` exactly once** — store it to verify the `X-Wacrm-Signature` header on deliveries; the CRM keeps only an encrypted copy and can never show it again.\n\nThe target `url` must resolve to a public address: `localhost`, private/RFC1918 ranges, link-local addresses (including the `169.254.169.254` cloud-metadata address), and similar internal targets are refused (SSRF guard).",
         "operationId": "createWebhook",
-        "security": [{ "bearerAuth": ["webhooks:manage"] }],
+        "security": [
+          {
+            "bearerAuth": ["webhooks:manage"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/WebhookCreateRequest" },
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreateRequest"
+              },
               "example": {
                 "url": "https://example.com/hooks/wacrm",
                 "events": ["message.received"]
@@ -892,20 +1203,36 @@
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     },
     "/webhooks/{id}": {
-      "parameters": [{ "$ref": "#/components/parameters/WebhookId" }],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WebhookId"
+        }
+      ],
       "get": {
         "tags": ["Webhooks"],
         "summary": "Read a webhook endpoint",
         "operationId": "getWebhook",
-        "security": [{ "bearerAuth": ["webhooks:manage"] }],
+        "security": [
+          {
+            "bearerAuth": ["webhooks:manage"]
+          }
+        ],
         "responses": {
           "200": {
             "description": "The webhook endpoint.",
@@ -915,16 +1242,26 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/WebhookEndpoint" }
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookEndpoint"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       },
       "patch": {
@@ -932,13 +1269,21 @@
         "summary": "Update a webhook endpoint",
         "description": "Update `url`, `events`, and/or `is_active` — at least one field is required. Setting `is_active: true` on a previously auto-disabled endpoint also resets its consecutive-failure counter to 0.",
         "operationId": "updateWebhook",
-        "security": [{ "bearerAuth": ["webhooks:manage"] }],
+        "security": [
+          {
+            "bearerAuth": ["webhooks:manage"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/WebhookUpdateRequest" },
-              "example": { "is_active": true }
+              "schema": {
+                "$ref": "#/components/schemas/WebhookUpdateRequest"
+              },
+              "example": {
+                "is_active": true
+              }
             }
           }
         },
@@ -951,24 +1296,40 @@
                   "type": "object",
                   "required": ["data"],
                   "properties": {
-                    "data": { "$ref": "#/components/schemas/WebhookEndpoint" }
+                    "data": {
+                      "$ref": "#/components/schemas/WebhookEndpoint"
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       },
       "delete": {
         "tags": ["Webhooks"],
         "summary": "Remove a webhook endpoint",
         "operationId": "deleteWebhook",
-        "security": [{ "bearerAuth": ["webhooks:manage"] }],
+        "security": [
+          {
+            "bearerAuth": ["webhooks:manage"]
+          }
+        ],
         "responses": {
           "200": {
             "description": "The endpoint was removed.",
@@ -982,8 +1343,14 @@
                       "type": "object",
                       "required": ["id", "deleted"],
                       "properties": {
-                        "id": { "type": "string", "format": "uuid" },
-                        "deleted": { "type": "boolean", "enum": [true] }
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "deleted": {
+                          "type": "boolean",
+                          "enum": [true]
+                        }
                       }
                     }
                   }
@@ -997,10 +1364,18 @@
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
         }
       }
     }
@@ -1030,49 +1405,71 @@
         "name": "cursor",
         "in": "query",
         "description": "Opaque cursor from a previous page's `meta.next_cursor`. Pass back verbatim — never construct or parse it. A malformed/unrecognized cursor is treated as absent (restarts from the first page).",
-        "schema": { "type": "string" }
+        "schema": {
+          "type": "string"
+        }
       },
       "ContactId": {
         "name": "id",
         "in": "path",
         "required": true,
-        "schema": { "type": "string", "format": "uuid" }
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
       },
       "ConversationId": {
         "name": "id",
         "in": "path",
         "required": true,
-        "schema": { "type": "string", "format": "uuid" }
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
       },
       "BroadcastId": {
         "name": "id",
         "in": "path",
         "required": true,
-        "schema": { "type": "string", "format": "uuid" }
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
       },
       "WebhookId": {
         "name": "id",
         "in": "path",
         "required": true,
-        "schema": { "type": "string", "format": "uuid" }
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
       }
     },
     "headers": {
       "RetryAfter": {
         "description": "Seconds until the caller should retry.",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       },
       "RateLimitLimit": {
         "description": "The request budget for the current window.",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       },
       "RateLimitRemaining": {
         "description": "Requests still allowed in the current window.",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       },
       "RateLimitReset": {
         "description": "Unix timestamp (seconds) when the window resets.",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       }
     },
     "responses": {
@@ -1080,9 +1477,14 @@
         "description": "Malformed input (`bad_request`).",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
             "example": {
-              "error": { "code": "bad_request", "message": "'to' is required" }
+              "error": {
+                "code": "bad_request",
+                "message": "'to' is required"
+              }
             }
           }
         }
@@ -1091,7 +1493,9 @@
         "description": "Missing, malformed, unknown, revoked, or expired API key (`unauthorized`). These cases are deliberately indistinguishable on the wire.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
             "example": {
               "error": {
                 "code": "unauthorized",
@@ -1102,24 +1506,42 @@
         }
       },
       "Forbidden": {
-        "description": "The key is valid but lacks the scope this endpoint requires (`forbidden`).",
+        "description": "Either the key lacks the scope this endpoint requires (`forbidden`), or the platform operator blocked the account the key belongs to (`account_blocked`, SPEC 062). Branch on `error.code`: the first is fixable by re-scoping the key, the second is not — the account has to be unblocked on the server.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
-            "example": {
-              "error": {
-                "code": "forbidden",
-                "message": "This API key is missing the 'messages:send' scope"
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "examples": {
+              "forbidden": {
+                "summary": "Missing scope",
+                "value": {
+                  "error": {
+                    "code": "forbidden",
+                    "message": "This API key is missing the 'messages:send' scope"
+                  }
+                }
+              },
+              "account_blocked": {
+                "summary": "Account blocked by the operator",
+                "value": {
+                  "error": {
+                    "code": "account_blocked",
+                    "message": "This account is blocked. Contact the operator."
+                  }
+                }
               }
             }
           }
         }
       },
       "ForbiddenOrQuota": {
-        "description": "Either the key lacks the required scope (`forbidden`), or — on a deployment with plan quotas turned on, SPEC 059 — the account's `contacts` quota is already at its limit (`quota_exceeded`). Branch on `error.code`; nothing was created in either case.",
+        "description": "Either the key lacks the required scope (`forbidden`), or the platform operator blocked the account (`account_blocked`, SPEC 062), or — on a deployment with plan quotas turned on, SPEC 059 — the account's `contacts` quota is already at its limit (`quota_exceeded`). Branch on `error.code`; nothing was created in any of the three cases.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
             "examples": {
               "forbidden": {
                 "summary": "Missing scope",
@@ -1138,6 +1560,15 @@
                     "message": "Contact quota exceeded (2000/2000)"
                   }
                 }
+              },
+              "account_blocked": {
+                "summary": "Account blocked by the operator",
+                "value": {
+                  "error": {
+                    "code": "account_blocked",
+                    "message": "This account is blocked. Contact the operator."
+                  }
+                }
               }
             }
           }
@@ -1147,9 +1578,14 @@
         "description": "No such resource, or it belongs to another account (`not_found`). Never `403` for a cross-account id — that would confirm the id exists.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
             "example": {
-              "error": { "code": "not_found", "message": "Contact not found" }
+              "error": {
+                "code": "not_found",
+                "message": "Contact not found"
+              }
             }
           }
         }
@@ -1157,18 +1593,24 @@
       "RateLimited": {
         "description": "Per-key rate limit exceeded — 120 requests/minute (`rate_limited`).",
         "headers": {
-          "Retry-After": { "$ref": "#/components/headers/RetryAfter" },
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
           "X-RateLimit-Limit": {
             "$ref": "#/components/headers/RateLimitLimit"
           },
           "X-RateLimit-Remaining": {
             "$ref": "#/components/headers/RateLimitRemaining"
           },
-          "X-RateLimit-Reset": { "$ref": "#/components/headers/RateLimitReset" }
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimitReset"
+          }
         },
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
             "example": {
               "error": {
                 "code": "rate_limited",
@@ -1182,7 +1624,9 @@
         "description": "Server error (`internal`). The message never leaks internal detail.",
         "content": {
           "application/json": {
-            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
             "example": {
               "error": {
                 "code": "internal",
@@ -1225,7 +1669,11 @@
       "ErrorResponse": {
         "type": "object",
         "required": ["error"],
-        "properties": { "error": { "$ref": "#/components/schemas/Error" } }
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
       },
       "PaginationMeta": {
         "type": "object",
@@ -1241,9 +1689,17 @@
         "type": "object",
         "required": ["id", "name", "color"],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "name": { "type": "string" },
-          "color": { "type": "string", "example": "#3b82f6" }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "example": "#3b82f6"
+          }
         }
       },
       "Contact": {
@@ -1260,22 +1716,43 @@
           "updated_at"
         ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "phone": {
             "type": "string",
             "description": "E.164 format.",
             "example": "+14155550123"
           },
-          "name": { "type": ["string", "null"] },
-          "email": { "type": ["string", "null"], "format": "email" },
-          "company": { "type": ["string", "null"] },
-          "avatar_url": { "type": ["string", "null"], "format": "uri" },
+          "name": {
+            "type": ["string", "null"]
+          },
+          "email": {
+            "type": ["string", "null"],
+            "format": "email"
+          },
+          "company": {
+            "type": ["string", "null"]
+          },
+          "avatar_url": {
+            "type": ["string", "null"],
+            "format": "uri"
+          },
           "tags": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/Tag" }
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            }
           },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "ContactCreateRequest": {
@@ -1287,12 +1764,21 @@
             "description": "E.164 format.",
             "example": "+14155550123"
           },
-          "name": { "type": "string" },
-          "email": { "type": "string", "format": "email" },
-          "company": { "type": "string" },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "company": {
+            "type": "string"
+          },
           "tags": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Tag names. Any name that doesn't yet exist is created."
           }
         }
@@ -1301,12 +1787,20 @@
         "type": "object",
         "description": "Every field is optional; only fields present in the body are changed. A field set to `null` clears it (for `name`/`email`/`company`).",
         "properties": {
-          "name": { "type": ["string", "null"] },
-          "email": { "type": ["string", "null"] },
-          "company": { "type": ["string", "null"] },
+          "name": {
+            "type": ["string", "null"]
+          },
+          "email": {
+            "type": ["string", "null"]
+          },
+          "company": {
+            "type": ["string", "null"]
+          },
           "tags": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Tag names. Replaces the contact's full tag set (pass `[]` to clear all tags)."
           }
         }
@@ -1314,14 +1808,27 @@
       "ConversationContact": {
         "type": ["object", "null"],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "phone": { "type": "string" },
-          "name": { "type": ["string", "null"] },
-          "email": { "type": ["string", "null"] },
-          "company": { "type": ["string", "null"] },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "name": {
+            "type": ["string", "null"]
+          },
+          "email": {
+            "type": ["string", "null"]
+          },
+          "company": {
+            "type": ["string", "null"]
+          },
           "tags": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/Tag" }
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            }
           }
         }
       },
@@ -1341,24 +1848,48 @@
           "contact"
         ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "contact_id": { "type": "string", "format": "uuid" },
-          "status": { "type": "string", "enum": ["open", "pending", "closed"] },
-          "assigned_agent_id": { "type": ["string", "null"], "format": "uuid" },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "pending", "closed"]
+          },
+          "assigned_agent_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
           "channel_id": {
             "type": ["string", "null"],
             "format": "uuid",
             "description": "Which of the account's channels this conversation belongs to (SPEC 049 §5.4). `null` only for a row that predates multi-channel support."
           },
-          "last_message_text": { "type": ["string", "null"] },
+          "last_message_text": {
+            "type": ["string", "null"]
+          },
           "last_message_at": {
             "type": ["string", "null"],
             "format": "date-time"
           },
-          "unread_count": { "type": "integer" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" },
-          "contact": { "$ref": "#/components/schemas/ConversationContact" }
+          "unread_count": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "contact": {
+            "$ref": "#/components/schemas/ConversationContact"
+          }
         }
       },
       "Message": {
@@ -1380,9 +1911,18 @@
           "is_favorite"
         ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "conversation_id": { "type": "string", "format": "uuid" },
-          "direction": { "type": "string", "enum": ["inbound", "outbound"] },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["inbound", "outbound"]
+          },
           "sender_type": {
             "type": "string",
             "description": "e.g. `customer`, `agent`, `automation`, `api`."
@@ -1391,9 +1931,16 @@
             "type": "string",
             "description": "e.g. `text`, `template`, `interactive`, `image`, `video`, `document`, `audio`."
           },
-          "content_text": { "type": ["string", "null"] },
-          "media_url": { "type": ["string", "null"], "format": "uri" },
-          "template_name": { "type": ["string", "null"] },
+          "content_text": {
+            "type": ["string", "null"]
+          },
+          "media_url": {
+            "type": ["string", "null"],
+            "format": "uri"
+          },
+          "template_name": {
+            "type": ["string", "null"]
+          },
           "whatsapp_message_id": {
             "type": ["string", "null"],
             "description": "Meta's `wamid.*` id."
@@ -1410,7 +1957,10 @@
             "type": ["string", "null"],
             "description": "The `id` of the interactive button/list row the contact tapped, when this message is a reply to one."
           },
-          "created_at": { "type": "string", "format": "date-time" },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "is_favorite": {
             "type": "boolean",
             "description": "Read-only. True when an agent starred this message in the inbox — the account's message retention policy never removes a favorited message."
@@ -1425,22 +1975,39 @@
             "type": "string",
             "description": "Stable id, echoed back when the recipient taps this button."
           },
-          "title": { "type": "string", "maxLength": 20 }
+          "title": {
+            "type": "string",
+            "maxLength": 20
+          }
         }
       },
       "InteractiveButtonsPayload": {
         "type": "object",
         "required": ["kind", "body", "buttons"],
         "properties": {
-          "kind": { "type": "string", "enum": ["buttons"] },
-          "body": { "type": "string", "maxLength": 1024 },
-          "header": { "type": "string", "maxLength": 60 },
-          "footer": { "type": "string", "maxLength": 60 },
+          "kind": {
+            "type": "string",
+            "enum": ["buttons"]
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "header": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "footer": {
+            "type": "string",
+            "maxLength": 60
+          },
           "buttons": {
             "type": "array",
             "minItems": 1,
             "maxItems": 3,
-            "items": { "$ref": "#/components/schemas/InteractiveButton" },
+            "items": {
+              "$ref": "#/components/schemas/InteractiveButton"
+            },
             "description": "1 to 3 buttons. Ids must be unique within the message."
           }
         }
@@ -1453,18 +2020,28 @@
             "type": "string",
             "description": "Stable id, echoed back when the recipient selects this row."
           },
-          "title": { "type": "string", "maxLength": 24 },
-          "description": { "type": "string", "maxLength": 72 }
+          "title": {
+            "type": "string",
+            "maxLength": 24
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 72
+          }
         }
       },
       "InteractiveListSection": {
         "type": "object",
         "required": ["rows"],
         "properties": {
-          "title": { "type": "string" },
+          "title": {
+            "type": "string"
+          },
           "rows": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/InteractiveListRow" }
+            "items": {
+              "$ref": "#/components/schemas/InteractiveListRow"
+            }
           }
         }
       },
@@ -1472,10 +2049,22 @@
         "type": "object",
         "required": ["kind", "body", "button_label", "sections"],
         "properties": {
-          "kind": { "type": "string", "enum": ["list"] },
-          "body": { "type": "string", "maxLength": 1024 },
-          "header": { "type": "string", "maxLength": 60 },
-          "footer": { "type": "string", "maxLength": 60 },
+          "kind": {
+            "type": "string",
+            "enum": ["list"]
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "header": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "footer": {
+            "type": "string",
+            "maxLength": 60
+          },
           "button_label": {
             "type": "string",
             "maxLength": 20,
@@ -1485,15 +2074,21 @@
             "type": "array",
             "minItems": 1,
             "maxItems": 10,
-            "items": { "$ref": "#/components/schemas/InteractiveListSection" },
+            "items": {
+              "$ref": "#/components/schemas/InteractiveListSection"
+            },
             "description": "Up to 10 sections; 1 to 10 rows TOTAL across all sections. Row ids must be unique across the whole message."
           }
         }
       },
       "InteractiveMessagePayload": {
         "oneOf": [
-          { "$ref": "#/components/schemas/InteractiveButtonsPayload" },
-          { "$ref": "#/components/schemas/InteractiveListPayload" }
+          {
+            "$ref": "#/components/schemas/InteractiveButtonsPayload"
+          },
+          {
+            "$ref": "#/components/schemas/InteractiveListPayload"
+          }
         ],
         "discriminator": {
           "propertyName": "kind",
@@ -1519,8 +2114,15 @@
           "params": {
             "description": "Positional body variables as an array, or a structured `{ header, body, buttons }` object.",
             "oneOf": [
-              { "type": "array", "items": { "type": "string" } },
-              { "type": "object" }
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "object"
+              }
             ]
           }
         }
@@ -1552,33 +2154,50 @@
       },
       "TextMessageRequest": {
         "allOf": [
-          { "$ref": "#/components/schemas/SendMessageCommon" },
+          {
+            "$ref": "#/components/schemas/SendMessageCommon"
+          },
           {
             "type": "object",
             "required": ["text"],
             "properties": {
-              "type": { "type": "string", "enum": ["text"], "default": "text" },
-              "text": { "type": "string" }
+              "type": {
+                "type": "string",
+                "enum": ["text"],
+                "default": "text"
+              },
+              "text": {
+                "type": "string"
+              }
             }
           }
         ]
       },
       "TemplateMessageRequest": {
         "allOf": [
-          { "$ref": "#/components/schemas/SendMessageCommon" },
+          {
+            "$ref": "#/components/schemas/SendMessageCommon"
+          },
           {
             "type": "object",
             "required": ["type", "template"],
             "properties": {
-              "type": { "type": "string", "enum": ["template"] },
-              "template": { "$ref": "#/components/schemas/TemplateSendParams" }
+              "type": {
+                "type": "string",
+                "enum": ["template"]
+              },
+              "template": {
+                "$ref": "#/components/schemas/TemplateSendParams"
+              }
             }
           }
         ]
       },
       "MediaMessageRequest": {
         "allOf": [
-          { "$ref": "#/components/schemas/SendMessageCommon" },
+          {
+            "$ref": "#/components/schemas/SendMessageCommon"
+          },
           {
             "type": "object",
             "required": ["type", "media_url"],
@@ -1587,7 +2206,10 @@
                 "type": "string",
                 "enum": ["image", "video", "document", "audio"]
               },
-              "media_url": { "type": "string", "format": "uri" },
+              "media_url": {
+                "type": "string",
+                "format": "uri"
+              },
               "filename": {
                 "type": "string",
                 "description": "Document filename."
@@ -1602,12 +2224,17 @@
       },
       "InteractiveMessageRequest": {
         "allOf": [
-          { "$ref": "#/components/schemas/SendMessageCommon" },
+          {
+            "$ref": "#/components/schemas/SendMessageCommon"
+          },
           {
             "type": "object",
             "required": ["type", "interactive_payload"],
             "properties": {
-              "type": { "type": "string", "enum": ["interactive"] },
+              "type": {
+                "type": "string",
+                "enum": ["interactive"]
+              },
               "interactive_payload": {
                 "$ref": "#/components/schemas/InteractiveMessagePayload"
               }
@@ -1617,10 +2244,18 @@
       },
       "SendMessageRequest": {
         "oneOf": [
-          { "$ref": "#/components/schemas/TextMessageRequest" },
-          { "$ref": "#/components/schemas/TemplateMessageRequest" },
-          { "$ref": "#/components/schemas/MediaMessageRequest" },
-          { "$ref": "#/components/schemas/InteractiveMessageRequest" }
+          {
+            "$ref": "#/components/schemas/TextMessageRequest"
+          },
+          {
+            "$ref": "#/components/schemas/TemplateMessageRequest"
+          },
+          {
+            "$ref": "#/components/schemas/MediaMessageRequest"
+          },
+          {
+            "$ref": "#/components/schemas/InteractiveMessageRequest"
+          }
         ]
       },
       "SendMessageResult": {
@@ -1633,13 +2268,22 @@
           "contact_created"
         ],
         "properties": {
-          "message_id": { "type": "string", "format": "uuid" },
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "whatsapp_message_id": {
             "type": ["string", "null"],
             "description": "Meta's `wamid.*` id."
           },
-          "conversation_id": { "type": "string", "format": "uuid" },
-          "contact_id": { "type": "string", "format": "uuid" },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "contact_created": {
             "type": "boolean",
             "description": "True if `to` didn't match an existing contact."
@@ -1657,7 +2301,9 @@
           },
           "params": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Positional template body variables for this recipient."
           }
         }
@@ -1666,17 +2312,25 @@
         "type": "object",
         "required": ["template_name", "recipients"],
         "properties": {
-          "name": { "type": "string", "description": "Optional label." },
+          "name": {
+            "type": "string",
+            "description": "Optional label."
+          },
           "template_name": {
             "type": "string",
             "description": "An approved Meta template name."
           },
-          "template_language": { "type": "string", "default": "en_US" },
+          "template_language": {
+            "type": "string",
+            "default": "en_US"
+          },
           "recipients": {
             "type": "array",
             "minItems": 1,
             "maxItems": 1000,
-            "items": { "$ref": "#/components/schemas/BroadcastRecipient" }
+            "items": {
+              "$ref": "#/components/schemas/BroadcastRecipient"
+            }
           }
         }
       },
@@ -1690,10 +2344,20 @@
           "rejected"
         ],
         "properties": {
-          "broadcast_id": { "type": "string", "format": "uuid" },
-          "status": { "type": "string", "enum": ["sending"] },
-          "total_recipients": { "type": "integer" },
-          "accepted": { "type": "integer" },
+          "broadcast_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["sending"]
+          },
+          "total_recipients": {
+            "type": "integer"
+          },
+          "accepted": {
+            "type": "integer"
+          },
           "rejected": {
             "type": "integer",
             "description": "Recipients dropped for an invalid phone number."
@@ -1718,22 +2382,49 @@
           "updated_at"
         ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "name": { "type": ["string", "null"] },
-          "template_name": { "type": "string" },
-          "template_language": { "type": "string" },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": ["string", "null"]
+          },
+          "template_name": {
+            "type": "string"
+          },
+          "template_language": {
+            "type": "string"
+          },
           "status": {
             "type": "string",
             "enum": ["scheduled", "sending", "sent", "failed"]
           },
-          "total_recipients": { "type": "integer" },
-          "sent_count": { "type": "integer" },
-          "delivered_count": { "type": "integer" },
-          "read_count": { "type": "integer" },
-          "replied_count": { "type": "integer" },
-          "failed_count": { "type": "integer" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "total_recipients": {
+            "type": "integer"
+          },
+          "sent_count": {
+            "type": "integer"
+          },
+          "delivered_count": {
+            "type": "integer"
+          },
+          "read_count": {
+            "type": "integer"
+          },
+          "replied_count": {
+            "type": "integer"
+          },
+          "failed_count": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "WebhookEvent": {
@@ -1741,7 +2432,15 @@
         "enum": [
           "message.received",
           "message.status_updated",
-          "conversation.created"
+          "conversation.created",
+          "plan.changed",
+          "plan.expiring",
+          "plan.expired",
+          "plan.canceled",
+          "plan.cancel_reverted",
+          "plan.canceled_applied",
+          "plan.grace_ended",
+          "plan.renewed"
         ]
       },
       "WebhookEndpoint": {
@@ -1756,11 +2455,19 @@
           "created_at"
         ],
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "url": { "type": "string", "format": "uri" },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
           "events": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/WebhookEvent" }
+            "items": {
+              "$ref": "#/components/schemas/WebhookEvent"
+            }
           },
           "is_active": {
             "type": "boolean",
@@ -1774,12 +2481,17 @@
             "type": "integer",
             "description": "Consecutive delivery failures. Reset to 0 by any successful delivery or by re-enabling via PATCH."
           },
-          "created_at": { "type": "string", "format": "date-time" }
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "WebhookEndpointWithSecret": {
         "allOf": [
-          { "$ref": "#/components/schemas/WebhookEndpoint" },
+          {
+            "$ref": "#/components/schemas/WebhookEndpoint"
+          },
           {
             "type": "object",
             "required": ["secret"],
@@ -1804,7 +2516,9 @@
           "events": {
             "type": "array",
             "minItems": 1,
-            "items": { "$ref": "#/components/schemas/WebhookEvent" }
+            "items": {
+              "$ref": "#/components/schemas/WebhookEvent"
+            }
           }
         }
       },
@@ -1812,13 +2526,20 @@
         "type": "object",
         "description": "At least one field is required.",
         "properties": {
-          "url": { "type": "string", "format": "uri" },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
           "events": {
             "type": "array",
             "minItems": 1,
-            "items": { "$ref": "#/components/schemas/WebhookEvent" }
+            "items": {
+              "$ref": "#/components/schemas/WebhookEvent"
+            }
           },
-          "is_active": { "type": "boolean" }
+          "is_active": {
+            "type": "boolean"
+          }
         }
       },
       "IngestCustomFieldEntry": {
@@ -1829,7 +2550,9 @@
             "type": "string",
             "description": "Matched case-insensitively against an existing custom field name in this account. No match (or an ambiguous one) skips this entry — never fails the request."
           },
-          "value": { "type": "string" }
+          "value": {
+            "type": "string"
+          }
         }
       },
       "IngestContactRequest": {
@@ -1837,7 +2560,14 @@
         "required": ["webhook_id", "webhook_name", "phone"],
         "properties": {
           "webhook_id": {
-            "oneOf": [{ "type": "string" }, { "type": "number" }],
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
             "description": "Digits only, minimum 16 characters — identifies the FUNNEL this request feeds, reused across every request carrying the same id. Not a credential; the API key is.",
             "example": "1234567890123456"
           },
@@ -1847,7 +2577,14 @@
             "example": "Landing page — Black Friday"
           },
           "phone": {
-            "oneOf": [{ "type": "string" }, { "type": "number" }],
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
             "description": "Validated with strict Brazilian rules (DDD against the Anatel list, mobile/landline shape) — stricter than `POST /contacts`.",
             "example": "(19) 9 9924-9658"
           },
@@ -1855,15 +2592,24 @@
             "type": "string",
             "description": "Falls back to the normalized phone if omitted."
           },
-          "email": { "type": "string" },
-          "company": { "type": "string" },
+          "email": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
           "tags": {
             "oneOf": [
               {
                 "type": "string",
                 "description": "Comma-separated tag names."
               },
-              { "type": "array", "items": { "type": "string" } }
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             ],
             "description": "Additive — never removes a tag the contact already has. Creates a tag that doesn't exist yet."
           },
@@ -1871,16 +2617,25 @@
             "oneOf": [
               {
                 "type": "object",
-                "additionalProperties": { "type": "string" },
+                "additionalProperties": {
+                  "type": "string"
+                },
                 "description": "Indexed object, e.g. `{\"nota_1\": \"…\", \"nota_2\": \"…\"}`. Keys are sorted by their NUMERIC SUFFIX (`nota_2` before `nota_10`), not alphabetically."
               },
-              { "type": "array", "items": { "type": "string" } }
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             ],
             "description": "Always appends — never dedupes or replaces existing notes."
           },
           "custom_fields": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/IngestCustomFieldEntry" }
+            "items": {
+              "$ref": "#/components/schemas/IngestCustomFieldEntry"
+            }
           },
           "template_id": {
             "type": "string",
@@ -1889,7 +2644,9 @@
           },
           "template_params": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Positional body variables (`{{1}}`, `{{2}}`…) for the template. Non-string entries are coerced to string, never dropped — dropping would shift every later placeholder."
           }
         }
@@ -1902,7 +2659,9 @@
             "type": "string",
             "description": "e.g. `custom_field_not_found`, `custom_field_ambiguous`, `note_empty`, `payload_truncated`, `template_not_found`, `template_not_approved`, `channel_not_capable`, `send_failed`."
           },
-          "message": { "type": "string" }
+          "message": {
+            "type": "string"
+          }
         }
       },
       "IngestFunnelRef": {
@@ -1910,8 +2669,13 @@
         "required": ["broadcast_id", "webhook_id"],
         "description": "`null` only when the funnel row itself couldn't be created/updated (a rare infra failure) — the contact is still created in that case.",
         "properties": {
-          "broadcast_id": { "type": "string", "format": "uuid" },
-          "webhook_id": { "type": "string" }
+          "broadcast_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "webhook_id": {
+            "type": "string"
+          }
         }
       },
       "IngestContactResult": {
@@ -1927,12 +2691,17 @@
           "warnings"
         ],
         "properties": {
-          "contact_id": { "type": "string", "format": "uuid" },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "contact_created": {
             "type": "boolean",
             "description": "True if `phone` didn't match an existing contact."
           },
-          "funnel": { "$ref": "#/components/schemas/IngestFunnelRef" },
+          "funnel": {
+            "$ref": "#/components/schemas/IngestFunnelRef"
+          },
           "tags": {
             "type": "object",
             "required": ["linked", "created"],
@@ -1950,16 +2719,24 @@
           "notes": {
             "type": "object",
             "required": ["inserted"],
-            "properties": { "inserted": { "type": "integer" } }
+            "properties": {
+              "inserted": {
+                "type": "integer"
+              }
+            }
           },
           "custom_fields": {
             "type": "object",
             "required": ["matched", "skipped"],
             "properties": {
-              "matched": { "type": "integer" },
+              "matched": {
+                "type": "integer"
+              },
               "skipped": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Field names that had no match (or an ambiguous one) and were skipped."
               }
             }
@@ -1972,12 +2749,17 @@
                 "type": "boolean",
                 "description": "True when `template_id` was present and a send was queued — NOT a guarantee it succeeded; see `warnings[]` and the dashboard log for the outcome."
               },
-              "template_id": { "type": "string", "format": "uuid" }
+              "template_id": {
+                "type": "string",
+                "format": "uuid"
+              }
             }
           },
           "warnings": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/IngestWarning" }
+            "items": {
+              "$ref": "#/components/schemas/IngestWarning"
+            }
           }
         }
       }

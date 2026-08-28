@@ -26,6 +26,7 @@ import { SendMessageError } from '@/lib/whatsapp/send-message';
 import { resolveAuditUserId, ContactError } from '@/lib/api/v1/contacts';
 import { resolveDefaultChannelId } from '@/lib/channels/send';
 import { parseQuotaError } from '@/lib/plans/errors';
+import { emitQuotaExceeded } from '@/lib/notifications/quota';
 
 export interface ResolvedConversation {
   conversationId: string;
@@ -176,6 +177,7 @@ export async function resolveConversationByPhone(
       } else {
         const quotaError = parseQuotaError(createErr);
         if (quotaError && quotaError.metric === 'contacts') {
+          emitQuotaExceeded(accountId, quotaError);
           throw new SendMessageError(
             'quota_exceeded',
             `Contact quota exceeded (${quotaError.used}/${quotaError.limit})`,

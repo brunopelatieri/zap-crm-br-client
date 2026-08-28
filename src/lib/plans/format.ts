@@ -40,3 +40,32 @@ export function formatLimit(value: number | null, locale: string): string {
     return String(value);
   }
 }
+
+/**
+ * O `code` que `POST /api/account/plan/change` devolve no corpo de
+ * erro → a chave dentro de `Plan.cycle.*` (achado de code review:
+ * `plan-cycle-dialog.tsx` e o atalho de plano Grátis em
+ * `plan-catalog.tsx` chamam a MESMA rota, mas só o diálogo tinha o
+ * mapeamento — o atalho caía sempre no texto cru em inglês da API,
+ * inclusive para `account_past_due`).
+ *
+ * Devolve só a CHAVE, não a string traduzida: cada chamador já tem seu
+ * próprio `t` (`useTranslations('Plan.cycle')` no diálogo,
+ * `useTranslations('Plan')` no catálogo — que por sua vez resolve
+ * chaves aninhadas como `t('cycle.changeSuccess')`), e este módulo não
+ * pode depender de `next-intl` (é importado por lógica pura também).
+ * `null` = código desconhecido ou ausente; o chamador cai para
+ * `payload.error` (inglês, vindo do servidor) ou seu próprio genérico.
+ */
+export function planChangeErrorKey(code: string | undefined): string | null {
+  switch (code) {
+    case 'self_service_disabled':
+      return 'errorSelfServiceDisabled';
+    case 'plan_not_available':
+      return 'errorPlanNotAvailable';
+    case 'account_past_due':
+      return 'errorAccountPastDue';
+    default:
+      return null;
+  }
+}

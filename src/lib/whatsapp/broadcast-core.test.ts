@@ -53,6 +53,19 @@ describe('assertAccountCanBroadcast (SPEC 049 §5.3)', () => {
     const client = {
       from: (table: string) => {
         calls.push(table);
+        // SPEC 062 §4.3 ponto 4: `assertAccountCanBroadcast` confere o
+        // bloqueio da conta ANTES da capacidade de canal. Conta
+        // existente e não bloqueada — o cenário destes testes.
+        if (table === 'accounts') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({ data: { blocked_at: null }, error: null }),
+              }),
+            }),
+          };
+        }
         if (table === 'channels') {
           return {
             select: () => ({
@@ -86,7 +99,11 @@ describe('assertAccountCanBroadcast (SPEC 049 §5.3)', () => {
       code: 'channel_not_capable',
       status: 400,
     });
-    expect(calls).toEqual(['channels']);
+    // `accounts` entrou na frente com a SPEC 062 §4.3 (bloqueio antes
+    // de capacidade). O que este teste protege continua sendo o mesmo:
+    // a guarda recusa ANTES de tocar `whatsapp_config`.
+    expect(calls).toEqual(['accounts', 'channels']);
+    expect(calls).not.toContain('whatsapp_config');
   });
 
   it('createBroadcast on a QR-only account fails with channel_not_capable before the fan-out', async () => {

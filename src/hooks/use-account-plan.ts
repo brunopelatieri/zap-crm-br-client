@@ -15,6 +15,7 @@ export type PlanCatalogEntry = Pick<
   | 'limits'
   | 'features'
   | 'sortOrder'
+  | 'yearlyDiscountPercent'
 >;
 
 export interface PendingPlanRequest {
@@ -30,6 +31,10 @@ export interface AccountPlanResponse {
   plan: Plan;
   accountPlan: AccountPlan;
   usage: PlanUsage;
+  /** SPEC 062 §6.1/§7.1 — liga o modal de ciclo no lugar da fila de solicitação. */
+  selfServiceEnabled: boolean;
+  /** SPEC 062 §3.4/D-5 — usado quando `plan.yearlyDiscountPercent` é `null`. */
+  defaultYearlyDiscountPercent: number;
   catalog: PlanCatalogEntry[];
   pendingRequest: PendingPlanRequest | null;
 }

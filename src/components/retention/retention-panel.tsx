@@ -1,91 +1,72 @@
 'use client';
 
 // ============================================================
-// RetentionPanel — Settings → Retenção (SPEC 060 §8.2, F5)
+// AccountRetentionPanel — bloco "Retenção" de
+// /admin/accounts/[accountId] (SPEC 062 §3.8, §7.5, F7)
 //
-// Só Proprietário — gate duplo, de propósito. `settings-rail.tsx` já
-// esconde o item da lista para quem não é owner (`SectionMeta.minRole`),
-// mas isso não impede a navegação direta por `?tab=retention`; o
-// `<RequireRole>` aqui é quem de fato barra o conteúdo nesse caso —
-// mesma dupla camada de `/api/account/retention` (guard de servidor +
-// RLS).
+// Este arquivo era o painel de Configurações do DONO DA CONTA (SPEC
+// 060 §8.2). A virada de dono da 069 mudou a casa e a fonte de dados,
+// não a forma: sai `<RequireRole min="owner">`, entra
+// `<RequirePlatformOwner>`; sai `/api/account/retention`, entram as
+// rotas por conta de `/api/platform/**`. Os três componentes filhos
+// (`RetentionChannelCard`, `RetentionPreview`, `RetentionUsageBar`)
+// continuam iguais.
 //
-// Três coisas que a SPEC obriga o painel a dizer (§8.2), e onde cada
-// uma vive neste arquivo:
-//   1. Prévia antes de salvar   → <RetentionPreview> em cada cartão
-//   2. O piso de idade          → o aviso logo abaixo do cabeçalho
-//   3. Herdado × explícito      → placeholder cinza nos campos vazios
-//      (RetentionChannelCard, via formatRetentionSource)
+// As três coisas que a SPEC 060 §8.2 obriga a dizer continuam onde
+// estavam:
+//   1. Prévia antes de salvar → <RetentionPreview> em cada cartão
+//   2. O piso de idade        → o aviso abaixo do cabeçalho
+//   3. Herdado × explícito    → placeholder cinza nos campos vazios,
+//      agora resolvendo contra um nível a mais na cadeia (§5.3)
+//
+// O estado da varredura e o alerta de `MESSAGE_RETENTION_ENABLED`
+// ausente NÃO vivem aqui: são da plataforma inteira, e por isso ficam
+// em `/admin/retention`, uma vez só.
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
-import { Archive, Loader2, ShieldAlert } from 'lucide-react';
+import { Loader2, ShieldAlert } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { RequireRole } from '@/components/auth/require-role';
-import { SettingsPanelHead } from '../settings/settings-panel-head';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { RequirePlatformOwner } from '@/components/platform/require-platform-owner';
 import {
   RetentionChannelCard,
   type RetentionChannelData,
 } from './retention-channel-card';
 
-interface RetentionSnapshot {
-  enabled: boolean;
+interface AccountRetentionSnapshot {
   minAgeHours: number;
-  intervalHours: number;
-  lastRunAt: string | null;
-  lastResult: {
-    by_age?: number;
-    by_count?: number;
-    favorites_demoted?: number;
-  } | null;
   channels: RetentionChannelData[];
 }
 
-function formatLastRun(
-  lastRunAt: string | null,
-  lastResult: RetentionSnapshot['lastResult'],
-  locale: string,
-  t: ReturnType<typeof useTranslations>
-): string {
-  if (!lastRunAt) return t('lastRunNever');
-  const date = new Date(lastRunAt).toLocaleString(locale, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  });
-  const removed =
-    (lastResult?.by_age ?? 0) +
-    (lastResult?.by_count ?? 0) +
-    (lastResult?.favorites_demoted ?? 0);
-  return t('lastRun', { date, count: removed });
-}
-
-function RetentionPanelContent() {
-  const t = useTranslations('Settings.retention');
-  const locale = useLocale();
+function AccountRetentionPanelContent({ accountId }: { accountId: string }) {
+  const t = useTranslations('Platform.retention');
   const [loading, setLoading] = useState(true);
-  const [snapshot, setSnapshot] = useState<RetentionSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<AccountRetentionSnapshot | null>(
+    null
+  );
+
+  const base = `/api/platform/accounts/${accountId}/retention`;
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/account/retention', {
-        cache: 'no-store',
-      });
+      const res = await fetch(base, { cache: 'no-store' });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
         toast.error(payload.error || t('loadFailed'));
         return;
       }
-      setSnapshot((await res.json()) as RetentionSnapshot);
+      setSnapshot((await res.json()) as AccountRetentionSnapshot);
     } catch (err) {
-      console.error('[RetentionPanel] load failed:', err);
+      console.error('[AccountRetentionPanel] load failed:', err);
       toast.error(t('networkError'));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [base, t]);
 
   useEffect(() => {
     void load();
@@ -104,65 +85,58 @@ function RetentionPanelContent() {
     );
   }
 
-  if (loading || !snapshot) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="text-primary size-6 animate-spin" />
-      </div>
-    );
-  }
-
   return (
-    <section className="animate-in fade-in-50 space-y-6 duration-200">
-      <SettingsPanelHead title={t('title')} description={t('description')} />
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('accountSectionTitle')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {loading || !snapshot ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="text-primary size-6 animate-spin" />
+          </div>
+        ) : (
+          <>
+            <p className="text-muted-foreground text-sm">
+              {t('accountSectionDescription')}
+            </p>
 
-      {/* §8.2 ponto 2 — o piso nunca pode ficar implícito, senão o
-          dono vê o total acima do teto configurado e reporta como bug. */}
-      <Alert>
-        <ShieldAlert />
-        <AlertDescription>
-          {t('floorNotice', { hours: snapshot.minAgeHours })}
-        </AlertDescription>
-      </Alert>
+            {/* §8.2 ponto 2 — o piso nunca pode ficar implícito, senão
+                quem lê vê o total acima do teto configurado e reporta
+                como bug. */}
+            <Alert>
+              <ShieldAlert />
+              <AlertDescription>
+                {t('floorNotice', { hours: snapshot.minAgeHours })}
+              </AlertDescription>
+            </Alert>
 
-      {!snapshot.enabled && (
-        <Alert variant="destructive">
-          <Archive />
-          <AlertDescription>{t('disabledNotice')}</AlertDescription>
-        </Alert>
-      )}
-
-      <p className="text-muted-foreground text-xs">
-        {formatLastRun(snapshot.lastRunAt, snapshot.lastResult, locale, t)}
-      </p>
-
-      {snapshot.channels.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t('noChannels')}</p>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {snapshot.channels.map((channel) => (
-            <RetentionChannelCard
-              key={channel.type}
-              data={channel}
-              onSaved={handleCardSaved}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+            {snapshot.channels.length === 0 ? (
+              <p className="text-muted-foreground text-sm">{t('noChannels')}</p>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {snapshot.channels.map((channel) => (
+                  <RetentionChannelCard
+                    key={channel.type}
+                    data={channel}
+                    onSaved={handleCardSaved}
+                    saveEndpoint={base}
+                    previewEndpoint={`${base}/preview`}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
-export function RetentionPanel() {
-  const t = useTranslations('Settings.retention');
+export function AccountRetentionPanel({ accountId }: { accountId: string }) {
   return (
-    <RequireRole
-      min="owner"
-      fallback={
-        <p className="text-muted-foreground text-sm">{t('accessDenied')}</p>
-      }
-    >
-      <RetentionPanelContent />
-    </RequireRole>
+    <RequirePlatformOwner>
+      <AccountRetentionPanelContent accountId={accountId} />
+    </RequirePlatformOwner>
   );
 }

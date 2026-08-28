@@ -62,6 +62,11 @@ function makeSupabaseMock() {
             },
             error: null,
           };
+        // SPEC 062 §4.3 ponto 4: `resolveChannelContext` confere
+        // `accounts.blocked_at` antes de resolver credencial. Conta
+        // existente e nao bloqueada — o cenario destes testes.
+        case 'accounts':
+          return { data: { blocked_at: null }, error: null };
         case 'channels':
           // `resolveDefaultChannelId` tenta este primeiro; devolver vazio
           // aqui faz o teste exercitar o fallback real (whatsapp_config).

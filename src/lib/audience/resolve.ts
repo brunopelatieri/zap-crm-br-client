@@ -48,6 +48,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isUniqueViolation, normalizeKey } from '@/lib/contacts/dedupe';
 import { parseQuotaError } from '@/lib/plans/errors';
+import { emitQuotaExceeded } from '@/lib/notifications/quota';
 import {
   assignImportedContactTags,
   resolveImportTagIds,
@@ -257,6 +258,7 @@ export async function upsertImportedContacts(
         // reagendar para sempre uma campanha que nunca vai caber.
         const quotaError = parseQuotaError(insertErr);
         if (quotaError && quotaError.metric === 'contacts') {
+          emitQuotaExceeded(accountId, quotaError);
           throw new BroadcastError(
             'contact_quota_exceeded',
             `Contact quota exceeded while creating imported contacts (${quotaError.used}/${quotaError.limit})`,

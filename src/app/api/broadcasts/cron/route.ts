@@ -57,6 +57,7 @@ import {
   nextWindowOpening,
   resolveTimeZone,
 } from '@/lib/broadcasts/send-window';
+import { loadBlockedAccountIds } from '@/lib/platform/blocked';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
   BroadcastError,
@@ -159,11 +160,26 @@ export async function GET(request: Request) {
     return NextResponse.json({ dispatched: 0, postponed: 0, failed: 0 });
   }
 
+  // SPEC 062 §4.3 ponto 1. Este cliente é `service_role` e não passa
+  // por RLS: sem esta lista, a campanha agendada de uma conta bloqueada
+  // dispara normalmente na hora marcada. `assertAccountCanBroadcast`
+  // (§4.3 ponto 4) recusaria adiante de qualquer forma — mas só depois
+  // de a campanha ter sido reivindicada e o ciclo do cron gasto, e o
+  // desfecho apareceria como campanha FALHA, não como campanha de conta
+  // bloqueada. Pular aqui deixa a campanha intacta em `scheduled`, para
+  // sair quando (e se) a conta for desbloqueada.
+  const blockedAccounts = await loadBlockedAccountIds(admin);
+
   let dispatched = 0;
   let postponed = 0;
   let failed = 0;
+  let skippedBlocked = 0;
 
   for (const row of due as DueBroadcast[]) {
+    if (blockedAccounts.has(row.account_id)) {
+      skippedBlocked++;
+      continue;
+    }
     const timeZone = resolveTimeZone(
       row.scheduled_timezone ?? DEFAULT_TIME_ZONE
     );
@@ -470,5 +486,10 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ dispatched, postponed, failed });
+  return NextResponse.json({
+    dispatched,
+    postponed,
+    failed,
+    skippedBlocked,
+  });
 }

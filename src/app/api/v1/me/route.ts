@@ -27,7 +27,15 @@ export async function GET(request: Request) {
     // despejar 10.000 contatos em vez de descobrir pelo 403. Best-effort:
     // /api/v1/me é o endpoint de referência ("minha chave funciona?") e
     // não pode virar 500 por causa de um problema no motor de quotas.
-    let plan: { code: string; name: string; status: string } | null = null;
+    let plan: {
+      code: string;
+      name: string;
+      status: string;
+      billingCycle: string;
+      startedAt: string;
+      currentPeriodEnd: string | null;
+      cancelAtPeriodEnd: boolean;
+    } | null = null;
     let usage: { key: string; used: number; limit: number | null }[] = [];
     try {
       const snapshot = await getAccountPlan(ctx.accountId, ctx.supabase);
@@ -35,6 +43,12 @@ export async function GET(request: Request) {
         code: snapshot.plan.code,
         name: snapshot.plan.name,
         status: snapshot.accountPlan.status,
+        // SPEC 062 §9 — uma integração que provisiona recursos precisa
+        // saber QUANDO o acesso vence, não só o código do plano.
+        billingCycle: snapshot.accountPlan.billingCycle,
+        startedAt: snapshot.accountPlan.startedAt,
+        currentPeriodEnd: snapshot.accountPlan.currentPeriodEnd,
+        cancelAtPeriodEnd: snapshot.accountPlan.cancelAtPeriodEnd,
       };
       usage = snapshot.quotasEnforced
         ? snapshot.usage.buckets.map((b) => ({

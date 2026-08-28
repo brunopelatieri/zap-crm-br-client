@@ -30,10 +30,14 @@ export interface RetentionChannelData {
    * uso falhou no servidor; `messagesTotal`/`favoritesTotal` vêm
    * `null` em vez de um `0` que pareceria "canal vazio" e mentiria
    * bem na tela que o dono usa para decidir se um limite é seguro.
+   *
+   * `null` = a tela não tem uso a mostrar (o padrão GLOBAL do console
+   * não pertence a nenhuma conta — SPEC 062 §7.5).
    */
   usage:
     | { messagesTotal: number; favoritesTotal: number; usageError: false }
-    | { messagesTotal: null; favoritesTotal: null; usageError: true };
+    | { messagesTotal: null; favoritesTotal: null; usageError: true }
+    | null;
 }
 
 /** `null`/coluna ausente vira campo vazio — o valor que o formulário
@@ -45,11 +49,21 @@ function toFieldValue(value: number | null | undefined): string {
 export function RetentionChannelCard({
   data,
   onSaved,
+  saveEndpoint,
+  previewEndpoint,
 }: {
   data: RetentionChannelData;
   onSaved: (updated: RetentionChannelData) => void;
+  /** Rota do PUT — o padrão global ou a política de uma conta (§7.5). */
+  saveEndpoint: string;
+  /**
+   * Rota da prévia. Ausente na tela do padrão global: `p_dry_run`
+   * precisa de um `account_id`, e o padrão global não tem um. O botão
+   * some, o resto do cartão é idêntico.
+   */
+  previewEndpoint?: string;
 }) {
-  const t = useTranslations('Settings.retention');
+  const t = useTranslations('Platform.retention');
   const locale = useLocale();
 
   const [maxMessages, setMaxMessages] = useState(
@@ -66,7 +80,7 @@ export function RetentionChannelCard({
   async function handleSave() {
     setSaving(true);
     try {
-      const res = await fetch('/api/account/retention', {
+      const res = await fetch(saveEndpoint, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,12 +196,17 @@ export function RetentionChannelCard({
         <p className="text-muted-foreground text-xs">{t('fieldsHint')}</p>
 
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <RetentionPreview
-            channelType={data.type}
-            maxMessages={maxMessages}
-            retentionDays={retentionDays}
-            maxFavorites={maxFavorites}
-          />
+          {previewEndpoint ? (
+            <RetentionPreview
+              channelType={data.type}
+              endpoint={previewEndpoint}
+              maxMessages={maxMessages}
+              retentionDays={retentionDays}
+              maxFavorites={maxFavorites}
+            />
+          ) : (
+            <span />
+          )}
           <Button
             type="button"
             size="sm"
@@ -203,28 +222,30 @@ export function RetentionChannelCard({
           </Button>
         </div>
 
-        <div className="flex flex-col gap-3 border-t pt-4">
-          {data.usage.usageError ? (
-            <p className="text-destructive flex items-center gap-1.5 text-xs">
-              <AlertTriangle className="size-3.5 shrink-0" />
-              {t('usageLoadFailed')}
-            </p>
-          ) : (
-            <>
-              <RetentionUsageBar
-                label={t('usageMessages')}
-                used={data.usage.messagesTotal}
-                limit={data.effective.maxMessages}
-              />
-              <RetentionUsageBar
-                label={t('usageFavorites')}
-                used={data.usage.favoritesTotal}
-                limit={data.effective.maxFavorites}
-                overCapHint={t('favoritesOverCapHint')}
-              />
-            </>
-          )}
-        </div>
+        {data.usage === null ? null : (
+          <div className="flex flex-col gap-3 border-t pt-4">
+            {data.usage.usageError ? (
+              <p className="text-destructive flex items-center gap-1.5 text-xs">
+                <AlertTriangle className="size-3.5 shrink-0" />
+                {t('usageLoadFailed')}
+              </p>
+            ) : (
+              <>
+                <RetentionUsageBar
+                  label={t('usageMessages')}
+                  used={data.usage.messagesTotal}
+                  limit={data.effective.maxMessages}
+                />
+                <RetentionUsageBar
+                  label={t('usageFavorites')}
+                  used={data.usage.favoritesTotal}
+                  limit={data.effective.maxFavorites}
+                  overCapHint={t('favoritesOverCapHint')}
+                />
+              </>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

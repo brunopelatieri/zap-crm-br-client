@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { formatLimit, formatPlanPrice } from './format';
+import { formatLimit, formatPlanPrice, planChangeErrorKey } from './format';
 
 describe('formatLimit', () => {
   it('null vira "Ilimitado" em pt-BR', () => {
@@ -38,5 +38,26 @@ describe('formatPlanPrice', () => {
 
   it('zero é formatado sem lançar', () => {
     expect(() => formatPlanPrice(0, 'BRL', 'pt-BR')).not.toThrow();
+  });
+});
+
+// Achado de code review: `plan-catalog.tsx` (atalho do plano Grátis) e
+// `plan-cycle-dialog.tsx` chamam a mesma rota mas só um tinha o
+// mapeamento de `code` — este teste trava o contrato compartilhado dos
+// dois, para não divergirem de novo.
+describe('planChangeErrorKey', () => {
+  it('mapeia os três códigos conhecidos', () => {
+    expect(planChangeErrorKey('self_service_disabled')).toBe(
+      'errorSelfServiceDisabled'
+    );
+    expect(planChangeErrorKey('plan_not_available')).toBe(
+      'errorPlanNotAvailable'
+    );
+    expect(planChangeErrorKey('account_past_due')).toBe('errorAccountPastDue');
+  });
+
+  it('código desconhecido ou ausente devolve null (chamador cai para payload.error)', () => {
+    expect(planChangeErrorKey('account_not_found')).toBeNull();
+    expect(planChangeErrorKey(undefined)).toBeNull();
   });
 });

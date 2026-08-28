@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
      */
     conversationChannelId: null as string | null,
     channelType: null as string | null,
+    /** SPEC 062 §4.3 ponto 5 — conta bloqueada não auto-responde. */
+    accountBlockedAt: null as string | null,
   },
 }));
 
@@ -42,6 +44,21 @@ vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }));
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
+      // SPEC 062 §4.3 ponto 5: a auto-resposta confere o bloqueio da
+      // conta antes de qualquer outra coisa. `h.state.accountBlockedAt`
+      // deixa o caso bloqueado testável.
+      if (table === 'accounts') {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: { blocked_at: h.state.accountBlockedAt },
+              error: null,
+            }),
+        };
+        return chain;
+      }
       if (table === 'automations') {
         // .select().eq().eq().in().limit() → active auto-responders
         const chain = {
@@ -151,6 +168,7 @@ beforeEach(() => {
   h.state.eligibleProfile = { user_id: 'agent-7' };
   h.state.conversationChannelId = null;
   h.state.channelType = null;
+  h.state.accountBlockedAt = null;
   h.loadAiConfig.mockResolvedValue(aiConfig());
   h.buildConversationContext.mockResolvedValue([
     { role: 'user', content: 'hi' },
@@ -172,6 +190,17 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: 'conv-1', text: 'Hello!' })
     );
+  });
+
+  // SPEC 062 §4.3 ponto 5. Chegamos aqui por uma mensagem RECEBIDA, que
+  // por D-9 continua entrando com a conta bloqueada — sem esta guarda o
+  // robô da conta bloqueada seguiria conversando com o cliente final.
+  it('não responde por conta bloqueada, e nem chega a carregar a config de IA', async () => {
+    h.state.accountBlockedAt = '2026-08-27T00:00:00Z';
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.engineSendText).not.toHaveBeenCalled();
+    expect(h.loadAiConfig).not.toHaveBeenCalled();
+    expect(h.state.rpcCalls).toEqual([]);
   });
 
   it('grounds the reply in retrieved knowledge', async () => {

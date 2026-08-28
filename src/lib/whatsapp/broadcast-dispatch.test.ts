@@ -75,6 +75,12 @@ function makeDb(scenario: Scenario) {
 
   const handler = (table: string, ops: QueryOp[]): MockResult | undefined => {
     switch (table) {
+      // SPEC 062 §4.3 ponto 4: `assertAccountCanBroadcast` (via
+      // `loadWhatsappConfig`) confere o bloqueio da conta antes de tudo.
+      // Conta existente e não bloqueada — o cenário destes testes.
+      case 'accounts':
+        return { data: { blocked_at: null } };
+
       case 'whatsapp_config':
         return { data: config };
 

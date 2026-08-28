@@ -10,7 +10,11 @@
 
 import { NextResponse } from 'next/server';
 
-import { ForbiddenError, UnauthorizedError } from '@/lib/auth/account';
+import {
+  AccountBlockedError,
+  ForbiddenError,
+  UnauthorizedError,
+} from '@/lib/auth/account';
 import { EvolutionApiError } from './client';
 import {
   EvolutionNotConfiguredError,
@@ -19,6 +23,18 @@ import {
 } from './instances';
 
 export function toEvolutionErrorResponse(err: unknown): NextResponse {
+  // Achado de code review (SPEC 062 §4.1): `requireRole()` lança
+  // `AccountBlockedError` para conta/usuário bloqueado, e sem este
+  // check ela caía no branch genérico abaixo — 500 em vez de 403 — nas
+  // 8 rotas de `/api/channels/evolution/instances/**`, que todas usam
+  // este mapeador em vez de `toErrorResponse` (auth/account.ts), que já
+  // tratava isto corretamente.
+  if (err instanceof AccountBlockedError) {
+    return NextResponse.json(
+      { error: err.message, code: err.code },
+      { status: err.status }
+    );
+  }
   if (err instanceof UnauthorizedError || err instanceof ForbiddenError) {
     return NextResponse.json({ error: err.message }, { status: err.status });
   }

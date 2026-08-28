@@ -13,6 +13,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import { parseQuotaError } from '@/lib/plans/errors';
+import { emitQuotaExceeded } from '@/lib/notifications/quota';
 
 /** Row select that embeds the contact's tags for serialization. */
 export const CONTACT_SELECT = '*, contact_tags(tags(*))';
@@ -152,6 +153,7 @@ export async function findOrCreateContact(
     }
     const quotaError = parseQuotaError(error);
     if (quotaError && quotaError.metric === 'contacts') {
+      emitQuotaExceeded(accountId, quotaError);
       throw new ContactError(
         `Contact quota exceeded (${quotaError.used}/${quotaError.limit})`,
         403,

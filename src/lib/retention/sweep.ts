@@ -24,11 +24,14 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { readPlatformRetentionDefaults } from '@/lib/platform/retention-defaults';
 import type { ChannelType } from '@/lib/channels/types';
 import { readRetentionDefaults } from './defaults';
+import { mergeGlobalDefaults } from './global-defaults';
 import { resolveEffectivePolicy, rowToPolicy } from './policy';
 import { shouldRunNow, isClaimStale, CLAIM_STALE_MINUTES } from './schedule';
 import type {
+  RetentionDefaults,
   RetentionPolicyRow,
   RetentionPurgeResult,
   RetentionRunResult,
@@ -68,6 +71,15 @@ export async function runMessageRetention(
     }
 
     const db = supabaseAdmin();
+
+    // SPEC 062 §5.3 — o elo novo da cadeia de precedência. UMA linha,
+    // UMA vez por ciclo (não um SELECT por par), e o resultado viaja
+    // por `sweepAllPairs`/`sweepOnePair` no lugar do `.env` puro.
+    // `policy.ts` não muda: só o que entra no parâmetro `defaults`.
+    const effectiveDefaults = mergeGlobalDefaults(
+      await readConsoleRetentionDefaults(db),
+      defaults
+    );
 
     const { data: stateRow, error: stateErr } = await db
       .from('message_retention_state')
@@ -123,7 +135,7 @@ export async function runMessageRetention(
 
     const result = emptyRunResult();
     try {
-      await sweepAllPairs(db, defaults, result);
+      await sweepAllPairs(db, effectiveDefaults, result);
     } finally {
       // Solta o claim e grava o resultado do ciclo SEMPRE — mesmo que
       // um par tenha lançado de forma inesperada (cada par já se
@@ -153,6 +165,32 @@ export async function runMessageRetention(
 }
 
 /**
+ * `platform_settings.retention_defaults` (SPEC 062 §3.8) — a fonte
+ * editável do padrão global, acima do `.env`.
+ *
+ * NUNCA aborta o ciclo (§11: "Varredura de retenção parou de rodar |
+ * `sweep.ts` passou a depender de `platform_settings` e a leitura
+ * falhou — precisa cair no `.env`, nunca abortar o ciclo"). Erro de
+ * rede, tabela/coluna ausente num projeto onde a 069 ainda não rodou,
+ * linha inexistente: todos devolvem `null`, e `mergeGlobalDefaults`
+ * trata `null` como "nada configurado no console" — o `.env` segue
+ * valendo sozinho, exatamente como antes desta SPEC.
+ */
+async function readConsoleRetentionDefaults(
+  db: ReturnType<typeof supabaseAdmin>
+): Promise<unknown> {
+  try {
+    return await readPlatformRetentionDefaults(db);
+  } catch (err) {
+    console.warn(
+      '[retention-sweep] platform_settings.retention_defaults ilegível — seguindo com o .env:',
+      err
+    );
+    return null;
+  }
+}
+
+/**
  * SPEC 060 §5: enumera os pares a partir de `SELECT DISTINCT account_id,
  * type FROM channels` — e não de `conversations` — porque é a lista
  * curta (uma conta tem 1–3 canais, não 40.000 conversas), e porque
@@ -161,7 +199,7 @@ export async function runMessageRetention(
  */
 async function sweepAllPairs(
   db: ReturnType<typeof supabaseAdmin>,
-  defaults: ReturnType<typeof readRetentionDefaults>,
+  defaults: RetentionDefaults,
   result: RetentionRunResult
 ): Promise<void> {
   const { data: channelRows, error: channelsErr } = await db
@@ -257,7 +295,7 @@ async function fetchPoliciesByPair(
 
 async function sweepOnePair(
   db: ReturnType<typeof supabaseAdmin>,
-  defaults: ReturnType<typeof readRetentionDefaults>,
+  defaults: RetentionDefaults,
   accountId: string,
   channelType: ChannelType,
   row: RetentionPolicyRow | null,

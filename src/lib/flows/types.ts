@@ -355,7 +355,17 @@ export interface DispatchInboundResult {
     | 'handed_off'
     | 'fallback_fired'
     | 'duplicate_inbound_ignored'
-    | 'no_match';
+    | 'no_match'
+    /**
+     * SPEC 062 §4.3 — a conta está bloqueada. Distinto de `no_match`
+     * de propósito: a mensagem ENTROU (D-9 — inbound nunca é
+     * descartado) e existia flow que casaria, mas o runner não pode
+     * responder por uma conta bloqueada. Sem um valor próprio, esse
+     * caso ficaria indistinguível de "nenhum flow casou" no log,
+     * exatamente quando alguém estiver investigando por que o cliente
+     * parou de receber resposta.
+     */
+    | 'account_blocked';
 }
 
 // ============================================================

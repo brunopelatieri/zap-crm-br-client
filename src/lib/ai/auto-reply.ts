@@ -10,6 +10,7 @@ import { latestUserMessage } from './query';
 import { engineSendText } from '@/lib/flows/meta-send';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 import { isAssignableMember } from '@/lib/inbox/assignment';
+import { isAccountBlocked } from '@/lib/platform/blocked';
 import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-channel';
 
 interface DispatchArgs {
@@ -48,6 +49,14 @@ export async function dispatchInboundToAiReply(
 
   try {
     const db = supabaseAdmin();
+
+    // SPEC 062 §4.3 ponto 5. Chegamos aqui a partir de uma mensagem
+    // RECEBIDA, que por D-9 continua entrando com a conta bloqueada —
+    // então sem esta linha o robô da conta bloqueada segue conversando
+    // com o cliente final como se nada tivesse acontecido. Primeira
+    // checagem da função: mais barata que carregar a config de IA e
+    // evita gastar token de LLM por uma conta que não pode responder.
+    if (await isAccountBlocked(db, accountId)) return;
 
     const config = await loadAiConfig(db, accountId);
     if (!config || !config.autoReplyEnabled) return;

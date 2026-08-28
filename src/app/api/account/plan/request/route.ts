@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
-import { deliverPlanRequestWebhook } from '@/lib/plans/request-webhook';
+import { emitSystemEvent } from '@/lib/notifications/emit';
 
 export async function POST(request: Request) {
   try {
@@ -80,15 +80,21 @@ export async function POST(request: Request) {
       );
     }
 
-    // Melhor esforço — nunca falha a solicitação por causa do aviso.
-    deliverPlanRequestWebhook({
+    // Grava na outbox e agenda a entrega (SPEC 063 §1, §3.1) — nunca
+    // falha a solicitação por causa do aviso.
+    await emitSystemEvent({
+      type: 'plan.requested',
       accountId: ctx.accountId,
-      accountName: ctx.account.name,
-      planCode: plan.code,
-      planName: plan.name,
+      account: { id: ctx.accountId, name: ctx.account.name, ownerEmail: null },
+      actor: `self-service:${ctx.userId}`,
       message,
-    }).catch((err) => {
-      console.error('[POST /api/account/plan/request] webhook error:', err);
+      data: {
+        accountId: ctx.accountId,
+        accountName: ctx.account.name,
+        planCode: plan.code,
+        planName: plan.name,
+        requestedAt: new Date().toISOString(),
+      },
     });
 
     return NextResponse.json({ request: created }, { status: 201 });

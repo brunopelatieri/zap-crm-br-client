@@ -97,7 +97,17 @@ function makeDb(
   > = {}
 ) {
   const ops: RecordedOp[] = [];
-  const resultMap = new Map(Object.entries(results));
+  // SPEC 062 §4.3 ponto 4: `resolveChannelContext` agora confere
+  // `accounts.blocked_at` antes de resolver credencial. O padrão é uma
+  // conta existente e NÃO bloqueada; um teste que queira o contrário
+  // sobrescreve `accounts.select`.
+  const resultMap = new Map<
+    string,
+    { data?: unknown; error?: unknown; count?: number }
+  >([
+    ['accounts.select', { data: { blocked_at: null }, error: null }],
+    ...Object.entries(results),
+  ]);
 
   function builder(table: string) {
     const op: RecordedOp = { table, verb: 'select', filters: [] };

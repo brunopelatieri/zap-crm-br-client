@@ -5,10 +5,29 @@ import type { ApiKeyRow } from '@/lib/api-keys/store';
 import { ApiError } from '@/lib/api/v1/respond';
 import { __resetRateLimitForTests, RATE_LIMITS } from '@/lib/rate-limit';
 
-// Mock the service-role client factory — requireApiKey only stashes
-// the returned client in the context; tests never call through it.
+// Mock the service-role client factory. Since SPEC 062 §4.3 ponto 6,
+// `requireApiKey` also reads `accounts.blocked_at` through this client
+// before handing the context back, so the stub has to answer that one
+// query. `blockedAt` is per-test state — the blocked case has its own
+// test below.
+const accountState = { blockedAt: null as string | null };
 vi.mock('@/lib/flows/admin-client', () => ({
-  supabaseAdmin: () => ({ __isMockAdminClient: true }),
+  supabaseAdmin: () => ({
+    __isMockAdminClient: true,
+    from: (table: string) => {
+      if (table !== 'accounts') throw new Error(`unexpected table ${table}`);
+      const chain = {
+        select: () => chain,
+        eq: () => chain,
+        maybeSingle: () =>
+          Promise.resolve({
+            data: { blocked_at: accountState.blockedAt },
+            error: null,
+          }),
+      };
+      return chain;
+    },
+  }),
 }));
 
 // Mock the store so we control which row a hash resolves to.
@@ -48,6 +67,7 @@ beforeEach(() => {
   __resetRateLimitForTests();
   findActiveKeyByHash.mockReset();
   touchLastUsed.mockReset();
+  accountState.blockedAt = null;
 });
 
 afterEach(() => {
@@ -120,6 +140,33 @@ describe('requireApiKey', () => {
     findActiveKeyByHash.mockResolvedValue(row({ scopes: ['messages:send'] }));
     const ctx = await requireApiKey(reqWith(`Bearer ${KEY}`), 'messages:send');
     expect(ctx.accountId).toBe('acct-1');
+  });
+
+  // SPEC 062 §4.3 ponto 6 — uma chave que continua VÁLIDA (não
+  // revogada, com escopo) para de funcionar porque a CONTA foi
+  // bloqueada. Código próprio (`account_blocked`, não `forbidden`) para
+  // a integração não sair procurando o que há de errado com os escopos
+  // dela, que estão certos.
+  it('403 account_blocked quando a conta da chave está bloqueada', async () => {
+    findActiveKeyByHash.mockResolvedValue(row({ scopes: ['messages:send'] }));
+    accountState.blockedAt = '2026-08-27T00:00:00Z';
+    await expectApiError(
+      requireApiKey(reqWith(`Bearer ${KEY}`), 'messages:send'),
+      'account_blocked',
+      403
+    );
+  });
+
+  // A checagem de bloqueio vem DEPOIS da de escopo: uma chave sem
+  // escopo precisa ouvir sobre o escopo, que é o problema dela.
+  it('a falta de escopo continua vindo antes do bloqueio', async () => {
+    findActiveKeyByHash.mockResolvedValue(row({ scopes: [] }));
+    accountState.blockedAt = '2026-08-27T00:00:00Z';
+    await expectApiError(
+      requireApiKey(reqWith(`Bearer ${KEY}`), 'messages:send'),
+      'forbidden',
+      403
+    );
   });
 
   it('429s once the per-key budget is exhausted', async () => {

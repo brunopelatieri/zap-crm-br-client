@@ -34,6 +34,7 @@ import {
   ChannelNotConfiguredError,
   type OutboundContent,
 } from '@/lib/channels/send';
+import { AccountBlockedError } from '@/lib/platform/blocked';
 import { can } from '@/lib/channels/capabilities';
 import {
   checkColdSend,
@@ -322,6 +323,17 @@ export async function sendMessageToConversation(
         'WhatsApp not configured. Please set up your WhatsApp integration first.',
         400
       );
+    }
+    // Achado de code review: `resolveChannelForConversation` chama
+    // `resolveChannelContext`, que confere bloqueio (SPEC 062 §4.3
+    // ponto 4 — o funil comum de envio). Sem traduzir para
+    // `SendMessageError` aqui, os dois chamadores (rota do inbox e a
+    // pública v1) deixam isto cair no catch genérico deles, que devolve
+    // 500 em vez de 403 `account_blocked` — a rota do inbox nem passa
+    // por `getCurrentAccount()`/`requireRole()` antes disto, então este
+    // é o ÚNICO ponto onde a conta bloqueada é detectada nesse caminho.
+    if (err instanceof AccountBlockedError) {
+      throw new SendMessageError(err.code, err.message, err.status);
     }
     throw err;
   }

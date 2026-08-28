@@ -20,7 +20,6 @@ import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { WebhookLogSettings } from '@/components/settings/webhook-log-settings';
-import { RetentionPanel } from '@/components/retention/retention-panel';
 import {
   resolveSection,
   type SettingsSection,
@@ -83,7 +82,6 @@ export default function SettingsPage() {
     'webhook-log': (
       <WebhookLogSettings initialWebhookId={searchParams.get('webhook_id')} />
     ),
-    retention: <RetentionPanel />,
   };
 
   return (

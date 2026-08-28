@@ -62,6 +62,18 @@ function fakeDb(opts: FakeDbOptions = {}): {
   const client = {
     from: (table: string) => {
       calls.push(table);
+      // SPEC 062 §4.3 ponto 4: `assertAccountCanBroadcast` confere
+      // `accounts.blocked_at` antes de tudo. Conta não bloqueada.
+      if (table === 'accounts') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: { blocked_at: null }, error: null }),
+            }),
+          }),
+        };
+      }
       if (table === 'channels') {
         return {
           select: () => ({
@@ -133,7 +145,7 @@ describe('sendIngestTemplate — channel capability (SPEC 049 §5.3)', () => {
       })
     ).rejects.toMatchObject({ code: 'channel_not_capable' });
 
-    expect(calls).toEqual(['channels']);
+    expect(calls).toEqual(['accounts', 'channels']);
     expect(cloudSendTemplate).not.toHaveBeenCalled();
   });
 });

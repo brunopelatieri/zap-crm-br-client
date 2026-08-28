@@ -51,6 +51,7 @@ import {
   resolveTimeZone,
 } from '@/lib/broadcasts/send-window';
 import { isOptedOut } from '@/lib/contacts/consent';
+import { loadBlockedAccountIds } from '@/lib/platform/blocked';
 import { supabaseAdmin } from './admin-client';
 import { runSingleAutomation } from './engine';
 import { cronMatches } from './schedule';
@@ -160,10 +161,17 @@ export async function scanSchedules(
       return emptyResult();
     }
 
+    // SPEC 062 §4.3 ponto 2. Uma consulta por ciclo (índice parcial
+    // `idx_accounts_blocked`), não uma por automação. `service_role`
+    // não passa por RLS: sem esta linha, o agendamento de uma conta
+    // bloqueada continua disparando na hora marcada.
+    const blockedAccounts = await loadBlockedAccountIds(db);
+
     const result = emptyResult();
     result.automations = automations.length;
 
     for (const automation of automations as Automation[]) {
+      if (blockedAccounts.has(automation.account_id)) continue;
       try {
         await scanForAutomation(automation, now, result);
       } catch (err) {

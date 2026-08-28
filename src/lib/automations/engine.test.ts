@@ -14,6 +14,12 @@ const h = vi.hoisted(() => ({
     profileQueries: [] as [string, string, unknown][][],
     automations: [] as Record<string, unknown>[],
     steps: [] as Record<string, unknown>[],
+    /**
+     * SPEC 062 §4.3 ponto 2 — `runAutomationsForTrigger` confere
+     * `accounts.blocked_at` antes de qualquer coisa. `null` = conta
+     * ativa, que é o cenário de quase todo teste deste arquivo.
+     */
+    accountBlockedAt: null as string | null,
     fromCalls: [] as string[],
     updateCalls: [] as {
       table: string;
@@ -25,6 +31,8 @@ const h = vi.hoisted(() => ({
     conversationRow: null as { last_customer_message_at: string | null } | null,
     // SPEC 045 §5.3.4 — categoria do template usado no fallback.
     templateRows: null as { category: string }[] | null,
+    /** Payloads gravados em `automation_pending_executions` (SPEC 062 §4.3 ponto 2). */
+    pendingExecutionUpdates: [] as Record<string, unknown>[],
   },
 }));
 
@@ -38,6 +46,9 @@ vi.mock('./admin-client', () => {
     filters: [string, string, unknown][];
   }) {
     const { table, type } = ops;
+    if (table === 'accounts') {
+      return { data: { blocked_at: state.accountBlockedAt }, error: null };
+    }
     if (table === 'contacts') {
       if (type === 'update') {
         state.updateCalls.push({ table, filters: ops.filters });
@@ -81,6 +92,14 @@ vi.mock('./admin-client', () => {
     }
     if (table === 'automations')
       return { data: state.automations, error: null };
+    if (table === 'automation_pending_executions') {
+      if (type === 'update') {
+        state.pendingExecutionUpdates.push(
+          ops.payload as Record<string, unknown>
+        );
+      }
+      return { data: null, error: null };
+    }
     if (table === 'automation_logs') {
       if (type === 'insert') return { data: { id: 'log1' }, error: null };
       if (type === 'update') return { data: null, error: null };
@@ -150,6 +169,7 @@ vi.mock('./meta-send', () => ({
 }));
 
 import {
+  resumePendingExecution,
   runAutomationsForTrigger,
   runSingleAutomation,
   triggerMatches,
@@ -176,9 +196,69 @@ beforeEach(() => {
   h.state.upsertCalls = [];
   h.state.conversationRow = null;
   h.state.templateRows = null;
+  h.state.accountBlockedAt = null;
+  h.state.pendingExecutionUpdates = [];
   vi.mocked(engineSendText).mockClear();
   vi.mocked(engineSendTemplate).mockClear();
   vi.mocked(engineSendInteractive).mockClear();
+});
+
+// SPEC 062 §4.3 ponto 2 — o cliente aqui é `service_role` e não passa
+// por RLS, então sem a guarda a conta bloqueada continuaria
+// auto-respondendo e enviando.
+describe('runAutomationsForTrigger — conta bloqueada (SPEC 062 §4.3)', () => {
+  it('não busca contato nem automação quando a conta está bloqueada', async () => {
+    h.state.accountBlockedAt = '2026-08-27T00:00:00Z';
+    h.state.owned = { id: 'contact-1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [updateStep()];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'contact-1',
+      context: { message_text: 'oi' },
+    });
+
+    // A checagem vem ANTES da guarda de posse do contato: uma conta
+    // bloqueada custa uma consulta, não três.
+    expect(h.state.fromCalls).toEqual(['accounts']);
+    expect(h.state.updateCalls).toHaveLength(0);
+  });
+});
+
+// Achado de code review: `resumePendingExecution` é alcançada direto por
+// id pelo dreno do cron (§5.5.1), não pelo caminho de gatilho que já
+// confere isto acima — sem a mesma guarda aqui, um step de `wait`
+// retomado depois de a conta ser bloqueada rodava todo step seguinte
+// (tag, deal, webhook), mesmo com um gatilho novo para a mesma conta já
+// sendo recusado.
+describe('resumePendingExecution — conta bloqueada (SPEC 062 §4.3)', () => {
+  it('não busca a automação nem executa passos quando a conta está bloqueada', async () => {
+    h.state.accountBlockedAt = '2026-08-27T00:00:00Z';
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [updateStep()];
+
+    await resumePendingExecution({
+      id: 'pending-1',
+      automation_id: 'automation-1',
+      user_id: 'user-1',
+      account_id: ACCOUNT,
+      contact_id: 'contact-1',
+      log_id: null,
+      parent_step_id: null,
+      branch: null,
+      next_step_position: 1,
+      context: {},
+    });
+
+    expect(h.state.fromCalls).toEqual([
+      'accounts',
+      'automation_pending_executions',
+    ]);
+    expect(h.state.updateCalls).toHaveLength(0);
+    expect(h.state.pendingExecutionUpdates).toEqual([{ status: 'done' }]);
+  });
 });
 
 describe('runAutomationsForTrigger — tenant isolation', () => {

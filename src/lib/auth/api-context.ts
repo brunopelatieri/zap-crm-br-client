@@ -33,7 +33,13 @@ import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { findActiveKeyByHash, touchLastUsed } from '@/lib/api-keys/store';
 import { hashApiKey, looksLikeApiKey } from '@/lib/api-keys/keys';
 import { hasScope, type ApiScope } from '@/lib/api-keys/scopes';
-import { forbidden, rateLimited, unauthorized } from '@/lib/api/v1/respond';
+import {
+  accountBlocked,
+  forbidden,
+  rateLimited,
+  unauthorized,
+} from '@/lib/api/v1/respond';
+import { isAccountBlocked } from '@/lib/platform/blocked';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 
 export interface ApiKeyContext {
@@ -105,11 +111,30 @@ export async function requireApiKey(
     throw forbidden(`This API key is missing the '${scope}' scope`);
   }
 
+  // SPEC 062 §4.3 pontos 6 e 7. Este contexto devolve um cliente
+  // `service_role`, que por definição não passa por RLS — a camada que
+  // barra a conta bloqueada em todo o resto. Sem esta checagem, uma
+  // chave válida de conta bloqueada continua lendo contato, criando
+  // contato e mandando mensagem.
+  //
+  // Cobre também o webhook de entrada da SPEC 055
+  // (`/api/v1/ingest/contact`), que autentica por aqui: é integração de
+  // terceiro, não mensagem de cliente final, então BLOQUEIA — ao
+  // contrário da ingestão inbound do WhatsApp, que por D-9 continua
+  // entrando.
+  //
+  // Depois da checagem de escopo de propósito: uma chave sem escopo
+  // deve ouvir sobre o escopo primeiro, que é o problema dela.
+  const db = supabaseAdmin();
+  if (await isAccountBlocked(db, row.account_id)) {
+    throw accountBlocked();
+  }
+
   touchLastUsed(row.id);
 
   return {
     authType: 'api_key',
-    supabase: supabaseAdmin(),
+    supabase: db,
     accountId: row.account_id,
     keyId: row.id,
     scopes: row.scopes,

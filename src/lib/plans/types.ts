@@ -53,10 +53,15 @@ export interface Plan {
   isPublic: boolean;
   isActive: boolean;
   sortOrder: number;
+  /** SPEC 062 §3.4 — `null` usa o padrão da plataforma (D-5). */
+  yearlyDiscountPercent: number | null;
 }
 
 export type AccountPlanStatus =
   'trialing' | 'active' | 'past_due' | 'suspended' | 'canceled';
+
+export type BillingCycle = 'monthly' | 'yearly';
+export type BillingSource = 'manual' | 'external' | 'gateway';
 
 export interface AccountPlan {
   accountId: string;
@@ -66,6 +71,17 @@ export interface AccountPlan {
   currentPeriodEnd: string | null;
   limitOverrides: PlanOverrides;
   note: string | null;
+  /** SPEC 062 §3.3 — ciclo de vida da assinatura. */
+  billingCycle: BillingCycle;
+  startedAt: string;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: string | null;
+  graceUntil: string | null;
+  /** SPEC 062 §3.7 — cobrança externa. */
+  billingSource: BillingSource;
+  externalBillingRef: string | null;
+  lastPaymentRef: string | null;
+  lastPaymentAt: string | null;
 }
 
 export type UsageBucketStatus = 'ok' | 'warn' | 'full' | 'over';

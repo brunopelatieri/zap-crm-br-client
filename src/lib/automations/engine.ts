@@ -31,6 +31,7 @@ import { sendAndPersistOutbound } from '@/lib/channels/send';
 import { ColdSendLimitError } from '@/lib/channels/cold-send-wiring';
 import type { ChannelType } from '@/lib/channels/types';
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
+import { isAccountBlocked } from '@/lib/platform/blocked';
 import { ASSIGNABLE_ACCOUNT_ROLES } from '@/lib/auth/roles';
 import { isAssignableMember } from '@/lib/inbox/assignment';
 import { excludesOptedOut, isOptedOut } from '@/lib/contacts/consent';
@@ -79,6 +80,15 @@ export async function runAutomationsForTrigger(
 ): Promise<void> {
   try {
     const db = supabaseAdmin();
+
+    // SPEC 062 §4.3 ponto 2. This client is service-role, so RLS — the
+    // layer that stops a blocked account everywhere else — does not
+    // apply. Without this line a blocked account keeps auto-replying
+    // and keeps sending. Placed before the contact-ownership check so a
+    // blocked account costs one query, not three.
+    if (await isAccountBlocked(db, input.accountId)) {
+      return;
+    }
 
     // Tenant isolation. `contactId` can be caller-supplied (the manual
     // POST /api/automations/engine entrypoint reads it straight from the
@@ -190,6 +200,18 @@ export async function resumePendingExecution(pending: {
   context: AutomationContext;
 }): Promise<void> {
   const db = supabaseAdmin();
+
+  // SPEC 062 §4.3 ponto 2, same gate as `runAutomationsForTrigger` above.
+  // This entry point is reached directly by id from the cron's drain
+  // loop, not through the trigger-matching path that already checks
+  // this — without it, a `wait` step resuming after the account was
+  // blocked would run every step after it (tags, deals, webhooks),
+  // even though a fresh trigger firing for that account is refused.
+  if (await isAccountBlocked(db, pending.account_id)) {
+    await markPending(pending.id, 'done');
+    return;
+  }
+
   const { data: automation, error } = await db
     .from('automations')
     .select('*')

@@ -68,6 +68,11 @@ const h = vi.hoisted(() => {
     const eq = (key: string) =>
       filters.find(([op, k]) => op === 'eq' && k === key)?.[2];
 
+    // SPEC 062 §4.3: conta existente e nao bloqueada — o cenario
+    // destes testes. A guarda de bloqueio roda antes do resto.
+    if (table === 'accounts')
+      return { data: { blocked_at: null }, error: null };
+
     if (table === 'contacts') {
       if (type === 'update') return { data: null, error: null };
       return { data: state.contact, error: null };

@@ -46,6 +46,7 @@ interface PlanRow {
   is_public: boolean;
   is_active: boolean;
   sort_order: number;
+  yearly_discount_percent: number | null;
 }
 
 function mapPlanRow(row: PlanRow): Plan {
@@ -62,6 +63,7 @@ function mapPlanRow(row: PlanRow): Plan {
     isPublic: row.is_public,
     isActive: row.is_active,
     sortOrder: row.sort_order,
+    yearlyDiscountPercent: row.yearly_discount_percent,
   };
 }
 
@@ -87,7 +89,7 @@ export async function getAccountPlan(
   const { data: apRow, error: apErr } = await supabase
     .from('account_plans')
     .select(
-      'account_id, plan_id, status, trial_ends_at, current_period_end, limit_overrides, note'
+      'account_id, plan_id, status, trial_ends_at, current_period_end, limit_overrides, note, billing_cycle, started_at, cancel_at_period_end, canceled_at, grace_until, billing_source, external_billing_ref, last_payment_ref, last_payment_at'
     )
     .eq('account_id', accountId)
     .maybeSingle();
@@ -129,6 +131,15 @@ export async function getAccountPlan(
     currentPeriodEnd: apRow.current_period_end,
     limitOverrides: apRow.limit_overrides ?? {},
     note: apRow.note,
+    billingCycle: apRow.billing_cycle,
+    startedAt: apRow.started_at,
+    cancelAtPeriodEnd: apRow.cancel_at_period_end,
+    canceledAt: apRow.canceled_at,
+    graceUntil: apRow.grace_until,
+    billingSource: apRow.billing_source,
+    externalBillingRef: apRow.external_billing_ref,
+    lastPaymentRef: apRow.last_payment_ref,
+    lastPaymentAt: apRow.last_payment_at,
   };
 
   const usage = await computeUsage(

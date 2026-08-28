@@ -42,6 +42,7 @@ import {
 import { decideFallback, resolveFallbackPolicy } from './fallback';
 import { matchDegradedReply, renderDegradedMenu } from './degraded-menu';
 import { isAssignableMember } from '@/lib/inbox/assignment';
+import { isAccountBlocked } from '@/lib/platform/blocked';
 import { can } from '@/lib/channels/capabilities';
 import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-channel';
 import {
@@ -955,6 +956,18 @@ export async function dispatchInboundToFlows(
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
+    // SPEC 062 §4.3. A tabela da §4.3 nomeia `/api/flows/cron` no ponto
+    // 3, mas aquele cron só marca execução abandonada como `timed_out`
+    // — ele não envia nada. Quem ENVIA por um flow é este despacho, e
+    // ele é acionado por mensagem RECEBIDA, que por D-9 continua
+    // entrando mesmo com a conta bloqueada. Sem esta linha, bloquear
+    // uma conta não impediria o flow dela de continuar respondendo ao
+    // cliente final — o buraco mais fácil de deixar aberto em toda a
+    // camada 3, porque o caminho não passa por nenhum cron.
+    if (await isAccountBlocked(db, input.accountId)) {
+      return { consumed: false, outcome: 'account_blocked' };
+    }
+
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,

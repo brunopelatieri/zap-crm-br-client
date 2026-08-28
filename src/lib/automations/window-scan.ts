@@ -52,6 +52,7 @@ import {
   isWithinSendWindow,
 } from '@/lib/broadcasts/send-window';
 import { isOptedOut } from '@/lib/contacts/consent';
+import { loadBlockedAccountIds } from '@/lib/platform/blocked';
 import { SESSION_WINDOW_MS } from '@/lib/whatsapp/session-window';
 import { shouldTrackSessionWindow } from '@/lib/channels/session-window';
 import type { ChannelType } from '@/lib/channels/types';
@@ -151,10 +152,16 @@ export async function scanSessionWindows(
       return emptyResult('no_automations');
     }
 
+    // SPEC 062 §4.3 ponto 2. Uma consulta por ciclo, não uma por
+    // automação. `service_role` não passa por RLS: sem esta linha, uma
+    // conta bloqueada continua mandando reengajamento de janela de 24h.
+    const blockedAccounts = await loadBlockedAccountIds(db);
+
     const result = emptyResult();
     result.automations = automations.length;
 
     for (const automation of automations as Automation[]) {
+      if (blockedAccounts.has(automation.account_id)) continue;
       try {
         await scanForAutomation(automation, now, result);
       } catch (err) {

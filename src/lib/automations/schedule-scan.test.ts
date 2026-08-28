@@ -22,6 +22,8 @@ const h = vi.hoisted(() => ({
     claimUpdates: [] as { id: unknown; patch: Record<string, unknown> }[],
     claimDeletes: 0,
     fromCalls: [] as string[],
+    /** SPEC 062 §4.3 ponto 2 — ids devolvidos por `loadBlockedAccountIds`. */
+    blockedAccountIds: [] as string[],
     contactFilters: [] as [string, string, unknown][],
     nextClaimId: 0,
   },
@@ -37,6 +39,13 @@ vi.mock('./admin-client', () => {
     filters: [string, string, unknown][];
   }) {
     const { table, type } = ops;
+
+    // SPEC 062 §4.3 ponto 2: a varredura pula contas bloqueadas.
+    if (table === 'accounts')
+      return {
+        data: state.blockedAccountIds.map((id) => ({ id })),
+        error: null,
+      };
 
     if (table === 'automations')
       return { data: state.automations, error: null };
@@ -111,6 +120,10 @@ vi.mock('./admin-client', () => {
       eq: (k: string, v: unknown) => (ops.filters.push(['eq', k, v]), b),
       in: (k: string, v: unknown) => (ops.filters.push(['in', k, v]), b),
       lt: (k: string, v: unknown) => (ops.filters.push(['lt', k, v]), b),
+      not: (k: string, op: string, v: unknown) => (
+        ops.filters.push(['not', k, `${op}:${v}`]),
+        b
+      ),
       order: () => b,
       limit: () => b,
       single: () => Promise.resolve(resolve(ops)),
@@ -168,6 +181,7 @@ function automation(
 
 beforeEach(() => {
   h.state.automations = [];
+  h.state.blockedAccountIds = [];
   h.state.contactTags = [{ contact_id: 'c1' }];
   h.state.contacts = [{ id: 'c1', opt_in_status: 'opted_in' }];
   h.state.contactsError = false;
@@ -182,6 +196,31 @@ beforeEach(() => {
   vi.mocked(runSingleAutomation).mockClear();
   vi.mocked(runSingleAutomation).mockImplementation(async () => {});
   vi.mocked(runAutomationsForTrigger).mockClear();
+});
+
+// SPEC 062 §4.3 ponto 2 — `service_role` não passa por RLS, então sem
+// este pulo o agendamento de uma conta bloqueada dispararia na hora
+// marcada como se nada tivesse acontecido.
+describe('conta bloqueada (SPEC 062 §4.3)', () => {
+  it('não despacha nada para a conta bloqueada', async () => {
+    h.state.automations = [automation('a1')];
+    h.state.blockedAccountIds = [ACCOUNT];
+
+    const result = await scanSchedules(NOW);
+
+    expect(runSingleAutomation).not.toHaveBeenCalled();
+    expect(result.dispatched).toBe(0);
+    expect(result.claimed).toBe(0);
+  });
+
+  it('a conta NÃO bloqueada ao lado continua despachando', async () => {
+    h.state.automations = [automation('a1')];
+    h.state.blockedAccountIds = ['outra-conta'];
+
+    await scanSchedules(NOW);
+
+    expect(runSingleAutomation).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('dispatch is per automation, never runAutomationsForTrigger', () => {

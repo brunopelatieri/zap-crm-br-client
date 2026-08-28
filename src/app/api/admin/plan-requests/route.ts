@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 
 import { requirePlatformAdminSecret } from '@/lib/auth/platform-admin';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { changeAccountPlan } from '@/lib/platform/plan-actions';
 
 export async function GET(request: Request) {
   const denied = requirePlatformAdminSecret(request);
@@ -96,73 +97,47 @@ export async function PATCH(request: Request) {
   }
 
   if (body.decision === 'approved') {
-    const [{ data: plan }, { data: current }] = await Promise.all([
-      db
-        .from('plans')
-        .select('id, code')
-        .eq('id', reqRow.requested_plan_id)
-        .maybeSingle(),
-      db
-        .from('account_plans')
-        .select('plan_id, status, limit_overrides, plans:plan_id (code)')
-        .eq('account_id', reqRow.account_id)
-        .maybeSingle(),
-    ]);
+    // SPEC 062 F6: a aplicação em si (UPDATE account_plans + INSERT
+    // account_plan_events, ecoando limit_overrides já persistido) mora
+    // em `changeAccountPlan` — a mesma função que as duas portas de
+    // `PUT …/plan` chamam. `status: 'active'` é forçado, sem tocar
+    // `limitOverrides` (omitido = mantém o valor atual), exatamente o
+    // comportamento que esta rota já tinha antes da extração.
+    const { data: plan } = await db
+      .from('plans')
+      .select('id, code')
+      .eq('id', reqRow.requested_plan_id)
+      .maybeSingle();
     if (!plan) {
       return NextResponse.json(
         { error: 'Requested plan no longer exists' },
         { status: 404 }
       );
     }
-    if (!current) {
-      return NextResponse.json(
-        { error: 'Account has no plan assigned' },
-        { status: 404 }
-      );
-    }
-    const currentPlanCode = (
-      current.plans as unknown as { code: string } | null
-    )?.code;
 
-    const { error: updateErr } = await db
-      .from('account_plans')
-      .update({
-        plan_id: plan.id,
-        status: 'active',
-        updated_by: body.actor,
-        updated_at: nowIso,
-      })
-      .eq('account_id', reqRow.account_id);
-    if (updateErr) {
+    const result = await changeAccountPlan(db, {
+      accountId: reqRow.account_id,
+      planCode: plan.code,
+      status: 'active',
+      actor: body.actor,
+      reason: note ?? `Approved plan request ${reqRow.id}`,
+    });
+
+    if (!result.ok) {
+      if (result.error === 'account_not_found') {
+        return NextResponse.json(
+          { error: 'Account has no plan assigned' },
+          { status: 404 }
+        );
+      }
       console.error(
-        '[PATCH /api/admin/plan-requests] plan update error:',
-        updateErr
+        '[PATCH /api/admin/plan-requests] changeAccountPlan failed:',
+        result.error,
+        result.details
       );
       return NextResponse.json(
         { error: 'Failed to apply plan change' },
         { status: 500 }
-      );
-    }
-
-    const { error: eventErr } = await db.from('account_plan_events').insert({
-      account_id: reqRow.account_id,
-      from_plan_code: currentPlanCode ?? null,
-      to_plan_code: plan.code,
-      from_status: current.status,
-      to_status: 'active',
-      // Achado de code review: este UPDATE não toca limit_overrides (a
-      // troca de plano não mexe em exceções negociadas por conta) — o
-      // evento tem que ecoar o valor ATUAL, não deixar cair no DEFAULT
-      // '{}' da coluna, senão a trilha de auditoria (append-only) fica
-      // dizendo que os overrides foram zerados quando não foram.
-      overrides_after: current.limit_overrides ?? {},
-      actor: body.actor,
-      reason: note ?? `Approved plan request ${reqRow.id}`,
-    });
-    if (eventErr) {
-      console.error(
-        '[PATCH /api/admin/plan-requests] event insert error:',
-        eventErr
       );
     }
   }

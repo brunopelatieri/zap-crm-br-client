@@ -39,6 +39,10 @@ vi.mock('./admin-client', () => {
     filters: [string, string, unknown][];
   }) {
     const { table, type, select } = ops;
+    // SPEC 062 §4.3: conta existente e nao bloqueada — o cenario
+    // destes testes. A guarda de bloqueio roda antes do resto.
+    if (table === 'accounts')
+      return { data: { blocked_at: null }, error: null };
     if (table === 'contacts') return { data: state.owned, error: null };
     if (table === 'conversations') {
       if (type === 'update') return { data: null, error: null };

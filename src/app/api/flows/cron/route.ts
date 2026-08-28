@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { resolveFallbackPolicy } from '@/lib/flows/fallback';
+import { loadBlockedAccountIds } from '@/lib/platform/blocked';
 
 /**
  * Sweep abandoned active flow runs.
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
   const { data: runs, error } = await admin
     .from('flow_runs')
     .select(
-      'id, flow_id, user_id, contact_id, last_advanced_at, flows ( fallback_policy )'
+      'id, flow_id, account_id, user_id, contact_id, last_advanced_at, flows ( fallback_policy )'
     )
     .eq('status', 'active');
 
@@ -67,14 +68,29 @@ export async function GET(request: Request) {
   type Row = {
     id: string;
     flow_id: string;
+    account_id: string;
     user_id: string;
     contact_id: string | null;
     last_advanced_at: string;
     flows: { fallback_policy: unknown } | { fallback_policy: unknown }[] | null;
   };
 
+  // SPEC 062 §4.3 ponto 3. Este sweep não ENVIA nada — só marca
+  // execução abandonada como `timed_out` — então pular contas
+  // bloqueadas aqui é consistência com os outros motores, não proteção
+  // contra envio (essa mora em `dispatchInboundToFlows`). A consequência
+  // é benigna e reversível: as execuções ativas de uma conta bloqueada
+  // ficam paradas em `active` e o primeiro sweep depois do desbloqueio
+  // as encerra.
+  const blockedAccounts = await loadBlockedAccountIds(admin);
+
   let swept = 0;
+  let skippedBlocked = 0;
   for (const r of runs as Row[]) {
+    if (blockedAccounts.has(r.account_id)) {
+      skippedBlocked++;
+      continue;
+    }
     const flowsField = Array.isArray(r.flows) ? r.flows[0] : r.flows;
     const policy = resolveFallbackPolicy(flowsField?.fallback_policy ?? null);
     const lastAdvanced = new Date(r.last_advanced_at);
@@ -109,5 +125,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ swept });
+  return NextResponse.json({ swept, skippedBlocked });
 }

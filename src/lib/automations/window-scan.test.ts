@@ -26,6 +26,8 @@ const h = vi.hoisted(() => ({
     claimUpdates: [] as { id: unknown; patch: Record<string, unknown> }[],
     claimDeletes: 0,
     fromCalls: [] as string[],
+    /** SPEC 062 §4.3 ponto 2 — ids devolvidos por `loadBlockedAccountIds`. */
+    blockedAccountIds: [] as string[],
     /** Filtros da última consulta a `conversations` (fase B). */
     conversationFilters: [] as [string, string, unknown][],
     nextClaimId: 0,
@@ -42,6 +44,13 @@ vi.mock('./admin-client', () => {
     filters: [string, string, unknown][];
   }) {
     const { table, type } = ops;
+
+    // SPEC 062 §4.3 ponto 2: a varredura pula contas bloqueadas.
+    if (table === 'accounts')
+      return {
+        data: state.blockedAccountIds.map((id) => ({ id })),
+        error: null,
+      };
 
     if (table === 'automations')
       return { data: state.automations, error: null };
@@ -113,6 +122,10 @@ vi.mock('./admin-client', () => {
       is: (k: string, v: unknown) => (ops.filters.push(['is', k, v]), b),
       gt: (k: string, v: unknown) => (ops.filters.push(['gt', k, v]), b),
       lt: (k: string, v: unknown) => (ops.filters.push(['lt', k, v]), b),
+      not: (k: string, op: string, v: unknown) => (
+        ops.filters.push(['not', k, `${op}:${v}`]),
+        b
+      ),
       lte: (k: string, v: unknown) => (ops.filters.push(['lte', k, v]), b),
       order: () => b,
       limit: () => b,
@@ -188,6 +201,7 @@ function conversation(
 
 beforeEach(() => {
   h.state.automations = [];
+  h.state.blockedAccountIds = [];
   h.state.conversations = [];
   h.state.contacts = [];
   h.state.flowRuns = [];
@@ -208,6 +222,31 @@ beforeEach(() => {
 // ============================================================
 // Achado nº 1 da 2ª revisão — o teste que a SPEC pede por nome.
 // ============================================================
+
+// SPEC 062 §4.3 ponto 2 — reengajamento de janela de 24h é envio, e
+// conta bloqueada não envia.
+describe('conta bloqueada (SPEC 062 §4.3)', () => {
+  it('não reengaja pela conta bloqueada', async () => {
+    h.state.automations = [automation('a1')];
+    h.state.conversations = [conversation('conv1', 'c1')];
+    h.state.blockedAccountIds = [ACCOUNT];
+
+    const result = await scanSessionWindows(NOW);
+
+    expect(runSingleAutomation).not.toHaveBeenCalled();
+    expect(result.dispatched).toBe(0);
+  });
+
+  it('a conta NÃO bloqueada ao lado continua reengajando', async () => {
+    h.state.automations = [automation('a1')];
+    h.state.conversations = [conversation('conv1', 'c1')];
+    h.state.blockedAccountIds = ['outra-conta'];
+
+    await scanSessionWindows(NOW);
+
+    expect(runSingleAutomation).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('dispatch is per automation, not per trigger (SPEC 045 §5.5.3)', () => {
   it('two automations + one eligible conversation = exactly 2 sends, not 4', async () => {

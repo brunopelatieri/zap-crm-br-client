@@ -11,6 +11,20 @@ export const WEBHOOK_EVENTS = [
   'message.received', // an inbound WhatsApp message landed
   'message.status_updated', // a sent message advanced (sent/delivered/read)
   'conversation.created', // a new conversation was opened for a contact
+  // SPEC 062 §6.1, §8 — plan lifecycle. Dispatched through this same
+  // account-scoped mechanism because the SPEC 063 SMTP/notification
+  // outbox it was originally designed against doesn't exist yet
+  // (sibling SPEC, not implemented) — an account only hears about
+  // these once it registers an endpoint subscribed to them, same as
+  // any other event here.
+  'plan.changed', // self-service plan/cycle change applied immediately
+  'plan.expiring', // current_period_end is 7 or 1 day(s) out
+  'plan.expired', // current_period_end passed; account moved to past_due
+  'plan.canceled', // self-service scheduled cancel_at_period_end = true
+  'plan.cancel_reverted', // self-service reverted a scheduled cancellation
+  'plan.canceled_applied', // a scheduled cancellation took effect at period end
+  'plan.grace_ended', // the grace period after past_due ended (D-7: does not block)
+  'plan.renewed', // POST /api/admin/accounts/{id}/billing/renew advanced the period
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -21,6 +35,16 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   'message.status_updated':
     'A message you sent changed delivery status (sent/delivered/read/failed)',
   'conversation.created': 'A new conversation was opened',
+  'plan.changed': 'The account self-service changed its plan or billing cycle',
+  'plan.expiring': "The account's plan is about to expire (7 or 1 day out)",
+  'plan.expired': "The account's plan expired and moved to past_due",
+  'plan.canceled': 'The account scheduled its plan to cancel at period end',
+  'plan.cancel_reverted': 'The account reverted a scheduled cancellation',
+  'plan.canceled_applied':
+    'A scheduled plan cancellation took effect at period end',
+  'plan.grace_ended':
+    'The past_due grace period ended (access is not revoked by this alone)',
+  'plan.renewed': 'An external payment renewed the account plan period',
 };
 
 /** Type-narrow an unknown value into a valid `WebhookEvent`. */

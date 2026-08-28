@@ -11,6 +11,12 @@ import type { RetentionPurgeResult } from '@/lib/retention/types';
 
 interface RetentionPreviewProps {
   channelType: ChannelType;
+  /**
+   * Rota de prévia. Passada pelo chamador porque a mesma prévia serve
+   * a contas diferentes no console (SPEC 062 §7.5) — o componente não
+   * conhece nem escolhe conta, só reporta o que a rota respondeu.
+   */
+  endpoint: string;
   /** Valores CRUS do formulário — string vazia = herdar, ainda não
    *  validados; a rota de prévia valida e resolve contra o `.env`. */
   maxMessages: string;
@@ -27,11 +33,12 @@ interface RetentionPreviewProps {
  */
 export function RetentionPreview({
   channelType,
+  endpoint,
   maxMessages,
   retentionDays,
   maxFavorites,
 }: RetentionPreviewProps) {
-  const t = useTranslations('Settings.retention');
+  const t = useTranslations('Platform.retention');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RetentionPurgeResult | null>(null);
 
@@ -39,7 +46,7 @@ export function RetentionPreview({
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch('/api/account/retention/preview', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

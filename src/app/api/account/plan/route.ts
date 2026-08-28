@@ -22,28 +22,41 @@ export async function GET() {
     const ctx = await getCurrentAccount();
     const snapshot = await getAccountPlan(ctx.accountId);
 
-    const [{ data: catalog }, { data: pendingRequest }] = await Promise.all([
-      ctx.supabase
-        .from('plans')
-        .select(
-          'id, code, name, description, price_cents, currency, billing_period, limits, features, sort_order'
-        )
-        .eq('is_active', true)
-        .eq('is_public', true)
-        .order('sort_order', { ascending: true }),
-      ctx.supabase
-        .from('plan_change_requests')
-        .select('id, requested_plan_id, status, message, created_at')
-        .eq('account_id', ctx.accountId)
-        .eq('status', 'pending')
-        .maybeSingle(),
-    ]);
+    const [{ data: catalog }, { data: pendingRequest }, { data: settings }] =
+      await Promise.all([
+        ctx.supabase
+          .from('plans')
+          .select(
+            'id, code, name, description, price_cents, currency, billing_period, limits, features, sort_order, yearly_discount_percent'
+          )
+          .eq('is_active', true)
+          .eq('is_public', true)
+          .order('sort_order', { ascending: true }),
+        ctx.supabase
+          .from('plan_change_requests')
+          .select('id, requested_plan_id, status, message, created_at')
+          .eq('account_id', ctx.accountId)
+          .eq('status', 'pending')
+          .maybeSingle(),
+        // SPEC 062 §6.1/§7.6 — o catálogo precisa do desconto anual
+        // padrão para calcular o preço anual de todo plano cujo
+        // `yearlyDiscountPercent` próprio é `null` (D-5), e a tela
+        // precisa saber se o autosserviço está ligado antes de abrir o
+        // modal de ciclo em vez do fluxo de solicitação antigo.
+        ctx.supabase
+          .from('platform_settings')
+          .select('self_service_enabled, default_yearly_discount_percent')
+          .maybeSingle(),
+      ]);
 
     return NextResponse.json({
       quotasEnforced: snapshot.quotasEnforced,
       plan: snapshot.plan,
       accountPlan: snapshot.accountPlan,
       usage: snapshot.usage,
+      selfServiceEnabled: settings?.self_service_enabled ?? false,
+      defaultYearlyDiscountPercent:
+        settings?.default_yearly_discount_percent ?? 0,
       catalog: (catalog ?? []).map((row) => ({
         id: row.id,
         code: row.code,
@@ -55,6 +68,7 @@ export async function GET() {
         limits: row.limits,
         features: row.features,
         sortOrder: row.sort_order,
+        yearlyDiscountPercent: row.yearly_discount_percent,
       })),
       pendingRequest: pendingRequest
         ? {

@@ -1,8 +1,10 @@
 /**
  * Validação do valor de um campo de limite vindo do formulário do
- * painel (SPEC 060 §8.2) ou do corpo de `/api/account/retention` e
- * `/api/account/retention/preview`. Puro — a rota só decide o status
- * HTTP a partir do resultado.
+ * painel (SPEC 060 §8.2) ou do corpo das rotas de retenção do console
+ * (`/api/platform/retention` e `/api/platform/accounts/[accountId]/
+ * retention[/preview]` — a SPEC 062 §3.8 mudou o dono da configuração,
+ * não o formato do campo). Puro — a rota só decide o status HTTP a
+ * partir do resultado.
  *
  * Vazio/`null`/`undefined` é uma entrada VÁLIDA que significa "herdar"
  * (§3.4) — nunca confundir com um valor inválido. `0` é igualmente
@@ -23,8 +25,14 @@ export type ParsedRetentionLimit =
  * silenciosa e indefinida (`sweepOnePair` só loga e soma `errors++`).
  * Um teto bem abaixo disso, compartilhado pelas três dimensões, fecha
  * a porta sem precisar de um limite por campo.
+ *
+ * Exportado (achado de code review, SPEC 062): `global-defaults.ts`
+ * (`parseConsoleDimension`/`validateRetentionDefaults`) reimplementava
+ * a mesma validação de dimensão sem este teto — reusar a constante,
+ * não só a ideia, é o que garante que as duas cópias não divergem de
+ * novo no futuro.
  */
-const MAX_RETENTION_LIMIT_VALUE = 1_000_000;
+export const MAX_RETENTION_LIMIT_VALUE = 1_000_000;
 
 export function parseRetentionLimitInput(value: unknown): ParsedRetentionLimit {
   if (value === null || value === undefined || value === '') {

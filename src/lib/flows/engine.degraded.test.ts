@@ -46,6 +46,10 @@ vi.mock('./admin-client', () => {
 
   function resolve(ops: FakeOps) {
     const { table, type } = ops;
+    // SPEC 062 §4.3: conta existente e nao bloqueada — o cenario
+    // destes testes. A guarda de bloqueio roda antes do resto.
+    if (table === 'accounts')
+      return { data: { blocked_at: null }, error: null };
     if (table === 'flow_runs') {
       if (type === 'update') {
         state.runUpdates.push(ops.payload as Record<string, unknown>);

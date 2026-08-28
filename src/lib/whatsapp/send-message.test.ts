@@ -250,7 +250,12 @@ function makeDb(results: Record<string, QueuedResult>) {
       ) => Promise.resolve(settle()).then(resolve, reject),
     };
     const settle = () => {
-      const r = results[`${table}.${verb}`] ?? {};
+      // SPEC 062 §4.3 ponto 4: `resolveChannelContext` confere
+      // `accounts.blocked_at` antes de resolver credencial. Padrão:
+      // conta existente e não bloqueada — sobrescrevível por teste.
+      const r =
+        results[`${table}.${verb}`] ??
+        (table === 'accounts' ? { data: { blocked_at: null } } : {});
       return { data: r.data ?? null, count: r.count, error: r.error ?? null };
     };
     return c;
@@ -396,5 +401,37 @@ describe('sendMessageToConversation — coldSendOrigin (canal QR)', () => {
     expect(db.inserts.some((i) => i.table === 'channel_cold_sends')).toBe(
       false
     );
+  });
+});
+
+// Achado de code review (SPEC 062 §4.3 ponto 4): `resolveChannelContext`
+// já confere `accounts.blocked_at` antes de resolver credencial, mas o
+// catch em volta de `resolveChannelForConversation` só traduzia
+// `ChannelNotConfiguredError` — o `AccountBlockedError` escapava como um
+// erro cru, e os dois chamadores (rota do inbox, rota pública v1) caem
+// no catch genérico deles e devolvem 500 em vez de 403. A rota do inbox
+// nem passa por `getCurrentAccount()`/`requireRole()` antes disto, então
+// este é o único ponto onde o bloqueio é detectado nesse caminho.
+describe('sendMessageToConversation — conta bloqueada (SPEC 062 §4.3)', () => {
+  const base: SendMessageParams = {
+    conversationId: 'conv-1',
+    messageType: 'text',
+    contentText: 'oi',
+  };
+
+  it('traduz AccountBlockedError em SendMessageError 403, não deixa vazar cru', async () => {
+    const db = dbForQr({
+      'accounts.select': { data: { blocked_at: '2026-08-27T00:00:00Z' } },
+    });
+
+    await expect(
+      sendMessageToConversation(db.client, 'acct-1', base)
+    ).rejects.toMatchObject({
+      name: 'SendMessageError',
+      code: 'account_blocked',
+      status: 403,
+    });
+
+    expect(qrSendText).not.toHaveBeenCalled();
   });
 });

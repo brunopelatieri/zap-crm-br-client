@@ -5,9 +5,11 @@ import type { AutomationContext } from '@/lib/automations/engine';
 import { scanSessionWindows } from '@/lib/automations/window-scan';
 import { scanSchedules } from '@/lib/automations/schedule-scan';
 import { runMessageRetention } from '@/lib/retention/sweep';
+import { runPlanLifecycle } from '@/lib/plans/lifecycle';
+import { deliverPending } from '@/lib/notifications/dispatch';
 
 /**
- * Três fases, um único agendamento:
+ * Cinco fases, um único agendamento:
  *
  *   1. **Drenar** as `automation_pending_executions` vencidas (o step
  *      `wait`). Comportamento original desta rota.
@@ -15,10 +17,17 @@ import { runMessageRetention } from '@/lib/retention/sweep';
  *   3. **Varrer** os agendamentos do gatilho `time_based` (SPEC 046 §6).
  *   4. **Varrer** a retenção de mensagens, respeitando o intervalo
  *      configurado (SPEC 060 §6, porta 1 — a padrão).
+ *   5. **Varrer** o vencimento de plano — avisos, `past_due`, carência
+ *      encerrada e a efetivação de cancelamentos agendados
+ *      (SPEC 062 §8, F9).
+ *   6. **Reentregar** a outbox de notificações do sistema — a porta 2
+ *      da SPEC 063 §5, rede de segurança para tudo que a porta 1
+ *      (`after()` na rota que emitiu o evento) perdeu.
  *
  * Por que a varredura mora AQUI e não numa rota nova (§5.5.1, e o mesmo
- * argumento vale para a fase 3 — SPEC 046 §6.1 — e para a fase 4 —
- * SPEC 060 §6)
+ * argumento vale para a fase 3 — SPEC 046 §6.1 —, para a fase 4 —
+ * SPEC 060 §6 —, para a fase 5 — SPEC 062 §8 — e para a fase 6 —
+ * SPEC 063 §5)
  *
  *   O agendamento não é código: vive em `supabase/setup/cron-jobs.sql`,
  *   que não é uma migração — é configuração de ambiente, carrega a URL e
@@ -109,7 +118,7 @@ export async function GET(request: Request) {
     processed++;
   }
 
-  // ── Fases 2, 3 e 4: varreduras de janela, agendamento e retenção ──
+  // ── Fases 2 a 5: varreduras de janela, agendamento, retenção e ciclo de plano ──
   //
   // Depois da drenagem (a ordem que §5.5.1 pede) e FORA do caminho da
   // resposta. `after()` casa com o `timeout_milliseconds := 20000` do
@@ -155,6 +164,39 @@ export async function GET(request: Request) {
       console.log(
         '[automations-cron] retention sweep:',
         JSON.stringify(retentionOutcome.result)
+      );
+    }
+
+    // Fase 5 (SPEC 062 §8) — sem interruptor de `.env`: ao contrário da
+    // retenção, o vencimento de plano não tem um "nasce desligado" —
+    // uma conta só entra no escopo quando tem `current_period_end`
+    // preenchido, e nenhuma migração inventa isso para quem já é
+    // cliente (069 §3.3). Contas sem vencimento continuam custando
+    // zero nesta fase.
+    const lifecycleResult = await runPlanLifecycle(new Date());
+    if (
+      lifecycleResult.expiringNotices > 0 ||
+      lifecycleResult.expired > 0 ||
+      lifecycleResult.canceledApplied > 0 ||
+      lifecycleResult.graceEnded > 0 ||
+      lifecycleResult.errors > 0
+    ) {
+      console.log(
+        '[automations-cron] plan lifecycle:',
+        JSON.stringify(lifecycleResult)
+      );
+    }
+
+    // Fase 6 (SPEC 063 §5, porta 2) — reentrega o que a porta 1 perdeu
+    // (processo reiniciado, SMTP fora do ar, evento emitido pelo
+    // próprio cron na fase 5 acima). Roda por último de propósito: dá
+    // à fase 5 a chance de já ter agendado sua própria porta 1 antes
+    // desta varredura rodar.
+    const notificationsResult = await deliverPending(new Date());
+    if (notificationsResult.claimed > 0) {
+      console.log(
+        '[automations-cron] notifications dispatch:',
+        JSON.stringify(notificationsResult)
       );
     }
   });

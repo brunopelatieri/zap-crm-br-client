@@ -24,6 +24,7 @@ import {
 } from '@/lib/channels/send';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 import { accountCapabilityCoverage } from '@/lib/channels/capabilities';
+import { isAccountBlocked } from '@/lib/platform/blocked';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import {
   sanitizePhoneForMeta,
@@ -119,6 +120,24 @@ export async function assertAccountCanBroadcast(
   db: SupabaseClient,
   accountId: string
 ): Promise<void> {
+  // SPEC 062 §4.3 ponto 4, ramo do disparo em massa.
+  //
+  // Esta é a única checagem de bloqueio no caminho de campanha:
+  // `deliverBroadcast` monta o `ChannelContext` por
+  // `cloudChannelContext()` e NÃO passa por `resolveChannelContext`, de
+  // modo que o backstop de `channels/send.ts` não alcança daqui.
+  // Todo ponto de partida de campanha — API pública, assistente do
+  // painel, agendador, `ingest/send.ts` — chama esta função (direta ou
+  // via `loadWhatsappConfig`), então é aqui que a campanha de uma conta
+  // bloqueada morre, ANTES de a linha em `broadcasts` ser criada.
+  if (await isAccountBlocked(db, accountId)) {
+    throw new BroadcastError(
+      'account_blocked',
+      'This account is blocked and cannot send broadcasts.',
+      403
+    );
+  }
+
   const types = await loadAccountChannelTypes(db, accountId);
   if (accountCapabilityCoverage(types, 'broadcast') === 'none') {
     throw new BroadcastError(

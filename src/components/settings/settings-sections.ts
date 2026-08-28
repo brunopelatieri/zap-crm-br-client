@@ -1,5 +1,4 @@
 import {
-  Archive,
   Coins,
   FileText,
   KeyRound,
@@ -39,7 +38,6 @@ export const SETTINGS_SECTIONS = [
   'members',
   'api',
   'webhook-log',
-  'retention',
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -48,11 +46,13 @@ export const DEFAULT_SECTION: SettingsSection = 'overview';
 
 /**
  * Rail grouping. `minRole`, when set, hides the item from the rail
- * (`settings-rail.tsx`) for anyone below that role — used for
- * "Retention" (SPEC 060 §8.2: "a seção só entra na lista quando o
- * papel é owner"). Every other section has no floor and is visible to
- * any member; per-action gating inside the panel (`<RequireRole>`)
- * still applies where relevant.
+ * (`settings-rail.tsx`) for anyone below that role. No section uses it
+ * right now — "Retention" was the only one, and SPEC 062 §3.8 moved
+ * that whole feature to the platform console. The field STAYS: it is
+ * the rail's gating mechanism and will be used again (SPEC 062 §7.5
+ * says so explicitly). Sections without a floor are visible to any
+ * member; per-action gating inside a panel (`<RequireRole>`) still
+ * applies where relevant.
  */
 export interface SectionMeta {
   id: SettingsSection;
@@ -135,13 +135,6 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     label: 'Webhook log',
     icon: ScrollText,
     group: 'workspace',
-  },
-  retention: {
-    id: 'retention',
-    label: 'Retention',
-    icon: Archive,
-    group: 'account',
-    minRole: 'owner',
   },
 };
 
