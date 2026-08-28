@@ -26,20 +26,22 @@
  *   `ai_generated`), mapeamento de erro tipado, logs. Uniformizar isso
  *   seria mudança de comportamento disfarçada de limpeza.
  *
- * Por que ninguém aqui consulta a tabela `channels`
+ * Onde a credencial oficial é resolvida (SPEC 064 F2)
  *
- *   A migração 055 (que a cria) e a 057 (`conversations.channel_id`)
- *   ainda NÃO estão aplicadas nos projetos de produção. Consultar
- *   `channels` derrubaria todo envio hoje. Enquanto isso,
- *   `resolveChannelContext` monta um canal Cloud sintético a partir da
- *   `whatsapp_config` — a mesma linha de onde as credenciais sempre
- *   vieram. Quando a 057 entrar, o único ponto a mudar é aqui: passa a
- *   ler o canal da conversa e o resto da aplicação não percebe.
+ *   Não aqui. O cabeçalho anterior dizia que este arquivo não consultava
+ *   `channels` porque a 055/057 ainda não estavam em produção — elas
+ *   estão, e a 072 tirou o singleton de `whatsapp_config`. Desde então o
+ *   ramo Cloud delega a `lib/whatsapp/cloud-channels.ts`, que aplica o
+ *   D-7 (canal explícito > padrão do tipo > erro). Aqui ficou só o que
+ *   sempre foi deste arquivo: decriptar o token e montar o
+ *   `ChannelContext`.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { decrypt } from '@/lib/whatsapp/encryption';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import type { WhatsappConfigRow } from '@/lib/whatsapp/cloud-channels';
 import { resolveInstanceByChannelId } from '@/lib/evolution/instances';
 import { assertAccountNotBlocked } from '@/lib/platform/blocked';
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive';
@@ -55,6 +57,8 @@ import {
   recordColdSend,
   ColdSendLimitError,
 } from './cold-send-wiring';
+import { resolveDefaultChannelId } from './default-channel';
+import { ChannelNotConfiguredError, ChannelCapabilityError } from './errors';
 import { getAdapter } from './registry';
 import type {
   Channel,
@@ -64,6 +68,22 @@ import type {
 } from './types';
 
 /**
+ * Reexportados (SPEC 064 F2).
+ *
+ * As duas classes de erro e o resolvedor de canal padrão saíram deste
+ * arquivo para `errors.ts` e `default-channel.ts` — `cloud-channels.ts`
+ * precisa dos três e é chamado daqui, e mantê-los aqui fecharia um ciclo
+ * de import. Reexportar preserva `@/lib/channels/send` como o endereço
+ * de sempre: nenhum dos onze arquivos que os importam mudou, e
+ * `instanceof` continua valendo porque a classe é a mesma.
+ */
+export {
+  ChannelNotConfiguredError,
+  ChannelCapabilityError,
+  resolveDefaultChannelId,
+};
+
+/**
  * Canal usado por quem ainda não informa um.
  *
  * Todo chamador de hoje é do canal oficial, e continuará sendo até a
@@ -71,29 +91,6 @@ import type {
  * a F4 não precise reabrir as cinco assinaturas.
  */
 export const DEFAULT_CHANNEL_TYPE: ChannelType = 'whatsapp_cloud';
-
-/**
- * A conta não tem canal configurado.
- *
- * Erro próprio (e não uma `Error` genérica) porque cada chamador precisa
- * mapeá-lo para a SUA forma de falha — `SendMessageError` com HTTP 400 na
- * API, `BroadcastError` no disparo, `Error` simples nos motores — e a
- * mensagem tem de continuar idêntica em cada um deles.
- */
-export class ChannelNotConfiguredError extends Error {
-  constructor(message = 'WhatsApp not configured for this account') {
-    super(message);
-    this.name = 'ChannelNotConfiguredError';
-  }
-}
-
-/** O canal não sabe fazer o que foi pedido (matriz de `capabilities`). */
-export class ChannelCapabilityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ChannelCapabilityError';
-  }
-}
 
 // ------------------------------------------------------------
 // Conteúdo de saída
@@ -133,13 +130,11 @@ export type OutboundContent =
 // ------------------------------------------------------------
 
 /**
- * Linha de `whatsapp_config`. Tipada de forma frouxa de propósito: o
- * `select('*')` é o mesmo dos chamadores originais, e o que muda entre
- * os três projetos Supabase (a coluna `channel_id` só existe onde a 055
- * já rodou) não pode virar erro de tipo.
+ * Linha de `whatsapp_config` — definida em `cloud-channels.ts`, que é
+ * quem a lê desde a SPEC 064 F2. Reexportada porque `ResolvedChannel`
+ * (abaixo) a usa e este arquivo é o endereço público da camada.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type WhatsappConfigRow = any;
+export type { WhatsappConfigRow };
 
 export interface ResolvedChannel {
   ctx: ChannelContext;
@@ -164,11 +159,15 @@ export async function resolveChannelContext(
   accountId: string,
   channelType: ChannelType = DEFAULT_CHANNEL_TYPE,
   /**
-   * Obrigatório para `whatsapp_qr`. Ao contrário do Cloud (um canal por
-   * conta, resolvível só pelo tipo), uma conta pode ter VÁRIAS
-   * instâncias QRCode — `channelType` sozinho não desambigua qual.
-   * Quem chama (a wiring de inbox/motores por conversa — SPEC 049)
-   * precisa saber de antemão o `channels.id` da thread.
+   * Obrigatório para `whatsapp_qr`, e **honrado também no Cloud** desde
+   * a SPEC 064: uma conta pode ter vários números oficiais, e
+   * `channelType` sozinho não desambigua qual. Quem chama (a wiring de
+   * inbox/motores por conversa — SPEC 049) já sabe o `channels.id` da
+   * thread.
+   *
+   * Ausente no Cloud = canal Cloud padrão da conta (D-11). Ausente no
+   * QRCode continua sendo erro: lá não existe "o padrão implícito" que
+   * dê para defender — todo caminho QR nasce de uma conversa.
    */
   channelId?: string
 ): Promise<ResolvedChannel> {
@@ -220,27 +219,33 @@ export async function resolveChannelContext(
     );
   }
 
-  const { data: config, error } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-
-  if (error || !config) {
-    throw new ChannelNotConfiguredError();
-  }
+  // SPEC 064 §4.2 — o ramo Cloud passa a honrar o `channelId`.
+  //
+  // Antes desta fase ele o IGNORAVA e caía num `.single()` sobre
+  // `whatsapp_config` por `account_id`. Isso valia enquanto o índice da
+  // 055 garantia um canal Cloud por conta; com dois números na mesma
+  // conta o `.single()` estoura, e responder uma conversa do número B
+  // pelo número A seria pior do que estourar. `resolveCloudConfig`
+  // aplica o D-7 (explícito > padrão do tipo > erro) e recusa canal de
+  // outra conta, de outro tipo, desativado ou sem credencial — tudo
+  // ANTES do `decrypt()`.
+  const { channel, config } = await resolveCloudConfig(
+    db,
+    accountId,
+    channelId
+  );
 
   return {
     ctx: cloudChannelContext({
       accountId,
       phoneNumberId: config.phone_number_id,
       accessToken: decrypt(config.access_token),
-      // `channel_id` só existe onde a 055 já rodou; até lá o id da
-      // própria config identifica o canal nos logs de erro.
-      channelId: config.channel_id ?? config.id,
+      channelId: channel.id,
       userId: config.user_id,
-      identifier: config.phone_number_id ?? null,
-      connected: config.status === 'connected',
+      // O telefone do canal (D-9) quando já reconciliado; senão o
+      // `phone_number_id`, que é o que o backfill da 055 gravou.
+      identifier: channel.identifier ?? config.phone_number_id ?? null,
+      connected: channel.status === 'connected',
     }),
     configRow: config,
   };
@@ -310,80 +315,6 @@ export async function resolveChannelForConversation(
   }
 
   return resolveChannelContext(db, accountId, channelType, channelId);
-}
-
-/**
- * O `channels.id` padrão da conta (migração 059, redefinido pela 072).
- *
- * Usado pelos pontos que abrem conversa fora do `ingest.ts` (API
- * pública, envio do inbox por `contact_id`), onde ninguém escolheu
- * canal.
- *
- * ⚠️ **`is_default` é por (conta, TIPO) desde a migração 072** — o
- * índice único que garantia um só padrão por conta virou
- * `idx_channels_one_default_per_account_type`. Uma conta com um número
- * oficial e uma instância QRCode tem, legitimamente, DOIS canais com
- * `is_default = TRUE`, então o `.maybeSingle()` que esta função usava
- * passou a devolver `PGRST116` — e como o erro era descartado, o
- * resultado não era um 500 e sim um fallback mudo para
- * `whatsapp_config`, que por sua vez quebra assim que a conta tem dois
- * números. Daí a derivação explícita abaixo.
- *
- * Regra do D-11, nesta ordem: **padrão do `whatsapp_cloud` → padrão do
- * `whatsapp_qr` → erro**. O número oficial é o canal de negócio; o
- * QRCode é complemento. Derivar em vez de guardar em
- * `accounts.default_channel_id` evita a segunda fonte de verdade que
- * sempre acaba divergindo.
- *
- * Canais `disabled` nunca são devolvidos: eles não podem enviar, e
- * `set_default_channel` (072 §6.1) recusa promovê-los pelo mesmo motivo.
- *
- * `type` restringe a busca a um tipo — é o que os caminhos específicos
- * usam (o desvio `fallback_channel` das automações pede um canal QR
- * explicitamente, e um Cloud não serviria).
- */
-export async function resolveDefaultChannelId(
-  db: SupabaseClient,
-  accountId: string,
-  type?: ChannelType
-): Promise<string> {
-  // Preferência de tipo, do D-11. Com `type`, a lista tem um item só.
-  const preference: ChannelType[] = type
-    ? [type]
-    : ['whatsapp_cloud', 'whatsapp_qr'];
-
-  const { data: channels, error } = await db
-    .from('channels')
-    .select('id, type, is_default, status, created_at')
-    .eq('account_id', accountId)
-    .in('type', preference)
-    .neq('status', 'disabled');
-
-  // Erro de leitura não pode virar "conta sem canal": isso mandaria o
-  // chamador criar/abortar por um motivo que não é o verdadeiro.
-  if (error) {
-    throw new ChannelNotConfiguredError(
-      `failed to read channels for account ${accountId}: ${error.message}`
-    );
-  }
-
-  for (const wanted of preference) {
-    const ofType = (channels ?? []).filter((c) => c.type === wanted);
-    if (ofType.length === 0) continue;
-
-    const marked = ofType.find((c) => c.is_default);
-    if (marked) return marked.id;
-
-    // Tipo com canal ativo mas sem padrão marcado: a 072 elege um no
-    // backfill, então isto só acontece se alguém mexeu em `is_default`
-    // fora da RPC. Mais antigo primeiro, o mesmo critério do backfill —
-    // determinístico, nunca "o primeiro que aparecer".
-    return ofType.sort((a, b) =>
-      String(a.created_at).localeCompare(String(b.created_at))
-    )[0].id;
-  }
-
-  throw new ChannelNotConfiguredError();
 }
 
 /**

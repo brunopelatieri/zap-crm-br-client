@@ -147,6 +147,10 @@ const h = vi.hoisted(() => {
       upsert: (p: unknown) => ((ops.type = 'upsert'), (ops.payload = p), b),
       eq: (k: string, v: unknown) => (ops.filters.push(['eq', k, v]), b),
       in: (k: string, v: unknown) => (ops.filters.push(['in', k, v]), b),
+      // `resolveDefaultChannelId` filtra `status <> 'disabled'`
+      // (SPEC 064 D-11); sem este elo o caminho Cloud morre com
+      // "neq is not a function" em vez de resolver o canal.
+      neq: (k: string, v: unknown) => (ops.filters.push(['neq', k, v]), b),
       gte: (k: string, v: unknown) => (ops.filters.push(['gte', k, v]), b),
       is: (k: string, v: unknown) => (ops.filters.push(['is', k, v]), b),
       order: () => b,
@@ -479,6 +483,23 @@ describe('sendViaFallbackChannel — guardrails que a decisão de rota já impõ
 
   it('janela ABERTA não desvia: o envio segue pelo canal da conversa', async () => {
     h.state.conversationRow = { last_customer_message_at: hoursAgoIso(1) };
+    // O canal oficial da conta. Desde a SPEC 064 F2 o caminho Cloud
+    // resolve a credencial PELO CANAL (`resolveCloudConfig`), então sem
+    // esta linha em `channels` o envio nem chega à `whatsapp_config` —
+    // e a asserção abaixo mediria a falha, não o caminho normal.
+    h.state.channels = [
+      ...h.state.channels,
+      {
+        id: 'ch-cloud-1',
+        account_id: ACCOUNT,
+        user_id: 'u1',
+        type: 'whatsapp_cloud',
+        name: 'WhatsApp Oficial',
+        status: 'connected',
+        is_default: true,
+        created_at: '2020-01-01T00:00:00Z',
+      },
+    ];
 
     await run();
 

@@ -91,21 +91,31 @@ interface RecordedOp {
   filters: Array<[string, ...unknown[]]>;
 }
 
-function makeDb(
-  results: Record<
-    string,
-    { data?: unknown; error?: unknown; count?: number }
-  > = {}
-) {
+interface FakeResult {
+  data?: unknown;
+  error?: unknown;
+  count?: number;
+}
+
+/**
+ * Resultado fixo OU função da consulta que foi feita.
+ *
+ * A forma de função entrou na SPEC 064 F2: `channels` passou a receber
+ * DUAS perguntas diferentes no mesmo caminho de envio — a lista dos
+ * canais ativos (`resolveDefaultChannelId`) e a linha de um id
+ * (`resolveCloudConfig`). Um `data` fixo só consegue responder a uma
+ * delas, e responder a errada faria o teste passar por um caminho que
+ * não é o de produção.
+ */
+type FakeEntry = FakeResult | ((op: RecordedOp) => FakeResult);
+
+function makeDb(results: Record<string, FakeEntry> = {}) {
   const ops: RecordedOp[] = [];
   // SPEC 062 §4.3 ponto 4: `resolveChannelContext` agora confere
   // `accounts.blocked_at` antes de resolver credencial. O padrão é uma
   // conta existente e NÃO bloqueada; um teste que queira o contrário
   // sobrescreve `accounts.select`.
-  const resultMap = new Map<
-    string,
-    { data?: unknown; error?: unknown; count?: number }
-  >([
+  const resultMap = new Map<string, FakeEntry>([
     ['accounts.select', { data: { blocked_at: null }, error: null }],
     ...Object.entries(results),
   ]);
@@ -118,9 +128,9 @@ function makeDb(
         ops.push(op);
         recorded = true;
       }
-      return (
-        resultMap.get(`${table}.${op.verb}`) ?? { data: null, error: null }
-      );
+      const entry = resultMap.get(`${table}.${op.verb}`);
+      if (typeof entry === 'function') return entry(op);
+      return entry ?? { data: null, error: null };
     };
 
     const chain: Record<string, unknown> = {
@@ -182,15 +192,55 @@ function makeDb(
 const CONFIG_ROW = {
   id: 'cfg-1',
   user_id: 'user-1',
+  channel_id: 'ch-cloud-1',
   phone_number_id: 'pnid-1',
   access_token: 'cipher',
   status: 'connected',
 };
 
-function dbWithConfigAndContact(
-  over: Record<string, { data?: unknown; error?: unknown }> = {}
-) {
+/**
+ * Linha de `channels` do número oficial (SPEC 064 F2).
+ *
+ * Desde a 072 o caminho Cloud passa por `channels`: a credencial é do
+ * CANAL, não da conta. Uma fixture que só traga `whatsapp_config` não
+ * chega mais ao envio — e é assim em produção também.
+ */
+const CLOUD_CHANNEL_ROW = {
+  id: 'ch-cloud-1',
+  account_id: 'acct-1',
+  user_id: 'user-1',
+  type: 'whatsapp_cloud',
+  name: 'WhatsApp Oficial',
+  identifier: '5511988887777',
+  status: 'connected',
+  status_detail: null,
+  is_default: true,
+  connected_at: null,
+  last_seen_at: null,
+  created_at: '2026-01-01T00:00:00.000Z',
+  updated_at: '2026-01-01T00:00:00.000Z',
+};
+
+/**
+ * `channels.select` que responde às DUAS perguntas do caminho de envio:
+ * a lista de canais ativos (`resolveDefaultChannelId`, sem `eq('id')`) e
+ * a linha de um id (`resolveCloudConfig`). Sem essa distinção, o teste
+ * receberia um array onde o código espera uma linha — e passaria (ou
+ * falharia) por um motivo que produção não tem.
+ */
+function channelsFixture(rows: Array<Record<string, unknown>>) {
+  return (op: RecordedOp) => {
+    const byId = op.filters.find((f) => f[0] === 'eq' && f[1] === 'id');
+    if (byId) {
+      return { data: rows.find((r) => r.id === byId[2]) ?? null, error: null };
+    }
+    return { data: rows, error: null };
+  };
+}
+
+function dbWithConfigAndContact(over: Record<string, FakeEntry> = {}) {
   return makeDb({
+    'channels.select': channelsFixture([CLOUD_CHANNEL_ROW]),
     'whatsapp_config.select': { data: CONFIG_ROW, error: null },
     'contacts.select': {
       data: { id: 'contact-1', phone: '+55 11 99999-9999' },
@@ -384,9 +434,12 @@ describe('resolveChannelForConversation', () => {
     expect(resolved.ctx.credentials.phoneNumberId).toBe('pnid-1');
   });
 
-  it('conversa sem channel_id cai no canal oficial (compat pré-059)', async () => {
+  it('conversa sem channel_id cai no canal oficial PADRÃO (compat pré-059)', async () => {
+    // Sem canal na conversa, quem decide é o D-11: o padrão do tipo
+    // Cloud. Antes da 072 era "a única `whatsapp_config` da conta".
     const db = makeDb({
       'conversations.select': { data: { channel_id: null }, error: null },
+      'channels.select': channelsFixture([CLOUD_CHANNEL_ROW]),
       'whatsapp_config.select': { data: CONFIG_ROW, error: null },
     });
 
@@ -414,9 +467,65 @@ describe('resolveChannelForConversation', () => {
     ).rejects.toBeInstanceOf(ChannelNotConfiguredError);
   });
 
+  it('dois números oficiais: a conversa do canal B sai PELO B (SPEC 064)', async () => {
+    // Este é o teste que a F2 existe para fazer passar. No código
+    // anterior o ramo Cloud IGNORAVA o `channelId` e caía num
+    // `.single()` por `account_id` — a conversa do segundo número
+    // responderia pelo primeiro (ou, com duas linhas, estouraria).
+    const cloudB = {
+      ...CLOUD_CHANNEL_ROW,
+      id: 'ch-cloud-2',
+      name: 'Suporte',
+      identifier: '5511977776666',
+      is_default: false,
+      created_at: '2026-03-01T00:00:00.000Z',
+    };
+    const db = makeDb({
+      'conversations.select': {
+        data: { channel_id: 'ch-cloud-2' },
+        error: null,
+      },
+      'channels.select': channelsFixture([CLOUD_CHANNEL_ROW, cloudB]),
+      'whatsapp_config.select': (op) => {
+        const byChannel = op.filters.find(
+          (f) => f[0] === 'eq' && f[1] === 'channel_id'
+        );
+        return {
+          data:
+            byChannel?.[2] === 'ch-cloud-2'
+              ? {
+                  ...CONFIG_ROW,
+                  id: 'cfg-2',
+                  channel_id: 'ch-cloud-2',
+                  phone_number_id: 'pnid-2',
+                  access_token: 'cipher-2',
+                }
+              : CONFIG_ROW,
+          error: null,
+        };
+      },
+    });
+
+    const resolved = await resolveChannelForConversation(
+      db.client,
+      'acct-1',
+      'conv-do-numero-b'
+    );
+
+    expect(resolved.ctx.channel.id).toBe('ch-cloud-2');
+    expect(resolved.ctx.credentials).toEqual({
+      phoneNumberId: 'pnid-2',
+      accessToken: 'decrypted:cipher-2',
+    });
+    // E o identifier do contexto é o TELEFONE do canal B (D-9), não o
+    // do padrão nem o `phone_number_id`.
+    expect(resolved.ctx.channel.identifier).toBe('5511977776666');
+  });
+
   it('escopa a leitura da conversa por conta', async () => {
     const db = makeDb({
       'conversations.select': { data: { channel_id: null }, error: null },
+      'channels.select': channelsFixture([CLOUD_CHANNEL_ROW]),
       'whatsapp_config.select': { data: CONFIG_ROW, error: null },
     });
 
