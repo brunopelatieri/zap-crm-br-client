@@ -56,7 +56,9 @@
     "errorGeneric": "Não foi possível criar sua conta agora. Tente novamente em instantes ou fale com o suporte.",
     "successTitle": "Verifique seu e-mail",
     "successDesc": "Enviamos um link de confirmação para <highlight>{email}</highlight>. Verifique sua caixa de entrada e clique no link para verificar sua conta.",
-    "backToSignIn": "Voltar para o login"
+    "backToSignIn": "Voltar para o login",
+    "publicSignupDisabledTitle": "O cadastro está desativado",
+    "publicSignupDisabledDesc": "Este deployment não aceita novas contas por autosserviço no momento. Se você recebeu um convite de uma equipe, use o link de convite que foi enviado a você."
   },
   "ForgotPasswordPage": {
     "title": "Redefinir senha",

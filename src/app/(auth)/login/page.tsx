@@ -10,6 +10,7 @@ import {
   getAuthErrorLogDetails,
 } from '@/lib/auth/error-messages';
 import { normalizePassword } from '@/lib/auth/password-policy';
+import { isPublicSignupEnabled } from '@/lib/auth/signup-flag';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,6 +43,11 @@ function LoginPageInner() {
   // page to accept rather than to /dashboard.
   const inviteToken = searchParams.get('invite');
   const t = useTranslations('LoginPage');
+  // Hide the "create account" link when public signup is switched off
+  // (NEXT_PUBLIC_SIGNUP_ENABLED=false) — an invite always bypasses that
+  // flag (see src/lib/auth/signup-flag.ts), so the link stays visible
+  // whenever an invite token is present.
+  const showSignupLink = Boolean(inviteToken) || isPublicSignupEnabled();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -161,19 +167,21 @@ function LoginPageInner() {
             </Button>
           </form>
 
-          <p className="text-muted-foreground mt-6 text-center text-sm">
-            {t('noAccount')}{' '}
-            <Link
-              href={
-                inviteToken
-                  ? `/signup?invite=${encodeURIComponent(inviteToken)}`
-                  : '/signup'
-              }
-              className="text-primary hover:text-primary/80"
-            >
-              {t('createAccount')}
-            </Link>
-          </p>
+          {showSignupLink && (
+            <p className="text-muted-foreground mt-6 text-center text-sm">
+              {t('noAccount')}{' '}
+              <Link
+                href={
+                  inviteToken
+                    ? `/signup?invite=${encodeURIComponent(inviteToken)}`
+                    : '/signup'
+                }
+                className="text-primary hover:text-primary/80"
+              >
+                {t('createAccount')}
+              </Link>
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

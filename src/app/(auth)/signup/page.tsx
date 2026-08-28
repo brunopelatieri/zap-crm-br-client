@@ -15,6 +15,7 @@ import {
   normalizePassword,
   passwordsMatch,
 } from '@/lib/auth/password-policy';
+import { isPublicSignupEnabled } from '@/lib/auth/signup-flag';
 import { PasswordStrengthMeter } from '@/components/auth/password-strength-meter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +27,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { MessageSquare, CheckCircle, UsersRound } from 'lucide-react';
+import { MessageSquare, CheckCircle, UserX, UsersRound } from 'lucide-react';
 
 // `useSearchParams` opts the component out of static prerendering
 // unless wrapped in Suspense — same pattern as /login.
@@ -58,6 +59,13 @@ function SignupPageInner() {
   const supabase = createClient();
 
   const passwordValid = isPasswordValid(evaluatePassword(password));
+
+  // Public (no-invite) signup can be switched off via
+  // NEXT_PUBLIC_SIGNUP_ENABLED — see src/lib/auth/signup-flag.ts. An
+  // invite always bypasses this: someone completing a team invite from
+  // /join/<token> isn't "public" signup and must keep working even on
+  // an invite-only deployment.
+  const publicSignupBlocked = !inviteToken && !isPublicSignupEnabled();
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,6 +115,33 @@ function SignupPageInner() {
     setSuccess(true);
     setLoading(false);
   };
+
+  if (publicSignupBlocked) {
+    return (
+      <div className="bg-background flex min-h-screen items-center justify-center px-4">
+        <Card className="border-border bg-card w-full max-w-md">
+          <CardHeader className="items-center text-center">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/10">
+              <UserX className="h-6 w-6 text-red-400" />
+            </div>
+            <CardTitle className="text-foreground text-xl">
+              {t('publicSignupDisabledTitle')}
+            </CardTitle>
+            <CardDescription className="text-muted-foreground">
+              {t('publicSignupDisabledDesc')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/login">
+              <Button className="bg-primary text-primary-foreground hover:bg-primary/90 w-full">
+                {t('backToSignIn')}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (success) {
     return (

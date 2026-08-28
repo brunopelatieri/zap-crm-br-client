@@ -56,7 +56,9 @@
     "errorGeneric": "We couldn't create your account right now. Please try again shortly or contact support.",
     "successTitle": "Check your email",
     "successDesc": "We've sent a confirmation link to <highlight>{email}</highlight>. Please check your inbox and click the link to verify your account.",
-    "backToSignIn": "Back to sign in"
+    "backToSignIn": "Back to sign in",
+    "publicSignupDisabledTitle": "Sign up is disabled",
+    "publicSignupDisabledDesc": "This deployment doesn't accept new self-service accounts right now. If you were invited by a team, use the invitation link you received."
   },
   "ForgotPasswordPage": {
     "title": "Reset password",
