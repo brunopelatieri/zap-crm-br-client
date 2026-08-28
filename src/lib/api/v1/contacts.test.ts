@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   serializeContact,
   findOrCreateContact,
+  resolveAuditUserId,
   ContactError,
 } from './contacts';
 
@@ -61,5 +62,47 @@ describe('findOrCreateContact', () => {
     await expect(
       findOrCreateContact(noopDb, 'acc', 'user', { phone: 'not-a-number' })
     ).rejects.toBeInstanceOf(ContactError);
+  });
+});
+
+// SPEC 064 F3 — a autoria das linhas criadas pela API pública.
+describe('resolveAuditUserId', () => {
+  function makeDb(owner: string | null) {
+    const tables: string[] = [];
+    const client = {
+      from: (table: string) => {
+        tables.push(table);
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: owner === null ? null : { owner_user_id: owner },
+              error: null,
+            }),
+        };
+        return chain;
+      },
+    } as unknown as SupabaseClient;
+    return { db: client, tables };
+  }
+
+  it('attributes writes to the account owner and never reads whatsapp_config', async () => {
+    // It used to prefer `whatsapp_config.user_id`. With two official
+    // numbers that is two rows saved by two different people, so the
+    // query would pick an arbitrary one and silently change who every
+    // API-created contact is attributed to.
+    const { db, tables } = makeDb('owner-1');
+
+    await expect(resolveAuditUserId(db, 'acc-1')).resolves.toBe('owner-1');
+    expect(tables).toEqual(['accounts']);
+  });
+
+  it('throws when the owner cannot be resolved', async () => {
+    const { db } = makeDb(null);
+
+    await expect(resolveAuditUserId(db, 'acc-1')).rejects.toBeInstanceOf(
+      ContactError
+    );
   });
 });

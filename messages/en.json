@@ -1665,6 +1665,7 @@
         "unlimited": "No limit on this tier.",
         "selectedOfLimit": "{selected} selected of {limit} allowed per broadcast",
         "usedInWindow": "{used} reached in the last 24 h",
+        "usageUnavailable": "24 h usage unavailable",
         "exceeded": "{excess} over the limit for a single broadcast.",
         "blockedHint": "This audience is larger than your Meta messaging tier allows in a single broadcast. Remove contacts or split the campaign.",
         "check": "Check limit",
@@ -1777,7 +1778,8 @@
             "readRate": "Read rate",
             "replyRate": "Reply rate",
             "contactsReached": "Contacts reached",
-            "reached24h": "Reached in 24 h"
+            "reached24h": "Reached in 24 h",
+            "reached24hUnavailable": "Unavailable"
           },
           "chart": {
             "title": "Last 30 days",

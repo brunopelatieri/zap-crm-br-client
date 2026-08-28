@@ -36,9 +36,37 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion';
-import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 
 const MASKED_TOKEN = '••••••••••••••••';
+
+/**
+ * Um número oficial como a rota o descreve (SPEC 064 §5).
+ *
+ * Substitui a linha crua de `whatsapp_config` que este componente lia
+ * direto do navegador: a policy `whatsapp_config_select` é
+ * `is_account_member`, então o `select('*')` entregava o `access_token`
+ * cifrado a qualquer membro — `viewer` inclusive — e, com N números,
+ * entregaria N. `GET /api/whatsapp/config` não devolve segredo nenhum.
+ *
+ * A tela ainda mostra UM número (a lista é a F7), então o componente
+ * trabalha com o canal padrão — o primeiro que a rota devolve.
+ */
+interface CloudNumber {
+  channel_id: string;
+  name: string;
+  identifier: string | null;
+  /** D-9: `false` enquanto o canal guarda o `phone_number_id` antigo. */
+  identifier_is_phone: boolean;
+  status: string;
+  is_default: boolean;
+  phone_number_id: string | null;
+  waba_id: string | null;
+  registered_at: string | null;
+  last_registration_error: string | null;
+  subscribed_apps_at: string | null;
+  broadcast_cooldown_days: number | null;
+  messaging_limit_tier: string | null;
+}
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'unknown';
 type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
@@ -66,7 +94,7 @@ export function WhatsAppConfig() {
   const [cooldownDaysInput, setCooldownDaysInput] = useState('7');
   const [savingCooldown, setSavingCooldown] = useState(false);
   const [showToken, setShowToken] = useState(false);
-  const [config, setConfig] = useState<WhatsAppConfigType | null>(null);
+  const [config, setConfig] = useState<CloudNumber | null>(null);
   const [connectionStatus, setConnectionStatus] =
     useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
@@ -110,87 +138,53 @@ export function WhatsAppConfig() {
       ? `${window.location.origin}/api/whatsapp/webhook`
       : '';
 
-  const fetchConfig = useCallback(
-    async (acctId: string) => {
-      setLoading(true);
-      try {
-        // Load form values from Supabase (shows what's in DB).
-        // Switched from `user_id` (which would only match the row's
-        // original author) to `account_id` so every member of the
-        // account sees the same saved configuration. UNIQUE(account_id)
-        // on the table guarantees the .maybeSingle() return type
-        // remains accurate.
-        const { data, error } = await supabase
-          .from('whatsapp_config')
-          .select('*')
-          .eq('account_id', acctId)
-          .maybeSingle();
+  const fetchConfig = useCallback(async () => {
+    setLoading(true);
+    try {
+      // A lista vem da ROTA, nunca do banco pelo navegador (§6.1). Ela
+      // já traz a sondagem do canal padrão nos campos de topo, que é
+      // exatamente uma chamada à Meta — o mesmo custo de antes.
+      const res = await fetch('/api/whatsapp/config', { cache: 'no-store' });
+      const payload = await res.json();
+      const numbers = (payload.channels ?? []) as CloudNumber[];
+      // A rota ordena com o padrão primeiro (D-11). A F7 troca isto por
+      // uma lista de verdade; até lá a tela edita o número padrão.
+      const current = numbers[0] ?? null;
 
-        if (error) {
-          console.error('Failed to load config row:', error);
-        }
+      setConfig(current);
+      setPhoneNumberId(current?.phone_number_id || '');
+      setWabaId(current?.waba_id || '');
+      setAccessToken(current ? MASKED_TOKEN : '');
+      setVerifyToken('');
+      setPin('');
+      setTokenEdited(false);
+      setCooldownDaysInput(String(current?.broadcast_cooldown_days ?? 7));
+      // Clear any stale probe result when reloading the row.
+      setRegistrationProbe(null);
 
-        if (data) {
-          setConfig(data);
-          setPhoneNumberId(data.phone_number_id || '');
-          setWabaId(data.waba_id || '');
-          setAccessToken(MASKED_TOKEN);
-          setVerifyToken('');
-          setPin('');
-          setTokenEdited(false);
-          setCooldownDaysInput(String(data.broadcast_cooldown_days ?? 7));
-        } else {
-          setConfig(null);
-          setPhoneNumberId('');
-          setWabaId('');
-          setAccessToken('');
-          setVerifyToken('');
-          setPin('');
-          setTokenEdited(false);
-          setCooldownDaysInput('7');
-        }
-        // Clear any stale probe result when reloading the row.
-        setRegistrationProbe(null);
-
-        // Then verify health via the API (decrypts token + pings Meta)
-        if (data) {
-          try {
-            const res = await fetch('/api/whatsapp/config', { method: 'GET' });
-            const payload = await res.json();
-
-            if (payload.connected) {
-              setConnectionStatus('connected');
-              setResetReason(null);
-              setStatusMessage('');
-            } else {
-              setConnectionStatus('disconnected');
-              setResetReason(
-                payload.needs_reset
-                  ? 'token_corrupted'
-                  : payload.reason === 'meta_api_error'
-                    ? 'meta_api_error'
-                    : null
-              );
-              setStatusMessage(payload.message || '');
-            }
-          } catch (err) {
-            console.error('Health check failed:', err);
-            setConnectionStatus('disconnected');
-          }
-        } else {
-          setConnectionStatus('disconnected');
-          setResetReason(null);
-          setStatusMessage('');
-        }
-      } catch (err) {
-        console.error('fetchConfig error:', err);
-        toast.error('Failed to load WhatsApp configuration');
-      } finally {
-        setLoading(false);
+      if (payload.connected) {
+        setConnectionStatus('connected');
+        setResetReason(null);
+        setStatusMessage('');
+      } else {
+        setConnectionStatus('disconnected');
+        setResetReason(
+          payload.needs_reset
+            ? 'token_corrupted'
+            : payload.reason === 'meta_api_error'
+              ? 'meta_api_error'
+              : null
+        );
+        setStatusMessage(current ? payload.message || '' : '');
       }
-    },
-    [supabase]
-  );
+    } catch (err) {
+      console.error('fetchConfig error:', err);
+      setConnectionStatus('disconnected');
+      toast.error('Failed to load WhatsApp configuration');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     // Need both the auth session (`!authLoading`) AND the profile
@@ -206,7 +200,7 @@ export function WhatsAppConfig() {
     }
     if (loadedAccountIdRef.current === accountId) return;
     loadedAccountIdRef.current = accountId;
-    fetchConfig(accountId);
+    fetchConfig();
   }, [authLoading, profileLoading, user?.id, accountId, fetchConfig]);
 
   async function handleSave() {
@@ -234,6 +228,11 @@ export function WhatsAppConfig() {
         // requires it on first save or when changing numbers; for a
         // simple token rotation, leaving it blank skips re-register.
         pin: pin.trim() || null,
+        // Idempotência (§5): com o id, o salvamento atualiza ESTE
+        // número. Sem ele a rota ainda acerta pelo `phone_number_id`,
+        // mas mandá-lo é o que protege contra o duplo clique enquanto o
+        // número está sendo trocado no formulário.
+        ...(config?.channel_id ? { channel_id: config.channel_id } : {}),
       };
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
@@ -295,7 +294,7 @@ export function WhatsAppConfig() {
         setPin('');
       }
 
-      if (accountId) await fetchConfig(accountId);
+      await fetchConfig();
     } catch (err) {
       console.error('Save error:', err);
       toast.error('Failed to save configuration');
@@ -307,7 +306,14 @@ export function WhatsAppConfig() {
   async function handleTestConnection() {
     try {
       setTesting(true);
-      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      // Com `channel_id`, a rota sonda ESTE número em vez do padrão da
+      // conta — e devolve só a sondagem, sem a lista.
+      const res = await fetch(
+        config?.channel_id
+          ? `/api/whatsapp/config?channel_id=${encodeURIComponent(config.channel_id)}`
+          : '/api/whatsapp/config',
+        { method: 'GET', cache: 'no-store' }
+      );
       const payload = await res.json();
 
       if (payload.connected) {
@@ -344,9 +350,12 @@ export function WhatsAppConfig() {
     setVerifyingRegistration(true);
     setRegistrationProbe(null);
     try {
-      const res = await fetch('/api/whatsapp/config/verify-registration', {
-        method: 'GET',
-      });
+      const res = await fetch(
+        config?.channel_id
+          ? `/api/whatsapp/config/verify-registration?channel_id=${encodeURIComponent(config.channel_id)}`
+          : '/api/whatsapp/config/verify-registration',
+        { method: 'GET' }
+      );
       const data = (await res.json()) as RegistrationProbe;
       setRegistrationProbe(data);
       if (data.live) {
@@ -357,7 +366,7 @@ export function WhatsAppConfig() {
           { duration: 8000 }
         );
       }
-      if (accountId) await fetchConfig(accountId);
+      await fetchConfig();
     } catch (err) {
       console.error('verify-registration failed:', err);
       toast.error('Could not reach the verification endpoint.');
@@ -367,9 +376,13 @@ export function WhatsAppConfig() {
   }
 
   async function handleReset() {
+    if (!config?.channel_id) {
+      toast.error('No number to reset yet.');
+      return;
+    }
     if (
       !confirm(
-        'This will delete the current WhatsApp config so you can re-enter it. Continue?'
+        'This clears the stored credentials so you can re-enter them. Conversation history, cooldown and messaging tier are preserved. Continue?'
       )
     ) {
       return;
@@ -377,7 +390,15 @@ export function WhatsAppConfig() {
 
     try {
       setResetting(true);
-      const res = await fetch('/api/whatsapp/config', { method: 'DELETE' });
+      // D-12: a rota exige `channel_id` — numa conta com dois números
+      // não há resposta certa sem ele, e adivinhar apagaria o errado.
+      // Com conversas, ela zera as credenciais e desativa o canal
+      // preservando histórico, cooldown e tier; sem conversas, apaga o
+      // canal de verdade e libera o `phone_number_id`.
+      const res = await fetch(
+        `/api/whatsapp/config?channel_id=${encodeURIComponent(config.channel_id)}`,
+        { method: 'DELETE' }
+      );
       const data = await res.json();
 
       if (!res.ok) {
@@ -386,17 +407,14 @@ export function WhatsAppConfig() {
       }
 
       toast.success(
-        'Configuration cleared. You can now re-enter your credentials.'
+        data.outcome === 'deleted'
+          ? 'Configuration cleared. You can now re-enter your credentials.'
+          : 'Credentials cleared. Conversation history was preserved — save the number again to reconnect it.'
       );
-      setConfig(null);
-      setPhoneNumberId('');
-      setWabaId('');
-      setAccessToken('');
-      setVerifyToken('');
-      setTokenEdited(false);
-      setConnectionStatus('disconnected');
-      setResetReason(null);
-      setStatusMessage('');
+      // Recarrega em vez de zerar o estado à mão: um canal desativado
+      // continua existindo, e a tela precisa refletir o que o banco
+      // realmente tem depois da operação.
+      await fetchConfig();
     } catch (err) {
       console.error('Reset error:', err);
       toast.error('Failed to reset configuration');
@@ -410,14 +428,15 @@ export function WhatsAppConfig() {
     toast.success('Webhook URL copied to clipboard');
   }
 
-  // Anti-fadiga (SPEC 044 §6.2). Escreve direto em `whatsapp_config`,
+  // Anti-fadiga (SPEC 044 §6.2), por número (SPEC 064 D-4). Escreve
+  // direto em `whatsapp_config`,
   // como `deals-settings.tsx` faz para `accounts.default_currency` — a
   // policy `whatsapp_config_update` (017) já é admin+, então não há
   // motivo para passar pela rota cheia de POST /api/whatsapp/config
   // (que reverifica credenciais com a Meta a cada chamada) só para
   // trocar um número.
   async function handleSaveCooldown() {
-    if (!accountId) return;
+    if (!accountId || !config?.channel_id) return;
     const parsed = Number(cooldownDaysInput);
     if (!Number.isInteger(parsed) || parsed < 0 || parsed > 90) {
       toast.error(t('cooldown.invalid'));
@@ -425,9 +444,13 @@ export function WhatsAppConfig() {
     }
 
     setSavingCooldown(true);
+    // Por CANAL, não por conta (D-4): `.eq('account_id')` escreveria o
+    // cooldown de um número na linha do outro assim que a conta tiver
+    // dois. O `account_id` fica junto como escopo, não como chave.
     const { error } = await supabase
       .from('whatsapp_config')
       .update({ broadcast_cooldown_days: parsed })
+      .eq('channel_id', config.channel_id)
       .eq('account_id', accountId);
     setSavingCooldown(false);
 

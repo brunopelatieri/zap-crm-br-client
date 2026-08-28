@@ -42,6 +42,12 @@ export interface MessagingLimitValue {
   batchLimit: number;
   /** Informativo: contatos alcançados nas últimas 24 h. Não limita. */
   usedLast24h: number;
+  /**
+   * True quando o servidor não conseguiu ler o consumo da janela
+   * (SPEC 064 §3.9). `usedLast24h` então NÃO significa nada — a tela
+   * mostra "consumo indisponível" em vez de um zero tranquilizador.
+   */
+  usageUnavailable: boolean;
   /** True quando exibimos o último valor conhecido (Meta indisponível). */
   stale: boolean;
   loading: boolean;
@@ -55,6 +61,7 @@ const FALLBACK_STATE: Omit<MessagingLimitValue, 'refresh'> = {
   tier: FALLBACK_TIER,
   batchLimit: tierCap(FALLBACK_TIER),
   usedLast24h: 0,
+  usageUnavailable: false,
   stale: true,
   loading: true,
   checkedAt: null,
@@ -74,6 +81,7 @@ interface ApiResponse {
   tier?: string;
   batchLimit?: number | null;
   usedLast24h?: number;
+  usageUnavailable?: boolean;
   stale?: boolean;
   checkedAt?: string;
 }
@@ -116,6 +124,10 @@ export function MessagingLimitProvider({ children }: { children: ReactNode }) {
         tier,
         batchLimit: toNumber(data.batchLimit),
         usedLast24h: data.usedLast24h ?? 0,
+        // Resposta antiga em cache (bundle anterior à SPEC 064) não traz
+        // o campo: tratar como "leitura ok" mantém o comportamento de
+        // hoje, em vez de acender um aviso sem motivo.
+        usageUnavailable: data.usageUnavailable === true,
         stale: data.stale ?? false,
         loading: false,
         checkedAt: data.checkedAt ?? null,

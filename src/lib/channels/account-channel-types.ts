@@ -12,6 +12,11 @@ import type { ChannelType } from './types';
  * result means "not backfilled yet", not "no channel is possible" — the
  * same conservative default `lib/automations/validate.ts` already
  * assumes for a caller that skips this lookup entirely.
+ *
+ * Canal `disabled` fica de fora (SPEC 064 D-12): ele não envia — o
+ * resolvedor de credencial o recusa antes do `decrypt()` — e contá-lo
+ * aqui faria a validação de automação prometer uma capacidade que o
+ * runtime não entrega.
  */
 export async function loadAccountChannelTypes(
   db: SupabaseClient,
@@ -20,7 +25,8 @@ export async function loadAccountChannelTypes(
   const { data } = await db
     .from('channels')
     .select('type')
-    .eq('account_id', accountId);
+    .eq('account_id', accountId)
+    .neq('status', 'disabled');
   const types = Array.from(
     new Set(
       ((data ?? []) as { type: string }[]).map((r) => r.type as ChannelType)

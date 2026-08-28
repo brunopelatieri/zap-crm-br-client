@@ -1665,6 +1665,7 @@
         "unlimited": "Sem limite neste tier.",
         "selectedOfLimit": "{selected} selecionados de {limit} permitidos por disparo",
         "usedInWindow": "{used} alcançados nas últimas 24 h",
+        "usageUnavailable": "consumo de 24 h indisponível",
         "exceeded": "{excess} acima do limite de um único disparo.",
         "blockedHint": "Esta audiência é maior do que o seu tier de mensageria na Meta permite em um único disparo. Remova contatos ou divida a campanha.",
         "check": "Checar limite",
@@ -1777,7 +1778,8 @@
             "readRate": "Taxa de leitura",
             "replyRate": "Taxa de resposta",
             "contactsReached": "Contatos alcançados",
-            "reached24h": "Alcançados em 24 h"
+            "reached24h": "Alcançados em 24 h",
+            "reached24hUnavailable": "Indisponível"
           },
           "chart": {
             "title": "Últimos 30 dias",

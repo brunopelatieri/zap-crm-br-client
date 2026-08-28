@@ -64,7 +64,6 @@ export function SettingsOverview({
     let cancelled = false;
     const supabase = createClient();
     const userId = user.id;
-    const acctId = accountId;
 
     // Cheap counts — resolve fast, render immediately.
     (async () => {
@@ -141,21 +140,21 @@ export function SettingsOverview({
     // WhatsApp connection status — slower, independent.
     (async () => {
       setWhatsappLoading(true);
-      const [row, health] = await Promise.allSettled([
-        supabase
-          .from('whatsapp_config')
-          .select('phone_number_id')
-          .eq('account_id', acctId)
-          .maybeSingle(),
+      // Uma chamada só: a rota devolve a lista de números E a sondagem
+      // do canal padrão (SPEC 064 §5). A leitura direta de
+      // `whatsapp_config` que existia aqui usava `.maybeSingle()` — com
+      // dois números ela devolveria `PGRST116` e o cartão diria "não
+      // configurado" numa conta que tem dois números no ar.
+      const health = await Promise.allSettled([
         fetch('/api/whatsapp/config', { cache: 'no-store' }).then((r) =>
           r.json()
         ),
       ]);
       if (cancelled) return;
+      const payload = health[0].status === 'fulfilled' ? health[0].value : null;
       setWhatsapp({
-        configured:
-          row.status === 'fulfilled' && !!row.value.data?.phone_number_id,
-        connected: health.status === 'fulfilled' && !!health.value?.connected,
+        configured: (payload?.channels?.length ?? 0) > 0,
+        connected: !!payload?.connected,
       });
       setWhatsappLoading(false);
     })();

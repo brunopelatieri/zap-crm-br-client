@@ -69,23 +69,21 @@ export function serializeContact(row: Record<string, unknown>): ApiContact {
  * of truth used by every public-API write (contacts, messages,
  * broadcasts, resolve-conversation), so the same key's writes are
  * always attributed to the same human. API callers have no logged-in
- * user, so — like the inbound webhook — we attribute writes to the
- * **WhatsApp config owner** (the webhook's own convention). Contacts
- * can be created before WhatsApp is connected, so we fall back to the
- * account owner when there's no config yet.
+ * user, so writes are attributed to the **account owner**.
+ *
+ * It used to prefer `whatsapp_config.user_id` and fall back to the
+ * owner. That preference stopped being answerable in SPEC 064: with two
+ * official numbers an account has two config rows, each saved by
+ * whoever connected it, and "the config owner" is no longer a single
+ * person — the query would return an arbitrary one, silently changing
+ * who every API-created row is attributed to. The fallback the function
+ * already had is the stable answer, and it is one row per account by
+ * definition.
  */
 export async function resolveAuditUserId(
   db: SupabaseClient,
   accountId: string
 ): Promise<string> {
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select('user_id')
-    .eq('account_id', accountId)
-    .maybeSingle();
-  const configOwner = config?.user_id as string | undefined;
-  if (configOwner) return configOwner;
-
   const { data: account } = await db
     .from('accounts')
     .select('owner_user_id')

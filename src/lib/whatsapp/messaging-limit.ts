@@ -147,6 +147,17 @@ export interface QuotaSnapshot {
    * teto por disparo: NÃO é subtraído de `batchLimit`.
    */
   usedLast24h: number;
+  /**
+   * True quando a contagem das 24 h NÃO pôde ser lida (SPEC 064 §3.9).
+   *
+   * Existe porque `usedLast24h: 0` e "não sei quanto foi usado" são
+   * coisas opostas para quem monta audiência, e o código antigo as
+   * confundia: qualquer falha da RPC virava `Number(undefined ?? 0)` e a
+   * tela dizia "0 de 1.000 usados" para uma conta que já tinha disparado
+   * 900. Com a flag, a UI mostra "consumo indisponível" — nunca um
+   * número que parece seguro.
+   */
+  usageUnavailable: boolean;
   source: QuotaSource;
   /** True quando estamos exibindo o último valor conhecido. */
   stale: boolean;
@@ -156,6 +167,8 @@ export interface QuotaSnapshot {
 export interface ComputeQuotaInput {
   tier: string;
   usedLast24h: number;
+  /** Ver `QuotaSnapshot.usageUnavailable`. Ausente = a leitura deu certo. */
+  usageUnavailable?: boolean;
   source: QuotaSource;
   checkedAt?: Date;
 }
@@ -176,6 +189,7 @@ export function computeQuota(input: ComputeQuotaInput): QuotaSnapshot {
     tier,
     batchLimit: tierCap(tier),
     usedLast24h: Math.max(0, Math.trunc(usedLast24h) || 0),
+    usageUnavailable: input.usageUnavailable === true,
     source,
     stale: source !== 'meta',
     checkedAt: (input.checkedAt ?? new Date()).toISOString(),
@@ -211,6 +225,7 @@ export function serializeQuota(snapshot: QuotaSnapshot) {
     tier: snapshot.tier,
     batchLimit: finite(snapshot.batchLimit),
     usedLast24h: snapshot.usedLast24h,
+    usageUnavailable: snapshot.usageUnavailable,
     source: snapshot.source,
     stale: snapshot.stale,
     checkedAt: snapshot.checkedAt,

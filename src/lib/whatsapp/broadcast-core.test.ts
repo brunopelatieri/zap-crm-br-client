@@ -67,9 +67,15 @@ describe('assertAccountCanBroadcast (SPEC 049 §5.3)', () => {
           };
         }
         if (table === 'channels') {
+          // `.neq('status','disabled')` desde a SPEC 064 D-12: canal
+          // desativado não envia, então não pode contar como
+          // capacidade da conta. As fixturas destes testes só têm
+          // canais ativos, e o filtro é aplicado no banco.
           return {
             select: () => ({
-              eq: () => Promise.resolve({ data: channelRows }),
+              eq: () => ({
+                neq: () => Promise.resolve({ data: channelRows }),
+              }),
             }),
           };
         }

@@ -23,6 +23,7 @@
  */
 
 import { can } from './capabilities';
+import { channelSendBlock } from './status';
 import type { ChannelSessionWindow } from './session-window';
 import type { ChannelStatus, ChannelType } from './types';
 
@@ -64,7 +65,12 @@ export function evaluateTransferChannel(
     return { channel, eligible: false, reason: 'same_channel' };
   }
 
-  if (channel.status !== 'connected') {
+  // SPEC 064 F3 — `channels.status` só recusa onde é mantido
+  // (`./status.ts`). O canal Cloud carrega o valor congelado do backfill
+  // da 055, então comparar com 'connected' aqui tirava o número oficial
+  // da lista de destinos de transferência — justamente o resgate fora
+  // da janela de 24 h que a SPEC 056 existe para permitir.
+  if (channelSendBlock({ type: channel.type, status: channel.status })) {
     return { channel, eligible: false, reason: 'not_connected' };
   }
 

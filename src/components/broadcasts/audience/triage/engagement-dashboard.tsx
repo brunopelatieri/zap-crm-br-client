@@ -108,7 +108,7 @@ export function EngagementDashboard({
 }: EngagementDashboardProps) {
   const t = useTranslations('Broadcasts.audience.triage.dashboard');
   const { accountId } = useAuth();
-  const { usedLast24h } = useMessagingLimit();
+  const { usedLast24h, usageUnavailable } = useMessagingLimit();
 
   const [stats, setStats] = useState<AccountEngagementStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -277,6 +277,9 @@ export function EngagementDashboard({
         <StatCard
           label={t('cards.reached24h')}
           value={usedLast24h}
+          unavailable={
+            usageUnavailable ? t('cards.reached24hUnavailable') : undefined
+          }
           icon={<Activity className="h-4 w-4" />}
           color="bg-cyan-500/10 text-cyan-400"
         />

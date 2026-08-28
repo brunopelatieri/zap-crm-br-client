@@ -14,7 +14,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import { decrypt } from '@/lib/whatsapp/encryption';
+import {
+  resolveCloudConfig,
+  type WhatsappConfigRow,
+} from '@/lib/whatsapp/cloud-channels';
 import { fetchMessagingLimit } from '@/lib/whatsapp/meta-api';
 import {
   FALLBACK_TIER,
@@ -39,6 +44,15 @@ export interface LoadAccountQuotaOptions {
    * limit da rota (20/min por usuário) é o que segura o abuso.
    */
   force?: boolean;
+  /**
+   * Qual número oficial medir (SPEC 064 D-4). Ausente = canal Cloud
+   * padrão da conta.
+   *
+   * O tier é da Meta e vale **por número**: somar o consumo de dois
+   * números contra o tier de um só faria o painel alertar cedo e o
+   * operador segurar audiência que caberia.
+   */
+  channelId?: string | null;
 }
 
 /**
@@ -55,26 +69,80 @@ export async function loadAccountQuota(
   accountId: string,
   options: LoadAccountQuotaOptions = {}
 ): Promise<QuotaLoadResult> {
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select(
-      'phone_number_id, access_token, messaging_limit_tier, messaging_limit_checked_at'
-    )
-    .eq('account_id', accountId)
-    .maybeSingle();
+  // SPEC 064 F3 — tier e cota passam a ser POR NÚMERO.
+  //
+  // Antes daqui saía um `.single()` sobre `whatsapp_config` por
+  // `account_id`, que com dois números oficiais não tem resposta.
+  // `resolveCloudConfig` aplica o D-7 (explícito > padrão do tipo >
+  // erro) e recusa canal desativado antes do `decrypt`.
+  let channelId: string;
+  // Linha crua, como no resto da camada (`WhatsappConfigRow`): tipar
+  // estreito aqui só criaria atrito com o `select('*')` de
+  // `resolveCloudConfig` sem ganhar segurança nenhuma.
+  let config: WhatsappConfigRow;
+  try {
+    const resolved = await resolveCloudConfig(db, accountId, options.channelId);
+    channelId = resolved.channel.id;
+    config = resolved.config;
+  } catch (err) {
+    if (!(err instanceof ChannelNotConfiguredError)) throw err;
 
-  if (!config) return { configured: false, reason: 'no_config' };
+    // `configured: false` significa UMA coisa só: a conta não tem número
+    // oficial. É o que faz o medidor se esconder na tela de audiência —
+    // e, nos dois chamadores de disparo, o que faz
+    // `batchLimit` virar `Infinity` (`broadcasts/send/route.ts:314`,
+    // `broadcasts/cron/route.ts:300`).
+    //
+    // Por isso qualquer OUTRO motivo (canal desativado, token zerado
+    // pelo "Reset Configuration", id inválido vindo da query string,
+    // leitura que falhou) não pode passar por aqui: sumir com o teto
+    // por disparo em silêncio é exatamente o efeito que a SPEC quer
+    // impedir. Nesses casos devolvemos o tier restritivo, com
+    // `stale` e `usageUnavailable` ligados — o mesmo tratamento que a
+    // Meta fora do ar já recebe logo abaixo. Nunca "sem limite".
+    if (err.reason === 'no_channel') {
+      return { configured: false, reason: 'no_config' };
+    }
+
+    console.error(
+      `[messaging-limit] channel unusable (${err.reason}) — falling back to ${FALLBACK_TIER}:`,
+      err.message
+    );
+    return {
+      configured: true,
+      snapshot: computeQuota({
+        tier: FALLBACK_TIER,
+        usedLast24h: 0,
+        usageUnavailable: true,
+        source: 'fallback',
+      }),
+    };
+  }
 
   // O volume da janela sempre vem do banco — é barato e muda a cada
   // disparo, então nunca é cacheado junto com o tier. Não limita nada;
   // é o número de contexto que a tela exibe ao lado do limite.
+  //
+  // ⚠️ Campanhas anteriores à 072 têm `broadcasts.channel_id NULL` e não
+  // entram na contagem de nenhum número (§3.9). É subcontagem conhecida
+  // e some sozinha 24 h depois do deploy da F6.
   const { data: usedRaw, error: usageError } = await db.rpc(
     'broadcast_quota_usage',
-    { p_account_id: accountId }
+    { p_account_id: accountId, p_channel_id: channelId }
   );
   if (usageError) {
-    console.error('[messaging-limit] quota usage error:', usageError);
+    console.error(
+      '[messaging-limit] quota usage error (channel',
+      channelId,
+      '):',
+      usageError
+    );
   }
+  // Ausência de dado NÃO é zero (§3.9 / armadilha 7): a tela precisa
+  // dizer "consumo indisponível", senão o operador monta uma audiência
+  // achando que a janela está livre. `PGRST202` logo após a migração —
+  // cache de schema do PostgREST — cai exatamente aqui.
+  const usageUnavailable = Boolean(usageError) || usedRaw == null;
   const usedLast24h = Number(usedRaw ?? 0);
 
   // ── Cache quente: pula a Meta (a menos que o usuário force) ────
@@ -88,6 +156,7 @@ export async function loadAccountQuota(
       snapshot: computeQuota({
         tier: config.messaging_limit_tier,
         usedLast24h,
+        usageUnavailable,
         source: 'cache',
         checkedAt: new Date(config.messaging_limit_checked_at),
       }),
@@ -116,12 +185,17 @@ export async function loadAccountQuota(
     // Persistir o tier é o que faz o medidor sobreviver a um restart e o
     // que dá um valor de fallback quando a Meta cai. Uma falha de
     // escrita não invalida a leitura — logamos e seguimos.
+    // ⚠️ Por `channel_id`, NUNCA por `account_id` (§9, armadilha 2): a
+    // conta pode ter dois números, e `.eq('account_id')` gravaria o tier
+    // do número consultado na linha do OUTRO — a leitura seguinte
+    // "funcionaria", com o teto errado.
     const { error: cacheError } = await db
       .from('whatsapp_config')
       .update({
         messaging_limit_tier: tier,
         messaging_limit_checked_at: checkedAt.toISOString(),
       })
+      .eq('channel_id', channelId)
       .eq('account_id', accountId);
     if (cacheError) {
       console.error('[messaging-limit] tier cache write failed:', cacheError);
@@ -135,6 +209,12 @@ export async function loadAccountQuota(
 
   return {
     configured: true,
-    snapshot: computeQuota({ tier, usedLast24h, source, checkedAt }),
+    snapshot: computeQuota({
+      tier,
+      usedLast24h,
+      usageUnavailable,
+      source,
+      checkedAt,
+    }),
   };
 }

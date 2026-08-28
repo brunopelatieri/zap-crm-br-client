@@ -323,6 +323,53 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const config = configRows[0];
 
+      // `channel_id` já vive em `whatsapp_config` desde a 055; o
+      // fallback só cobre uma conta que nunca passou pelo backfill.
+      // Resolvido UMA vez, fora do laço de mensagens.
+      const channelId: string =
+        config.channel_id ??
+        (await resolveDefaultChannelId(supabaseAdmin(), config.account_id));
+
+      // SPEC 064 D-12 — número desativado não ingere.
+      //
+      // "Desativar" preserva canal, histórico e configuração e zera só
+      // o segredo (`access_token = ''`). Sem esta guarda, o `decrypt`
+      // logo abaixo estouraria com erro de criptografia, e pior: uma
+      // conversa nova nasceria num canal que não pode responder. Antes
+      // da 072 o caso equivalente (config apagada) caía no genérico
+      // "No config found" — agora o log diz o motivo certo.
+      const { data: channelRow, error: channelError } = await supabaseAdmin()
+        .from('channels')
+        .select('id, name, status')
+        .eq('id', channelId)
+        .eq('account_id', config.account_id)
+        .maybeSingle();
+
+      if (channelError) {
+        console.error(
+          '[webhook] channel lookup failed for phone_number_id:',
+          phoneNumberId,
+          channelError
+        );
+        continue;
+      }
+      if (!channelRow) {
+        console.error(
+          '[webhook] inbound message dropped — channel',
+          channelId,
+          'no longer exists for phone_number_id:',
+          phoneNumberId
+        );
+        continue;
+      }
+      if (channelRow.status === 'disabled') {
+        console.warn(
+          '[webhook] inbound message ignored — number is disabled:',
+          `${channelRow.name} (phone_number_id ${phoneNumberId}, channel ${channelId})`
+        );
+        continue;
+      }
+
       const decryptedAccessToken = decrypt(config.access_token);
 
       for (let i = 0; i < value.messages.length; i++) {
@@ -340,10 +387,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // the admin who saved the WhatsApp config.
           config.user_id,
           decryptedAccessToken,
-          // `channel_id` já vive em `whatsapp_config` desde a 055; o
-          // fallback só cobre uma conta que nunca passou pelo backfill.
-          config.channel_id ??
-            (await resolveDefaultChannelId(supabaseAdmin(), config.account_id))
+          channelId
         );
       }
     }

@@ -176,16 +176,23 @@ async function computeUsage(
       .from('profiles')
       .select('account_role')
       .eq('account_id', accountId),
+    // `disabled` NÃO ocupa vaga (SPEC 064 D-5/D-12): é exatamente o
+    // filtro de `enforce_channel_quota()` na migração 072. Sem ele o
+    // medidor diverge do enforcement — a barra diria "1 de 1" e a
+    // trigger deixaria conectar, ou pior, a pré-checagem da UI
+    // bloquearia um número que o banco aceitaria.
     supabase
       .from('channels')
       .select('id', { count: 'exact', head: true })
       .eq('account_id', accountId)
-      .eq('type', 'whatsapp_qr'),
+      .eq('type', 'whatsapp_qr')
+      .neq('status', 'disabled'),
     supabase
       .from('channels')
       .select('id', { count: 'exact', head: true })
       .eq('account_id', accountId)
-      .eq('type', 'whatsapp_cloud'),
+      .eq('type', 'whatsapp_cloud')
+      .neq('status', 'disabled'),
   ]);
 
   const roleCounts = { owner: 0, admin: 0, agent: 0, viewer: 0 };

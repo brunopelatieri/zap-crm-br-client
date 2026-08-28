@@ -25,6 +25,9 @@ import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import { SendMessageError } from '@/lib/whatsapp/send-message';
 import { resolveAuditUserId, ContactError } from '@/lib/api/v1/contacts';
 import { resolveDefaultChannelId } from '@/lib/channels/send';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
+import { channelSendBlock } from '@/lib/channels/status';
+import type { ChannelType } from '@/lib/channels/types';
 import { parseQuotaError } from '@/lib/plans/errors';
 import { emitQuotaExceeded } from '@/lib/notifications/quota';
 
@@ -39,14 +42,14 @@ export interface ResolvedConversation {
  * Find or create the contact + conversation for `phone` within
  * `accountId`. Throws `SendMessageError` (shared with the send core,
  * so the route maps one error family) on a bad phone, a missing
- * WhatsApp config, or a DB failure.
+ * WhatsApp channel, or a DB failure.
  *
  * `explicitChannelId` — SPEC 049 §5.4: `POST /api/v1/messages` accepts an
  * OPTIONAL `channel_id`, letting an integrator pick which of the
- * account's channels a message goes out on (e.g. a QR instance) instead
- * of always landing on the default. Omitted keeps today's behaviour
- * byte-for-byte — same `config.channel_id` / `resolveDefaultChannelId`
- * fallback as before this parameter existed.
+ * account's channels a message goes out on (e.g. one of two official
+ * numbers, or a QR instance) instead of always landing on the default.
+ * Omitted resolves the account's default channel through the single
+ * D-11 rule in `resolveDefaultChannelId` (SPEC 064).
  */
 export async function resolveConversationByPhone(
   db: SupabaseClient,
@@ -71,7 +74,7 @@ export async function resolveConversationByPhone(
     // confirm the id (SPEC 049 §5.4).
     const { data: channel } = await db
       .from('channels')
-      .select('id, status')
+      .select('id, type, status')
       .eq('id', explicitChannelId)
       .eq('account_id', accountId)
       .maybeSingle();
@@ -82,7 +85,16 @@ export async function resolveConversationByPhone(
         400
       );
     }
-    if (channel.status !== 'connected') {
+    // SPEC 064 F3: `channels.status` só barra o envio onde ele é
+    // mantido — ver `lib/channels/status.ts`. Comparar com 'connected'
+    // aqui recusava o número oficial de contas cuja linha ficou no
+    // valor do backfill da 055 (o estado de `vn` hoje), que envia sem
+    // problema por qualquer outro caminho.
+    const block = channelSendBlock({
+      type: channel.type as ChannelType,
+      status: channel.status,
+    });
+    if (block) {
       throw new SendMessageError(
         'bad_request',
         `channel_id "${explicitChannelId}" is ${channel.status} — cannot send`,
@@ -91,25 +103,29 @@ export async function resolveConversationByPhone(
     }
     channelId = channel.id;
   } else {
-    // Fail fast (and create nothing) when the account has no WhatsApp
+    // Fail fast (and create nothing) when the account has no channel
     // connected — the same error the send would raise anyway.
-    const { data: config } = await db
-      .from('whatsapp_config')
-      .select('id, channel_id')
-      .eq('account_id', accountId)
-      .maybeSingle();
-    if (!config) {
+    //
+    // SPEC 064 F3: this used to read `whatsapp_config` by `account_id`,
+    // which has no answer once an account has two official numbers.
+    // `resolveDefaultChannelId` owns the D-11 derivation (default Cloud
+    // channel, else default QR, else error) and is the same rule the
+    // send path applies, so the conversation is created on exactly the
+    // channel that will carry the message.
+    try {
+      channelId = await resolveDefaultChannelId(db, accountId);
+    } catch (err) {
+      // Only the typed "no channel" failure becomes this 400. A bare
+      // `catch` here would turn a bug or a DB outage into "set up your
+      // WhatsApp integration", sending the operator to reconnect a
+      // number that is already connected.
+      if (!(err instanceof ChannelNotConfiguredError)) throw err;
       throw new SendMessageError(
         'whatsapp_not_configured',
         'WhatsApp not configured. Please set up your WhatsApp integration first.',
         400
       );
     }
-
-    // `channel_id` já vive em `whatsapp_config` desde a 055; o fallback só
-    // cobre uma conta que nunca passou pelo backfill (migração 059).
-    channelId =
-      config.channel_id ?? (await resolveDefaultChannelId(db, accountId));
   }
 
   // Audit user for created rows = the single account-wide default used

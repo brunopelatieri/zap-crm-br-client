@@ -26,6 +26,8 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 
 export async function GET(
   request: Request,
@@ -63,7 +65,7 @@ export async function GET(
     // de casar.
     const { data: owningMessage, error: ownershipError } = await supabase
       .from('messages')
-      .select('id')
+      .select('id, channel_id')
       .eq('media_id', mediaId)
       .limit(1)
       .maybeSingle();
@@ -101,21 +103,30 @@ export async function GET(
       );
     }
 
-    // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single();
-
-    if (configError || !config) {
-      return NextResponse.json(
-        { error: 'WhatsApp not configured' },
-        { status: 400 }
+    // SPEC 064 F3 — a credencial é a DO NÚMERO que recebeu a mídia.
+    //
+    // A mídia da Meta só é baixável com o token do número dono dela: o
+    // handle vive no WABA daquele `phone_number_id`, e usar o token do
+    // outro número devolveria 404 da Graph API numa conta com dois
+    // oficiais. `channel_id` nulo é mensagem anterior à 063 e cai no
+    // canal Cloud padrão, que é como sempre funcionou.
+    let accessToken: string;
+    try {
+      const { config } = await resolveCloudConfig(
+        supabase,
+        accountId,
+        (owningMessage.channel_id as string | null) ?? undefined
       );
+      accessToken = decrypt(config.access_token);
+    } catch (err) {
+      if (err instanceof ChannelNotConfiguredError) {
+        return NextResponse.json(
+          { error: 'WhatsApp not configured' },
+          { status: 400 }
+        );
+      }
+      throw err;
     }
-
-    const accessToken = decrypt(config.access_token);
 
     // Get the download URL from Meta
     const mediaInfo = await getMediaUrl({ mediaId, accessToken });

@@ -39,16 +39,58 @@ const APPROVED_TEMPLATE = {
 const CONFIG_ROW = {
   id: 'cfg-1',
   account_id: 'acc-1',
+  channel_id: 'ch-cloud-1',
   user_id: 'u1',
   phone_number_id: '1234567890',
   access_token: encrypt('fake-access-token'),
   status: 'connected',
 };
 
+/**
+ * Canal oficial da conta (SPEC 064 F3).
+ *
+ * A credencial passou a ser resolvida PELO CANAL: sem uma linha em
+ * `channels`, o disparo de ingestão não chega à `whatsapp_config` — e
+ * em produção é assim também.
+ */
+const CLOUD_CHANNEL = {
+  id: 'ch-cloud-1',
+  account_id: 'acc-1',
+  user_id: 'u1',
+  type: 'whatsapp_cloud',
+  name: 'WhatsApp Oficial',
+  identifier: '5511988887777',
+  status: 'connected',
+  status_detail: null,
+  is_default: true,
+  created_at: '2026-01-01T00:00:00.000Z',
+};
+
 interface FakeDbOptions {
-  channelRows?: { type: string }[] | null;
+  channelRows?: Record<string, unknown>[] | null;
   config?: Record<string, unknown> | null;
   template?: Record<string, unknown> | null;
+}
+
+/**
+ * Elo encadeável que ignora os filtros e resolve no `then`/`maybeSingle`
+ * — serve tanto à LISTA (`assertAccountCanBroadcast`,
+ * `resolveDefaultChannelId`) quanto à LINHA por id (`resolveCloudConfig`).
+ */
+function chain(resolveWith: (filters: [string, unknown][]) => unknown) {
+  const filters: [string, unknown][] = [];
+  const link: Record<string, unknown> = {
+    select: () => link,
+    eq: (k: string, v: unknown) => (filters.push([k, v]), link),
+    neq: () => link,
+    in: () => link,
+    limit: () => link,
+    maybeSingle: () => Promise.resolve(resolveWith(filters)),
+    single: () => Promise.resolve(resolveWith(filters)),
+    then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+      Promise.resolve(resolveWith(filters)).then(onF, onR),
+  };
+  return link;
 }
 
 function fakeDb(opts: FakeDbOptions = {}): {
@@ -75,25 +117,24 @@ function fakeDb(opts: FakeDbOptions = {}): {
         };
       }
       if (table === 'channels') {
-        return {
-          select: () => ({
-            eq: () => Promise.resolve({ data: opts.channelRows ?? null }),
-          }),
-        };
+        return chain((filters) => {
+          const id = filters.find(([k]) => k === 'id')?.[1];
+          const rows = opts.channelRows ?? null;
+          if (id !== undefined) {
+            return {
+              data: (rows ?? []).find((r) => r.id === id) ?? null,
+              error: null,
+            };
+          }
+          return { data: rows, error: null };
+        });
       }
       if (table === 'whatsapp_config') {
-        return {
-          select: () => ({
-            eq: () => ({
-              single: () =>
-                Promise.resolve(
-                  opts.config
-                    ? { data: opts.config, error: null }
-                    : { data: null, error: { message: 'not found' } }
-                ),
-            }),
-          }),
-        };
+        return chain(() =>
+          opts.config
+            ? { data: opts.config, error: null }
+            : { data: null, error: null }
+        );
       }
       if (table === 'message_templates') {
         return {
@@ -196,9 +237,9 @@ describe('sendIngestTemplate — template lookup', () => {
 });
 
 describe('sendIngestTemplate — channel not configured', () => {
-  it('throws channel_not_capable when whatsapp_config is missing despite capability', async () => {
+  it('canal órfão (sem credencial) vira channel_not_capable, com o motivo', async () => {
     const { db } = fakeDb({
-      channelRows: [],
+      channelRows: [CLOUD_CHANNEL],
       template: APPROVED_TEMPLATE,
       config: null,
     });
@@ -218,7 +259,7 @@ describe('sendIngestTemplate — channel not configured', () => {
 describe('sendIngestTemplate — send success/failure', () => {
   it('sends, stamps the recipient row as sent, and returns the provider message id', async () => {
     const { db, recipientUpdates } = fakeDb({
-      channelRows: [],
+      channelRows: [CLOUD_CHANNEL],
       template: APPROVED_TEMPLATE,
       config: CONFIG_ROW,
     });
@@ -241,12 +282,44 @@ describe('sendIngestTemplate — send success/failure', () => {
     ]);
   });
 
+  it('usa a credencial DO CANAL, e o canal escolhido quando há um (SPEC 064)', async () => {
+    // Antes da F3 isto era um `.single()` sobre `whatsapp_config` por
+    // `account_id`: com dois números a ingestão sairia pelo número
+    // errado — ou estouraria, mas só depois de a conta ter dois.
+    const outro = {
+      ...CLOUD_CHANNEL,
+      id: 'ch-cloud-2',
+      identifier: '5511977776666',
+      is_default: false,
+    };
+    const { db } = fakeDb({
+      channelRows: [CLOUD_CHANNEL, outro],
+      template: APPROVED_TEMPLATE,
+      config: { ...CONFIG_ROW, channel_id: 'ch-cloud-2' },
+    });
+
+    await sendIngestTemplate(db, {
+      accountId: 'acc-1',
+      phone: '5519992496598',
+      templateId: 'tpl-1',
+      templateParams: [],
+      recipientRowId: 'rec-1',
+      channelId: 'ch-cloud-2',
+    });
+
+    const [ctx] = cloudSendTemplate.mock.calls[0] as unknown as [
+      { channel: { id: string; identifier: string | null } },
+    ];
+    expect(ctx.channel.id).toBe('ch-cloud-2');
+    expect(ctx.channel.identifier).toBe('5511977776666');
+  });
+
   it('a Meta failure marks the recipient row failed and throws send_failed', async () => {
     cloudSendTemplate.mockRejectedValueOnce(
       new Error('Meta API error: bad param')
     );
     const { db, recipientUpdates } = fakeDb({
-      channelRows: [],
+      channelRows: [CLOUD_CHANNEL],
       template: APPROVED_TEMPLATE,
       config: CONFIG_ROW,
     });

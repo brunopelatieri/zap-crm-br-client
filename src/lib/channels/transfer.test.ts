@@ -73,9 +73,44 @@ describe('evaluateTransferChannel — critérios da SPEC 056 §4.3', () => {
     });
   });
 
-  it('canal desconectado é recusado com motivo', () => {
+  it('QRCode desconectado é recusado com motivo', () => {
     expect(evaluateTransferChannel(qrDisconnected, CURRENT)).toEqual({
       channel: qrDisconnected,
+      eligible: false,
+      reason: 'not_connected',
+    });
+  });
+
+  it('número oficial desconectado é recusado — a F4 deu escritor ao status', () => {
+    // Até a F4 este teste afirmava o CONTRÁRIO: `channels.status` do
+    // canal Cloud vinha do backfill da 055 e não tinha escritor, então
+    // recusá-lo tirava da lista de destinos justamente o resgate fora
+    // da janela de 24 h da SPEC 056. Com a rota de configuração
+    // escrevendo a coluna, `disconnected` num número oficial passa a
+    // significar "a Meta reprovou a credencial" — e aí ele não é
+    // destino de transferência nenhuma.
+    const cloudDesconectado: TransferCandidateChannel = {
+      ...cloudWindowOpen,
+      id: 'cloud-5',
+      status: 'disconnected',
+    };
+
+    expect(evaluateTransferChannel(cloudDesconectado, CURRENT)).toEqual({
+      channel: cloudDesconectado,
+      eligible: false,
+      reason: 'not_connected',
+    });
+  });
+
+  it('canal DESATIVADO é recusado em qualquer tipo (D-12)', () => {
+    const cloudDesativado: TransferCandidateChannel = {
+      ...cloudWindowOpen,
+      id: 'cloud-6',
+      status: 'disabled',
+    };
+
+    expect(evaluateTransferChannel(cloudDesativado, CURRENT)).toEqual({
+      channel: cloudDesativado,
       eligible: false,
       reason: 'not_connected',
     });

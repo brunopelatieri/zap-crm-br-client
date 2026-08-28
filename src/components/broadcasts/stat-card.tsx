@@ -25,6 +25,13 @@ interface StatCardProps {
    * sentido.
    */
   format?: 'count' | 'percent';
+  /**
+   * Texto a exibir NO LUGAR do número quando o valor não pôde ser lido
+   * (SPEC 064 §3.9). Zero e "não sei" não podem ocupar o mesmo pixel:
+   * o card de alcance das 24 h é usado para decidir tamanho de
+   * audiência.
+   */
+  unavailable?: string;
 }
 
 export function StatCard({
@@ -34,9 +41,10 @@ export function StatCard({
   icon,
   color,
   format = 'count',
+  unavailable,
 }: StatCardProps) {
   const pct =
-    format === 'count' && total !== undefined
+    !unavailable && format === 'count' && total !== undefined
       ? total > 0
         ? Math.round((value / total) * 100)
         : 0
@@ -54,9 +62,15 @@ export function StatCard({
           <span className="text-muted-foreground text-xs">{pct}%</span>
         )}
       </div>
-      <p className="text-foreground mt-3 text-2xl font-bold">
-        {format === 'percent' ? `${value}%` : value.toLocaleString()}
-      </p>
+      {unavailable ? (
+        <p className="text-muted-foreground mt-3 text-base font-medium">
+          {unavailable}
+        </p>
+      ) : (
+        <p className="text-foreground mt-3 text-2xl font-bold">
+          {format === 'percent' ? `${value}%` : value.toLocaleString()}
+        </p>
+      )}
       <p className="text-muted-foreground text-xs">{label}</p>
     </div>
   );

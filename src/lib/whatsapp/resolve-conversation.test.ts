@@ -14,12 +14,36 @@ import { SendMessageError } from './send-message';
 // ------------------------------------------------------------
 type ContactRow = { id: string; phone: string; name?: string | null };
 
+/** Canal Cloud padrão da conta, do jeito que a 072 o deixa. */
+function cloudChannel(id: string, over: Record<string, unknown> = {}) {
+  return {
+    id,
+    type: 'whatsapp_cloud',
+    is_default: true,
+    status: 'connected',
+    created_at: '2026-01-01T00:00:00.000Z',
+    ...over,
+  };
+}
+
 interface Script {
-  config?: { user_id: string; channel_id?: string } | null; // whatsapp_config.maybeSingle
+  /**
+   * Canais ativos da conta — a LISTA que `resolveDefaultChannelId` lê
+   * (SPEC 064 D-11). Substituiu o `whatsapp_config.channel_id` que esta
+   * função consultava antes da 072, quando "a config da conta" ainda era
+   * uma pergunta com resposta única.
+   */
+  defaultChannels?: Record<string, unknown>[];
+  /**
+   * Dono da conta — a fonte de autoria da API pública desde a SPEC 064
+   * F3 (`resolveAuditUserId` deixou de derivar do dono da
+   * `whatsapp_config`, que com dois números não é uma pessoa só).
+   */
+  accountOwner?: string | null;
   /** `channels` row for an explicit `channel_id` lookup. `null` = not found
    *  (wrong account or nonexistent id) — the row `.eq('account_id', …)`
    *  already scopes to, so the fake doesn't need to re-check tenancy. */
-  channel?: { id: string; status: string } | null;
+  channel?: { id: string; type?: string; status: string } | null;
   contactCandidates?: ContactRow[]; // contacts .like (same every call)
   /** Per-call `.like` results — overrides contactCandidates. Lets a
    *  test simulate "miss, then hit" for the unique-race path. */
@@ -53,6 +77,10 @@ function makeDb(script: Script): SupabaseClient {
       return builder;
     },
     eq: () => builder,
+    // `resolveDefaultChannelId` filtra por `in('type')` e
+    // `neq('status','disabled')` (SPEC 064 D-11).
+    in: () => builder,
+    neq: () => builder,
     order: () => builder,
     limit: () => {
       // Only the conversation lookup terminates on `.limit(1)`.
@@ -73,8 +101,14 @@ function makeDb(script: Script): SupabaseClient {
       return Promise.resolve({ data, error: null });
     },
     maybeSingle: () => {
-      if (table === 'whatsapp_config')
-        return Promise.resolve({ data: script.config ?? null, error: null });
+      if (table === 'accounts')
+        return Promise.resolve({
+          data:
+            script.accountOwner === null
+              ? null
+              : { owner_user_id: script.accountOwner ?? 'owner-1' },
+          error: null,
+        });
       if (table === 'channels')
         return Promise.resolve({ data: script.channel ?? null, error: null });
       return Promise.resolve({ data: null, error: null });
@@ -104,9 +138,15 @@ function makeDb(script: Script): SupabaseClient {
       }
       return Promise.resolve({ data: null, error: null });
     },
-    // Thenable: `await db.from().update().eq()` lands here.
-    then: (resolve: (v: { data: null; error: null }) => void) =>
-      resolve({ data: null, error: null }),
+    // Thenable: `await db.from().update().eq()` lands here — e também a
+    // LISTA de canais de `resolveDefaultChannelId`, que não termina em
+    // `maybeSingle`.
+    then: (resolve: (v: { data: unknown; error: null }) => void) => {
+      if (table === 'channels' && mode === 'select') {
+        return resolve({ data: script.defaultChannels ?? [], error: null });
+      }
+      return resolve({ data: null, error: null });
+    },
   };
 
   return {
@@ -130,8 +170,8 @@ describe('resolveConversationByPhone', () => {
     ).rejects.toBeInstanceOf(SendMessageError);
   });
 
-  it('fails with whatsapp_not_configured when no config owner exists', async () => {
-    const db = makeDb({ config: null });
+  it('fails with whatsapp_not_configured when the account has no channel', async () => {
+    const db = makeDb({ defaultChannels: [] });
     await resolveConversationByPhone(db, 'acct', '+14155550123').catch(
       (e: SendMessageError) => {
         expect(e.code).toBe('whatsapp_not_configured');
@@ -145,7 +185,7 @@ describe('resolveConversationByPhone', () => {
 
   it('returns the existing contact + conversation without creating', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1', channel_id: 'chan-1' },
+      defaultChannels: [cloudChannel('chan-1')],
       contactCandidates: [{ id: 'c1', phone: '14155550123' }],
       existingConversation: { id: 'cv1' },
     });
@@ -163,7 +203,7 @@ describe('resolveConversationByPhone', () => {
 
   it('creates contact + conversation when none exist', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1', channel_id: 'chan-1' },
+      defaultChannels: [cloudChannel('chan-1')],
       contactCandidates: [],
       insertedContactId: 'c2',
       existingConversation: null,
@@ -187,7 +227,7 @@ describe('resolveConversationByPhone', () => {
     // 23505 unique violation, and the post-race re-lookup now returns
     // the row a concurrent writer created.
     const db = makeDb({
-      config: { user_id: 'owner-1', channel_id: 'chan-1' },
+      defaultChannels: [cloudChannel('chan-1')],
       contactCandidatesByCall: [[], [{ id: 'c-raced', phone: '14155550123' }]],
       insertContactError: { code: '23505' },
       existingConversation: { id: 'cv-raced' },
@@ -204,7 +244,7 @@ describe('resolveConversationByPhone', () => {
     // post-race re-lookup returns the winning conversation — no duplicate
     // conversation is created (issue #363).
     const db = makeDb({
-      config: { user_id: 'owner-1', channel_id: 'chan-1' },
+      defaultChannels: [cloudChannel('chan-1')],
       contactCandidates: [{ id: 'c1', phone: '14155550123' }],
       existingConversationByCall: [null, { id: 'cv-raced' }],
       insertConversationError: { code: '23505' },
@@ -224,8 +264,7 @@ describe('resolveConversationByPhone', () => {
 describe('resolveConversationByPhone — explicit channel_id (SPEC 049 §5.4)', () => {
   it('uses the explicit channel when it belongs to the account and is connected — never touches whatsapp_config for the channel', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1' }, // still needed for resolveAuditUserId
-      channel: { id: 'chan-qr-1', status: 'connected' },
+      channel: { id: 'chan-qr-1', type: 'whatsapp_qr', status: 'connected' },
       contactCandidates: [{ id: 'c1', phone: '14155550123' }],
       existingConversation: { id: 'cv1' },
     });
@@ -245,7 +284,6 @@ describe('resolveConversationByPhone — explicit channel_id (SPEC 049 §5.4)', 
 
   it('rejects with bad_request (never a 404) when channel_id does not belong to this account', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1' },
       channel: null, // .eq('account_id', accountId) found nothing
     });
     await expect(
@@ -259,10 +297,9 @@ describe('resolveConversationByPhone — explicit channel_id (SPEC 049 §5.4)', 
     ).rejects.toMatchObject({ code: 'bad_request', status: 400 });
   });
 
-  it('rejects with bad_request and the status in the message when the channel is disconnected', async () => {
+  it('rejects a QRCode channel that is disconnected — ali o status é mantido', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1' },
-      channel: { id: 'chan-qr-1', status: 'disconnected' },
+      channel: { id: 'chan-qr-1', type: 'whatsapp_qr', status: 'disconnected' },
     });
     await expect(
       resolveConversationByPhone(db, 'acct', '+14155550123', null, 'chan-qr-1')
@@ -273,9 +310,86 @@ describe('resolveConversationByPhone — explicit channel_id (SPEC 049 §5.4)', 
     });
   });
 
+  it('recusa o número oficial desconectado — a F4 deu escritor ao status', async () => {
+    // Até a F4 este teste afirmava o CONTRÁRIO, e de propósito:
+    // `channels.status` do canal Cloud era o valor congelado do
+    // backfill da 055 (`POST /api/whatsapp/config` nem tocava a
+    // tabela), então recusar por ele negava envio a um número que
+    // funcionava. Agora a rota de configuração escreve a coluna —
+    // `connected` ao salvar, `error` quando o diagnóstico é reprovado —
+    // e `STATUS_IS_MAINTAINED.whatsapp_cloud` virou `true`. Um Cloud
+    // fora de `connected` passa a significar o que diz.
+    const db = makeDb({
+      channel: {
+        id: 'chan-cloud-1',
+        type: 'whatsapp_cloud',
+        status: 'disconnected',
+      },
+      contactCandidates: [{ id: 'c1', phone: '14155550123' }],
+      existingConversation: { id: 'cv1' },
+    });
+
+    await expect(
+      resolveConversationByPhone(
+        db,
+        'acct',
+        '+14155550123',
+        null,
+        'chan-cloud-1'
+      )
+    ).rejects.toMatchObject({
+      code: 'bad_request',
+      status: 400,
+      message: expect.stringContaining('disconnected'),
+    });
+  });
+
+  it('aceita o número oficial conectado', async () => {
+    const db = makeDb({
+      channel: {
+        id: 'chan-cloud-1',
+        type: 'whatsapp_cloud',
+        status: 'connected',
+      },
+      contactCandidates: [{ id: 'c1', phone: '14155550123' }],
+      existingConversation: { id: 'cv1' },
+    });
+
+    await expect(
+      resolveConversationByPhone(
+        db,
+        'acct',
+        '+14155550123',
+        null,
+        'chan-cloud-1'
+      )
+    ).resolves.toMatchObject({ conversationId: 'cv1', contactId: 'c1' });
+  });
+
+  it('recusa canal DESATIVADO em qualquer tipo (D-12)', async () => {
+    // O único estado de canal Cloud que o operador realmente cria — e o
+    // que zera o segredo. Enviar por ele é impossível.
+    const db = makeDb({
+      channel: {
+        id: 'chan-cloud-1',
+        type: 'whatsapp_cloud',
+        status: 'disabled',
+      },
+    });
+    await expect(
+      resolveConversationByPhone(
+        db,
+        'acct',
+        '+14155550123',
+        null,
+        'chan-cloud-1'
+      )
+    ).rejects.toMatchObject({ code: 'bad_request', status: 400 });
+  });
+
   it('omitting channel_id keeps the default-channel behaviour unchanged', async () => {
     const db = makeDb({
-      config: { user_id: 'owner-1', channel_id: 'chan-default' },
+      defaultChannels: [cloudChannel('chan-default')],
       contactCandidates: [{ id: 'c1', phone: '14155550123' }],
       existingConversation: { id: 'cv1' },
     });

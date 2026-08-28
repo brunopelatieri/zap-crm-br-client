@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { can } from '@/lib/channels/capabilities';
 import { useAccountChannels } from '@/lib/channels/use-account-channels';
 import { useTransferChannels } from '@/hooks/use-transfer-channels';
-import { formatPhoneForDisplay } from '@/lib/phone/br';
+import { channelIdentifierDisplay } from '@/lib/channels/identifier';
 
 interface TransferChannelDialogProps {
   open: boolean;
@@ -207,9 +207,14 @@ export function TransferChannelDialog({
                     <p className="text-foreground truncate font-medium">
                       {channel.name}
                     </p>
-                    {row?.identifier && (
+                    {/* D-9: só formata o que sabidamente é telefone. Um
+                        canal Cloud ainda não reconciliado guarda o
+                        `phone_number_id` da Meta, e este mesmo trecho
+                        exibia esse id opaco como se fosse o número
+                        (§1.1.E.2). Sem certeza, mostra só o rótulo. */}
+                    {row && channelIdentifierDisplay(row) && (
                       <p className="text-muted-foreground truncate text-xs">
-                        {formatPhoneForDisplay(row.identifier)}
+                        {channelIdentifierDisplay(row)}
                       </p>
                     )}
                   </div>

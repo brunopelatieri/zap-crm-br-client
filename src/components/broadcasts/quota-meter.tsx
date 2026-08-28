@@ -45,8 +45,16 @@ export function exceedsQuota(selected: number, batchLimit: number): boolean {
 
 export function QuotaMeter({ selected, compact = false }: QuotaMeterProps) {
   const t = useTranslations('Broadcasts.audience.quota');
-  const { configured, tier, batchLimit, usedLast24h, stale, loading, refresh } =
-    useMessagingLimit();
+  const {
+    configured,
+    tier,
+    batchLimit,
+    usedLast24h,
+    usageUnavailable,
+    stale,
+    loading,
+    refresh,
+  } = useMessagingLimit();
 
   // `loading` do provider também sobe na busca automática de montagem;
   // um estado local é o que faz o spinner pertencer a ESTE clique.
@@ -139,8 +147,16 @@ export function QuotaMeter({ selected, compact = false }: QuotaMeterProps) {
                 limit: batchLimit.toLocaleString(),
               })}
             </span>
+            {/*
+              SPEC 064 §3.9: quando a contagem das 24 h não pôde ser
+              lida, mostrar "0 alcançados" seria pior que não mostrar
+              nada — é o número que o operador usa para decidir o
+              tamanho da audiência.
+            */}
             <span className="text-muted-foreground">
-              {t('usedInWindow', { used: usedLast24h.toLocaleString() })}
+              {usageUnavailable
+                ? t('usageUnavailable')
+                : t('usedInWindow', { used: usedLast24h.toLocaleString() })}
             </span>
           </div>
         </>

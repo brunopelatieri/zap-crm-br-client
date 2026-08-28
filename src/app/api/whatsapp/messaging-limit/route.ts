@@ -51,8 +51,20 @@ export async function GET(request: Request) {
     // Toda a lógica de tier + cache + fallback mora em
     // `messaging-limit-server`, porque a rota de envio precisa
     // exatamente da mesma leitura para impor o teto (§4.5, item 4).
-    const force = new URL(request.url).searchParams.get('force') === '1';
-    const quota = await loadAccountQuota(supabase, accountId, { force });
+    const params = new URL(request.url).searchParams;
+    const force = params.get('force') === '1';
+    // SPEC 064 D-4: o tier é por NÚMERO. Sem `channel_id`, mede o canal
+    // Cloud padrão — que é o comportamento de toda conta com um número
+    // só. O cache de 15 min também passa a ser por canal, então uma
+    // conta com 3 números faz até 3 chamadas à Meta por janela (§5).
+    // `?channel_id=` (vazio) é ausência de id: `URLSearchParams.get`
+    // devolve `''`, que não é nullish e viraria uma consulta por
+    // `id = ''` em vez do canal padrão.
+    const channelId = params.get('channel_id')?.trim() || null;
+    const quota = await loadAccountQuota(supabase, accountId, {
+      force,
+      channelId,
+    });
 
     if (!quota.configured) {
       return NextResponse.json(

@@ -82,6 +82,17 @@ let statusMessageRow: {
   };
 } | null = null;
 
+/**
+ * Linha de `channels` do número que recebeu a mensagem (SPEC 064 F3).
+ * Padrão: conectado. Um teste troca por `disabled` para exercitar a
+ * guarda do D-12.
+ */
+let channelRow: { id: string; name: string; status: string } | null = {
+  id: 'chan-1',
+  name: 'WhatsApp Oficial',
+  status: 'connected',
+};
+
 // Só a consulta de `whatsapp_config` por `phone_number_id` é exercida
 // diretamente aqui — o resto do trabalho de INGESTÃO está mockado no
 // ingest. `messages`/`broadcast_recipients` ramificam por tabela porque
@@ -120,6 +131,21 @@ vi.mock('@supabase/supabase-js', () => ({
           select: () => chain,
           eq: () => chain,
           maybeSingle: () => Promise.resolve({ data: null, error: null }),
+        };
+        return chain;
+      }
+      // SPEC 064 D-12: antes de ingerir, a rota confere o STATUS do
+      // canal dono do número. Número desativado não cria conversa nem
+      // decripta segredo nenhum.
+      if (table === 'channels') {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: channelRow,
+              error: null,
+            }),
         };
         return chain;
       }
@@ -190,6 +216,7 @@ beforeEach(() => {
   ingestInbound.mockResolvedValue(undefined);
   dispatchWebhookEvent.mockResolvedValue(undefined);
   statusMessageRow = null;
+  channelRow = { id: 'chan-1', name: 'WhatsApp Oficial', status: 'connected' };
   storageUploadResult = { error: null };
   getMediaUrl.mockResolvedValue({
     url: 'https://cdn.meta.example/media-1',
@@ -299,6 +326,38 @@ describe('POST /api/whatsapp/webhook — ack e processamento', () => {
     expect(event.fromPhone).toBe('5511999999999');
     // `1786000000` em segundos — nunca `new Date()` do nosso servidor.
     expect(event.occurredAt.getTime()).toBe(1786000000 * 1000);
+  });
+
+  it('número DESATIVADO: nada é ingerido, e o log nomeia o número (SPEC 064 D-12)', async () => {
+    // Desativar preserva canal, histórico e configuração e zera só o
+    // segredo (`access_token = ''`). Sem esta guarda a rota decriptaria
+    // uma string vazia e, pior, abriria conversa num número que não
+    // pode responder. Antes da 072 o caso equivalente caía no genérico
+    // "No config found" — o log agora diz o motivo certo.
+    channelRow = { id: 'chan-1', name: 'Suporte', status: 'disabled' };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await POST(request(INBOUND));
+    expect(res.status).toBe(200);
+    await afterCallbacks[0]!();
+
+    expect(ingestInbound).not.toHaveBeenCalled();
+    const logged = warn.mock.calls.flat().join(' ');
+    expect(logged).toContain('disabled');
+    expect(logged).toContain('Suporte');
+    expect(logged).toContain('pnid-1');
+    warn.mockRestore();
+  });
+
+  it('canal apagado fora do fluxo normal: não ingere', async () => {
+    channelRow = null;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await POST(request(INBOUND));
+    await afterCallbacks[0]!();
+
+    expect(ingestInbound).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it('uma falha no processamento não escapa do callback', async () => {

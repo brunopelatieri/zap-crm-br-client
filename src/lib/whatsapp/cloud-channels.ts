@@ -76,11 +76,28 @@ export interface CloudChannelSummary {
    */
   phoneNumberId: string | null;
   wabaId: string | null;
+  /** `POST /register` da Meta já concluído neste número. */
+  registeredAt: string | null;
+  lastRegistrationError: string | null;
+  subscribedAppsAt: string | null;
+  /** Anti-fadiga por número (SPEC 044 §6.2 / D-4). */
+  broadcastCooldownDays: number | null;
+  /** Tier da Meta, que é por NÚMERO (D-4). */
+  messagingLimitTier: string | null;
   createdAt: string;
 }
 
-/** Colunas do resumo — sem segredo nenhum, ver o cabeçalho. */
-const CONFIG_SUMMARY_COLUMNS = 'channel_id, phone_number_id, waba_id';
+/**
+ * Colunas do resumo — sem segredo nenhum, ver o cabeçalho.
+ *
+ * A lista é o que a aba de configuração passa a ler no lugar do
+ * `select('*')` que ela fazia direto do navegador (§6.1), então ela
+ * carrega tudo que aquela tela mostra: registro, cooldown e tier. O que
+ * não pode estar aqui é `access_token` e `verify_token` — e é por isso
+ * que as colunas são nomeadas uma a uma, e não `*`.
+ */
+const CONFIG_SUMMARY_COLUMNS =
+  'channel_id, phone_number_id, waba_id, registered_at, last_registration_error, subscribed_apps_at, broadcast_cooldown_days, messaging_limit_tier';
 
 /**
  * Todos os números oficiais da conta, **do padrão para o mais novo**.
@@ -105,7 +122,8 @@ export async function listCloudChannels(
   // consulta falhou" levam o chamador a caminhos opostos.
   if (error) {
     throw new ChannelNotConfiguredError(
-      `failed to list cloud channels for account ${accountId}: ${error.message}`
+      `failed to list cloud channels for account ${accountId}: ${error.message}`,
+      'read_failed'
     );
   }
 
@@ -126,7 +144,8 @@ export async function listCloudChannels(
 
   if (configError) {
     throw new ChannelNotConfiguredError(
-      `failed to read cloud credentials for account ${accountId}: ${configError.message}`
+      `failed to read cloud credentials for account ${accountId}: ${configError.message}`,
+      'read_failed'
     );
   }
 
@@ -145,6 +164,14 @@ export async function listCloudChannels(
         isDefault: Boolean(c.is_default),
         phoneNumberId: (config?.phone_number_id ?? null) as string | null,
         wabaId: (config?.waba_id ?? null) as string | null,
+        registeredAt: (config?.registered_at ?? null) as string | null,
+        lastRegistrationError: (config?.last_registration_error ?? null) as
+          string | null,
+        subscribedAppsAt: (config?.subscribed_apps_at ?? null) as string | null,
+        broadcastCooldownDays: (config?.broadcast_cooldown_days ?? null) as
+          number | null,
+        messagingLimitTier: (config?.messaging_limit_tier ?? null) as
+          string | null,
         createdAt: c.created_at as string,
       };
     })
@@ -173,8 +200,12 @@ export async function resolveCloudConfig(
   accountId: string,
   channelId?: string | null
 ): Promise<{ channel: Channel; config: WhatsappConfigRow }> {
+  // `|| null`, e não `?? null`: `''` chega aqui quando um chamador
+  // repassa `searchParams.get('channel_id')` de um `?channel_id=` vazio,
+  // e `''` não é nullish — sem isto, a consulta seria por `id = ''` e o
+  // pedido morreria com "canal não existe" em vez de cair no padrão.
   const wantedId =
-    channelId ??
+    (channelId || null) ??
     (await resolveDefaultChannelId(db, accountId, 'whatsapp_cloud'));
 
   const { data: channel, error } = await db
@@ -186,24 +217,28 @@ export async function resolveCloudConfig(
 
   if (error) {
     throw new ChannelNotConfiguredError(
-      `failed to read channel ${wantedId}: ${error.message}`
+      `failed to read channel ${wantedId}: ${error.message}`,
+      'read_failed'
     );
   }
   // Inclui o caso "id de outra conta": o `account_id` acima faz a linha
   // simplesmente não existir para esta conta.
   if (!channel) {
     throw new ChannelNotConfiguredError(
-      `channel ${wantedId} does not exist in account ${accountId}`
+      `channel ${wantedId} does not exist in account ${accountId}`,
+      'not_found'
     );
   }
   if (channel.type !== 'whatsapp_cloud') {
     throw new ChannelNotConfiguredError(
-      `channel ${wantedId} is of type "${channel.type}", not whatsapp_cloud`
+      `channel ${wantedId} is of type "${channel.type}", not whatsapp_cloud`,
+      'wrong_type'
     );
   }
   if (channel.status === 'disabled') {
     throw new ChannelNotConfiguredError(
-      `channel ${wantedId} is disabled — reconnect the number before sending`
+      `channel ${wantedId} is disabled — reconnect the number before sending`,
+      'disabled'
     );
   }
 
@@ -216,13 +251,15 @@ export async function resolveCloudConfig(
 
   if (configError) {
     throw new ChannelNotConfiguredError(
-      `failed to read credentials of channel ${wantedId}: ${configError.message}`
+      `failed to read credentials of channel ${wantedId}: ${configError.message}`,
+      'read_failed'
     );
   }
   // Canal órfão: a criação são dois INSERT sem transação (§5).
   if (!config) {
     throw new ChannelNotConfiguredError(
-      `channel ${wantedId} has no WhatsApp credentials`
+      `channel ${wantedId} has no WhatsApp credentials`,
+      'no_credentials'
     );
   }
   // `access_token` é NOT NULL desde a 001, então "desativar" grava
@@ -230,7 +267,8 @@ export async function resolveCloudConfig(
   // falharia com um erro de criptografia que não explica nada.
   if (!config.access_token) {
     throw new ChannelNotConfiguredError(
-      `channel ${wantedId} has no access token — reconnect the number`
+      `channel ${wantedId} has no access token — reconnect the number`,
+      'no_credentials'
     );
   }
 
@@ -258,7 +296,8 @@ export async function countCloudChannels(
 
   if (error) {
     throw new ChannelNotConfiguredError(
-      `failed to count cloud channels for account ${accountId}: ${error.message}`
+      `failed to count cloud channels for account ${accountId}: ${error.message}`,
+      'read_failed'
     );
   }
   return count ?? 0;

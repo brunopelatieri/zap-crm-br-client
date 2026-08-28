@@ -22,6 +22,8 @@ import {
   cloudChannelContext,
   sendWithPhoneVariants,
 } from '@/lib/channels/send';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { createHeaderMediaResolver } from '@/lib/whatsapp/header-media';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
@@ -57,6 +59,17 @@ export interface SendIngestTemplateParams {
   templateParams: string[];
   /** Linha de `broadcast_recipients` já criada por `addFunnelRecipient`. */
   recipientRowId: string;
+  /**
+   * Por qual número oficial disparar (SPEC 064 D-7). Ausente = canal
+   * Cloud padrão da conta.
+   *
+   * O webhook de entrada da SPEC 055 ainda não guarda canal — o
+   * `webhook_id` é só um rótulo no corpo do POST —, então hoje todo
+   * chamador cai no padrão. O parâmetro existe para que escolher o
+   * número, quando a origem passar a saber qual é, não exija reabrir
+   * esta assinatura.
+   */
+  channelId?: string | null;
 }
 
 /**
@@ -73,8 +86,14 @@ export async function sendIngestTemplate(
   db: SupabaseClient,
   params: SendIngestTemplateParams
 ): Promise<{ messageId: string }> {
-  const { accountId, phone, templateId, templateParams, recipientRowId } =
-    params;
+  const {
+    accountId,
+    phone,
+    templateId,
+    templateParams,
+    recipientRowId,
+    channelId,
+  } = params;
 
   // SPEC 049 §5.3 — lança BroadcastError('channel_not_capable', …, 400)
   // quando NENHUM canal da conta sabe fazer broadcast (ex.: só QRCode).
@@ -108,32 +127,31 @@ export async function sendIngestTemplate(
   }
   const template = approval.template;
 
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-  if (configError || !config) {
+  // SPEC 064 F3 — credencial pelo CANAL, nunca por `account_id`.
+  let channel;
+  let config;
+  try {
+    ({ channel, config } = await resolveCloudConfig(db, accountId, channelId));
+  } catch (err) {
+    if (!(err instanceof ChannelNotConfiguredError)) throw err;
     // `assertAccountCanBroadcast` já confirmou que ALGUM canal desta
-    // conta é capaz de broadcast; se ainda assim não há
-    // `whatsapp_config`, o canal Cloud especificamente não está
-    // configurado. §5.3 não reserva um código próprio para esse caso
-    // — cai no mesmo `channel_not_capable` que a guarda de canal usa,
-    // com mensagem distinta para quem lê o log.
-    throw new IngestSendError(
-      'channel_not_capable',
-      'WhatsApp Oficial is not configured for this account'
-    );
+    // conta é capaz de broadcast; se ainda assim não há número oficial
+    // utilizável, o canal Cloud especificamente não está configurado
+    // (ou o escolhido está desativado / é de outro tipo). §5.3 não
+    // reserva um código próprio para esse caso — cai no mesmo
+    // `channel_not_capable` que a guarda de canal usa, com a mensagem
+    // do resolvedor, que nomeia o motivo para quem lê o log.
+    throw new IngestSendError('channel_not_capable', err.message);
   }
 
   const channelCtx = cloudChannelContext({
     accountId,
     phoneNumberId: config.phone_number_id,
     accessToken: decrypt(config.access_token),
-    channelId: config.channel_id ?? config.id,
+    channelId: channel.id,
     userId: config.user_id,
-    identifier: config.phone_number_id ?? null,
-    connected: config.status === 'connected',
+    identifier: channel.identifier ?? config.phone_number_id ?? null,
+    connected: channel.status === 'connected',
   });
 
   const resolveHeaderParams = createHeaderMediaResolver(db, template);

@@ -133,6 +133,25 @@ describe('computeQuota', () => {
     expect(q.usedLast24h).toBe(900);
   });
 
+  it('marca o consumo como indisponível quando a leitura falhou (SPEC 064 §3.9)', () => {
+    // Ausência de dado e zero não podem ser a mesma coisa neste
+    // medidor: "0 de 1.000 usados" é o que faz o operador montar uma
+    // audiência que a Meta recusa no meio do envio.
+    const q = computeQuota({
+      tier: 'TIER_1K',
+      usedLast24h: 0,
+      usageUnavailable: true,
+      source: 'meta',
+    });
+
+    expect(q.usageUnavailable).toBe(true);
+    // A leitura BEM-SUCEDIDA continua sendo o padrão silencioso.
+    expect(
+      computeQuota({ tier: 'TIER_1K', usedLast24h: 3, source: 'meta' })
+        .usageUnavailable
+    ).toBe(false);
+  });
+
   it('mantém o limite mesmo com uso acima do teto na janela', () => {
     // Três disparos de 400 num TIER_250 são possíveis; o que não é
     // possível é um único disparo de 400.
@@ -232,6 +251,7 @@ describe('serializeQuota', () => {
       tier: 'TIER_2K',
       batchLimit: 2000,
       usedLast24h: 100,
+      usageUnavailable: false,
       source: 'cache',
       stale: true,
     });

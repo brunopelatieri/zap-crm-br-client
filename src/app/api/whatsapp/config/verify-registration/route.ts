@@ -1,15 +1,42 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { decrypt } from '@/lib/whatsapp/encryption';
-import { getSubscribedApps, verifyPhoneNumber } from '@/lib/whatsapp/meta-api';
+import {
+  getSubscribedApps,
+  isMetaCredentialError,
+  verifyPhoneNumber,
+} from '@/lib/whatsapp/meta-api';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import {
+  identifierFromDisplayPhone,
+  reconcileCloudChannel,
+} from '@/lib/whatsapp/cloud-channel-crud';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
+
+// Reconciliação com service_role, pelo mesmo motivo de `config/route.ts`:
+// `channels_update` é admin+, mas este diagnóstico é aberto a qualquer
+// membro da conta. A escrita é derivada da resposta da própria Meta
+// sobre um número desta conta, e sempre casa `account_id`.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _adminClient: any = null;
+function supabaseAdmin() {
+  if (!_adminClient) {
+    _adminClient = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _adminClient;
+}
 
 /**
- * GET /api/whatsapp/config/verify-registration
+ * GET /api/whatsapp/config/verify-registration[?channel_id=...]
  *
- * Diagnostic endpoint — confirms the user's saved phone number is
- * actually reachable on Meta's side. Solves the failure mode that
- * surfaced the multi-number bug originally: "UI says Connected but
- * Meta isn't delivering events."
+ * Diagnostic endpoint — confirms the saved phone number is actually
+ * reachable on Meta's side. Solves the failure mode that surfaced the
+ * multi-number bug originally: "UI says Connected but Meta isn't
+ * delivering events."
  *
  * Three checks run independently so the UI can show which step
  * passes and which fails:
@@ -21,11 +48,17 @@ import { getSubscribedApps, verifyPhoneNumber } from '@/lib/whatsapp/meta-api';
  *                    /register last succeeded; NULL means the
  *                    number was saved but never actually subscribed
  *
+ * SPEC 064 F4: o diagnóstico é **por canal** (`?channel_id=`; sem ele,
+ * o canal Cloud padrão) e **reconcilia** a linha de `channels` com o
+ * que a Meta responde — `identifier` recebe o telefone (D-9) e `status`
+ * passa a refletir o resultado da verificação. É o segundo dos dois
+ * pontos que o D-9 nomeia; o outro é o `POST` de salvamento.
+ *
  * Returns 200 in every case so the UI can render diagnostic detail
  * rather than a generic error toast. The combined `live` flag is
  * what the UI badges on.
  */
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -35,9 +68,9 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // whatsapp_config is one-row-per-account post-017. Resolve the
-  // caller's account_id so a teammate who joined an existing account
-  // sees the same registration state as the admin who set it up.
+  // Resolve o `account_id` do chamador para que um colega que entrou
+  // numa conta existente veja o mesmo estado de registro que o admin
+  // que a configurou.
   const { data: profile } = await supabase
     .from('profiles')
     .select('account_id')
@@ -52,18 +85,47 @@ export async function GET() {
     });
   }
 
-  const { data: config } = await supabase
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .maybeSingle();
+  // `''` não é ausência de id por acidente: `?channel_id=` viraria uma
+  // consulta por `id = ''` em vez de cair no canal padrão.
+  const wantedChannelId =
+    new URL(request.url).searchParams.get('channel_id')?.trim() || null;
 
-  if (!config) {
-    return NextResponse.json({
-      live: false,
-      checks: { config_exists: false },
-      message: 'No WhatsApp configuration saved yet.',
-    });
+  let channel;
+  let config;
+  try {
+    ({ channel, config } = await resolveCloudConfig(
+      supabase,
+      accountId,
+      wantedChannelId
+    ));
+  } catch (err) {
+    if (err instanceof ChannelNotConfiguredError) {
+      // Falha de LEITURA não é ausência de configuração. Dizer "você
+      // ainda não salvou nada" durante uma indisponibilidade do banco
+      // convida o operador a recadastrar tudo — a ação exatamente
+      // errada. `config_exists` fica fora do objeto: o painel mostra
+      // "desconhecido", não "não existe".
+      if (err.reason === 'read_failed') {
+        console.error('[verify-registration] read failed:', err.message);
+        return NextResponse.json({
+          live: false,
+          channel_id: wantedChannelId,
+          checks: {},
+          message:
+            'Could not read the configuration right now. Try again in a moment.',
+        });
+      }
+      return NextResponse.json({
+        live: false,
+        channel_id: wantedChannelId,
+        checks: { config_exists: false },
+        message:
+          err.reason === 'disabled'
+            ? 'This number is disabled. Save its credentials again to reconnect it.'
+            : 'No WhatsApp configuration saved yet.',
+      });
+    }
+    throw err;
   }
 
   let accessToken: string;
@@ -72,6 +134,7 @@ export async function GET() {
   } catch {
     return NextResponse.json({
       live: false,
+      channel_id: channel.id,
       checks: {
         config_exists: true,
         token_decryptable: false,
@@ -97,16 +160,21 @@ export async function GET() {
   const errors: string[] = [];
 
   // 1. Phone metadata
+  let metadataError: string | null = null;
+  /** A Meta REPROVOU a credencial (4xx) — não caiu (5xx/timeout). */
+  let credentialRejected = false;
+  let identifier: string | null = null;
   try {
-    await verifyPhoneNumber({
+    const phoneInfo = await verifyPhoneNumber({
       phoneNumberId: config.phone_number_id,
       accessToken,
     });
     checks.phone_metadata_ok = true;
+    identifier = identifierFromDisplayPhone(phoneInfo.display_phone_number);
   } catch (err) {
-    errors.push(
-      `Phone metadata check failed: ${err instanceof Error ? err.message : String(err)}`
-    );
+    metadataError = err instanceof Error ? err.message : String(err);
+    credentialRejected = isMetaCredentialError(err);
+    errors.push(`Phone metadata check failed: ${metadataError}`);
   }
 
   // 2. WABA subscription — only meaningful if we have a waba_id
@@ -137,6 +205,36 @@ export async function GET() {
     );
   }
 
+  // D-9 + status: o que a Meta acabou de dizer vira o estado do canal.
+  // A assinatura do WABA de propósito NÃO entra no `status`: ela
+  // governa a ENTRADA de eventos, e um número com assinatura pendente
+  // continua enviando. Marcar `error` ali tiraria do ar um número que
+  // funciona (mesma razão do `POST`).
+  //
+  // ⚠️ `error` só quando a Meta REPROVOU (4xx). Uma indisponibilidade
+  // passageira não pode tirar o número da API pública e do diálogo de
+  // transferência — o mesmo cuidado do `GET` de saúde.
+  const needsIdentifier =
+    identifier !== null && identifier !== channel.identifier;
+  if (metadataError) {
+    if (
+      credentialRejected &&
+      (channel.status !== 'error' || channel.status_detail !== metadataError)
+    ) {
+      await reconcileCloudChannel(supabaseAdmin(), accountId, channel.id, {
+        status: 'error',
+        statusDetail: metadataError,
+      });
+    }
+  } else if (needsIdentifier || channel.status !== 'connected') {
+    await reconcileCloudChannel(supabaseAdmin(), accountId, channel.id, {
+      ...(needsIdentifier ? { identifier } : {}),
+      status: 'connected',
+      statusDetail: null,
+      connectedAt: channel.connected_at ?? new Date().toISOString(),
+    });
+  }
+
   const live =
     checks.phone_metadata_ok &&
     (checks.waba_subscribed_to_app ?? false) &&
@@ -144,6 +242,7 @@ export async function GET() {
 
   return NextResponse.json({
     live,
+    channel_id: channel.id,
     checks,
     errors,
     last_registration_error: config.last_registration_error ?? null,

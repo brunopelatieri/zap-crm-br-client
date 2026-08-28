@@ -64,7 +64,8 @@ export async function resolveDefaultChannelId(
   // chamador criar/abortar por um motivo que não é o verdadeiro.
   if (error) {
     throw new ChannelNotConfiguredError(
-      `failed to read channels for account ${accountId}: ${error.message}`
+      `failed to read channels for account ${accountId}: ${error.message}`,
+      'read_failed'
     );
   }
 

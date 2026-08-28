@@ -42,11 +42,55 @@ interface MetaErrorResponse {
   };
 }
 
+/**
+ * Erro da Graph API com o STATUS HTTP preservado.
+ *
+ * Por que o status importa a ponto de virar uma classe: quem decide
+ * gravar `channels.status = 'error'` (SPEC 064 F4) precisa separar
+ * "a Meta recusou a credencial" de "a Meta estava fora do ar por dez
+ * segundos". Os dois chegavam aqui como a MESMA `Error`, e latir o
+ * segundo como erro de credencial tira do ar um número que funciona —
+ * indefinidamente, porque nada re-sonda sozinho.
+ *
+ * `message` continua idêntica e a classe estende `Error`, então todo
+ * chamador que faz `err instanceof Error ? err.message : ...` — que é
+ * como o repositório inteiro trata isto — não muda de comportamento.
+ */
+export class MetaApiError extends Error {
+  /** Status HTTP da resposta da Graph API. */
+  readonly status: number;
+  /** `error.code` da Meta, quando veio no corpo (ex.: 190 = token). */
+  readonly code: number | null;
+
+  constructor(message: string, status: number, code: number | null) {
+    super(message);
+    this.name = 'MetaApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/**
+ * A resposta da Meta indica credencial/permissão inválida — e não uma
+ * indisponibilidade passageira?
+ *
+ * `true` só para 4xx: token expirado, número que não existe, app sem
+ * permissão. 5xx, 429 e falha de rede (que nem chega a virar
+ * `MetaApiError`) são transitórios por definição.
+ */
+export function isMetaCredentialError(err: unknown): boolean {
+  if (!(err instanceof MetaApiError)) return false;
+  // 429 é "tente de novo mais tarde", não "sua credencial é inválida".
+  if (err.status === 429) return false;
+  return err.status >= 400 && err.status < 500;
+}
+
 async function throwMetaError(
   response: Response,
   fallback: string
 ): Promise<never> {
   let message = fallback;
+  let code: number | null = null;
   try {
     const data = (await response.json()) as MetaErrorResponse;
     const err = data.error;
@@ -74,6 +118,7 @@ async function throwMetaError(
     // template-lifecycle.test.ts) — guard with `includes` so that case
     // doesn't end up double-prefixed.
     if (err?.code != null) {
+      code = err.code;
       const codePrefix = `(#${err.code})`;
       if (!message.includes(codePrefix)) {
         message = `${codePrefix} ${message}`;
@@ -82,7 +127,7 @@ async function throwMetaError(
   } catch {
     // response body wasn't JSON — keep the fallback
   }
-  throw new Error(message);
+  throw new MetaApiError(message, response.status, code);
 }
 
 // ============================================================

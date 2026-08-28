@@ -333,30 +333,29 @@ export default function InboxPage() {
         return;
       }
 
-      // Cloud (oficial) e QRCode (Evolution) são fontes independentes:
-      // `whatsapp_config.status` nunca é espelhado de volta em
-      // `channels` fora do backfill da 055 (ver `route.ts` do config),
-      // então checar as duas é a única forma de não perder uma conexão
-      // Cloud recente. Basta UMA das duas estar conectada para o aviso
-      // sumir — o requisito é "pelo menos um canal", não "o Cloud".
-      const [{ data: cloudConfig }, { data: qrChannels }] = await Promise.all([
-        supabase
-          .from('whatsapp_config')
-          .select('status')
-          .eq('account_id', accountId)
-          .maybeSingle(),
-        supabase
-          .from('channels')
-          .select('id')
-          .eq('account_id', accountId)
-          .eq('type', 'whatsapp_qr')
-          .eq('status', 'connected')
-          .limit(1),
-      ]);
+      // Uma consulta a `channels` cobre os dois tipos desde a SPEC 064
+      // F4. A leitura extra de `whatsapp_config` que existia aqui usava
+      // `.maybeSingle()` e devolveria `PGRST116` (data nula, erro
+      // descartado) na primeira conta com dois números — o aviso
+      // reapareceria para quem já está conectado.
+      //
+      // O critério é `<> 'disabled'`, e não `= 'connected'`, de
+      // propósito: `channels.status` do canal Cloud só deixa de ser o
+      // valor congelado do backfill da 055 quando alguém passa pela
+      // rota de configuração. Exigir `connected` faria este aviso
+      // acusar "conecte o WhatsApp" em toda conta que envia
+      // normalmente, até que um admin abrisse a aba de Configurações —
+      // e numa conta cujos membros só usam o inbox, para sempre. A
+      // pergunta que este aviso faz é "existe algum canal utilizável?",
+      // e `disabled` é o único estado que responde não com certeza.
+      const { data: usableChannels } = await supabase
+        .from('channels')
+        .select('id')
+        .eq('account_id', accountId)
+        .neq('status', 'disabled')
+        .limit(1);
 
-      setWhatsappConnected(
-        cloudConfig?.status === 'connected' || (qrChannels?.length ?? 0) > 0
-      );
+      setWhatsappConnected((usableChannels?.length ?? 0) > 0);
     };
 
     checkConnection();
