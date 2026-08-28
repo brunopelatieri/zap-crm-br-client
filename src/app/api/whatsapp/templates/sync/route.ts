@@ -238,6 +238,14 @@ export async function POST() {
         // route. account_id is NOT NULL on message_templates
         // post-017, so an INSERT without it errors.
         account_id: accountId,
+        // WABA tenancy — metade do alvo de conflito desde a migração 072
+        // (SPEC 064 D-2). Omitir isto fazia a sincronização inserir a
+        // linha com `waba_id NULL`, e o upsert de `templates/submit`
+        // (que casa por `account_id, waba_id, name, language`) deixava
+        // de encontrá-la: o reenvio criava uma DUPLICATA em vez de
+        // atualizar, e a cópia obsoleta — que fica `APPROVED` — era a
+        // que os seletores de campanha ofereciam.
+        waba_id: config.waba_id,
         user_id: user.id,
         name: t.name,
         category: normalizeCategory(t.category),
@@ -255,13 +263,25 @@ export async function POST() {
         updated_at: new Date().toISOString(),
       };
 
-      const { data: existing, error: lookupErr } = await supabase
+      // Um mesmo `name` + `language` pode agora existir uma vez POR WABA
+      // (migração 072 / D-2), então `.maybeSingle()` aqui passaria a
+      // errar com "multiple rows" numa conta com dois WABAs. Buscamos os
+      // candidatos e escolhemos em memória — são no máximo um por WABA.
+      //
+      // A ordem de preferência é a regra de adoção do D-2: a linha DESTE
+      // WABA vence; na falta dela, uma linha legada (`waba_id NULL`,
+      // anterior à 072) é adotada e ganha o WABA no update abaixo.
+      // Nunca "a primeira que aparecer".
+      const { data: candidates, error: lookupErr } = await supabase
         .from('message_templates')
-        .select('id')
+        .select('id, waba_id')
         .eq('account_id', accountId)
         .eq('name', t.name)
-        .eq('language', t.language)
-        .maybeSingle();
+        .eq('language', t.language);
+
+      const existing =
+        candidates?.find((c) => c.waba_id === config.waba_id) ??
+        candidates?.find((c) => c.waba_id === null);
 
       if (lookupErr) {
         errors.push({

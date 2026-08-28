@@ -33,6 +33,14 @@ function buildUpsertRow(
     status: 'DRAFT' | string;
     metaTemplateId: string | null;
     submissionError: string | null;
+    /**
+     * WABA that owns this template (SPEC 064 D-2). Part of the conflict
+     * target as of migration 072, so it MUST be written on every upsert:
+     * an upsert writes every column in the row, and omitting this would
+     * blank out the value migration 072 backfilled — silently, on the
+     * next re-submit. `null` only in DRY_RUN, where no config is loaded.
+     */
+    wabaId: string | null;
   }
 ) {
   return {
@@ -40,9 +48,10 @@ function buildUpsertRow(
     // of migration 017. Without this an INSERT throws on the
     // not-null constraint.
     account_id: accountId,
-    // Original author — kept as audit only. The unique index is
-    // still on (user_id, name, language) — see the upsert helper
-    // for the cross-teammate dedup follow-up.
+    // WABA tenancy — half of the conflict target since migration 072.
+    waba_id: extras.wabaId,
+    // Original author — kept as audit only since migration 072 moved
+    // the unique index off (user_id, name, language).
     user_id: userId,
     name: payload.name,
     category: payload.category,
@@ -69,14 +78,21 @@ async function upsertTemplateRow(
   supabase: SupabaseClient,
   row: ReturnType<typeof buildUpsertRow>
 ) {
-  // TODO(account-sharing): conflict target is still scoped to
-  // user_id. Once a follow-up migration drops the legacy unique
-  // index on (user_id, name, language) and adds (account_id,
-  // name, language), switch `onConflict` here so two teammates
-  // can't shadow each other's same-named template.
+  // Conflict target follows migration 072 (SPEC 064 §3.4 / D-2), which
+  // dropped the legacy `message_templates_user_name_language_key` and
+  // created `(account_id, waba_id, name, language) NULLS NOT DISTINCT`.
+  // Two consequences, both intended:
+  //   - teammates on the same account can no longer shadow each other's
+  //     same-named template (the old TODO here);
+  //   - the same template name may exist once per WABA, which is how
+  //     Meta scopes templates — a second official number on a different
+  //     WABA gets its own row instead of overwriting the first one's.
+  // These four column names must stay in sync with that index: PostgREST
+  // builds `ON CONFLICT (<columns>)` from this string, and a mismatch is
+  // a 42P10 on the first save, not a silent fallback.
   return supabase
     .from('message_templates')
-    .upsert(row, { onConflict: 'user_id,name,language' })
+    .upsert(row, { onConflict: 'account_id,waba_id,name,language' })
     .select()
     .single();
 }
@@ -85,8 +101,9 @@ async function upsertTemplateRow(
  * Submit a template to Meta for approval AND persist it locally.
  *
  * Auth → fetch whatsapp_config → validate → (DRY_RUN short-circuit) →
- * POST to Meta → upsert local row by (user_id, name, language) with
- * status, meta_template_id, sample_values, last_submitted_at.
+ * POST to Meta → upsert local row by (account_id, waba_id, name,
+ * language) with status, meta_template_id, sample_values,
+ * last_submitted_at.
  *
  * When WHATSAPP_TEMPLATES_DRY_RUN=true, we skip the network call and
  * insert a row with a synthetic `dry-run-<uuid>` meta_template_id so
@@ -156,10 +173,42 @@ export async function POST(request: Request) {
 
     let metaTemplateId: string;
     let metaStatus: string;
+    // Half of the upsert conflict target since migration 072. Hoisted
+    // because both call sites (Meta failure and Meta success) write it.
+    let wabaId: string | null = null;
 
     if (dryRun) {
       metaTemplateId = `dry-run-${crypto.randomUUID()}`;
       metaStatus = 'PENDING';
+
+      // DRY_RUN still has to resolve the WABA, even though it never
+      // talks to Meta: leaving it null would put the row outside the
+      // conflict target of every real template, so a dry-run re-submit
+      // would INSERT a duplicate next to the row migration 072
+      // backfilled instead of updating it. Resolved through the default
+      // Cloud channel — never "the first config that shows up" — and a
+      // dev without any config simply gets null, which is the honest
+      // answer there.
+      // `.maybeSingle()` é seguro aqui porque o filtro inclui `type`:
+      // `idx_channels_one_default_per_account_type` (072) garante no
+      // máximo um padrão por (conta, TIPO). Sem o `type` seriam duas
+      // linhas numa conta com Cloud e QRCode.
+      const { data: defaultCloud } = await supabase
+        .from('channels')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('type', 'whatsapp_cloud')
+        .eq('is_default', true)
+        .maybeSingle();
+
+      if (defaultCloud?.id) {
+        const { data: cfg } = await supabase
+          .from('whatsapp_config')
+          .select('waba_id')
+          .eq('channel_id', defaultCloud.id)
+          .maybeSingle();
+        wabaId = cfg?.waba_id ?? null;
+      }
     } else {
       const { data: config, error: configError } = await supabase
         .from('whatsapp_config')
@@ -184,6 +233,8 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
+
+      wabaId = config.waba_id as string;
 
       const accessToken = decrypt(config.access_token);
 
@@ -232,6 +283,7 @@ export async function POST(request: Request) {
             status: 'DRAFT',
             metaTemplateId: null,
             submissionError: message,
+            wabaId,
           })
         );
         const isRateLimit = /\b429\b/.test(message);
@@ -252,6 +304,7 @@ export async function POST(request: Request) {
         status: normalizeStatus(metaStatus),
         metaTemplateId,
         submissionError: null,
+        wabaId,
       })
     );
 

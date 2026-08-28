@@ -16,6 +16,7 @@ import {
   cloudChannelContext,
   resolveChannelContext,
   resolveChannelForConversation,
+  resolveDefaultChannelId,
   resolveOutboundContact,
   sendAndPersistOutbound,
   sendContentViaChannel,
@@ -142,6 +143,14 @@ function makeDb(
       },
       eq: (...args: unknown[]) => {
         op.filters.push(['eq', ...args]);
+        return chain;
+      },
+      neq: (...args: unknown[]) => {
+        op.filters.push(['neq', ...args]);
+        return chain;
+      },
+      in: (...args: unknown[]) => {
+        op.filters.push(['in', ...args]);
         return chain;
       },
       gte: (...args: unknown[]) => {
@@ -1022,5 +1031,117 @@ describe('ChannelCapabilityError', () => {
   it('é uma classe de erro própria, para o chamador distinguir', () => {
     expect(new ChannelCapabilityError('x')).toBeInstanceOf(Error);
     expect(new ChannelCapabilityError('x').name).toBe('ChannelCapabilityError');
+  });
+});
+
+// ---------------------------------------------------------------------
+// resolveDefaultChannelId — D-11 (SPEC 064)
+//
+// A migração 072 trocou `idx_channels_one_default_per_account` (um
+// padrão por CONTA) por `..._per_account_type` (um por conta e TIPO).
+// A versão anterior desta função casava `account_id + is_default` com
+// `.maybeSingle()`: com um Cloud e um QRCode marcados — estado que o
+// próprio backfill da 072 cria — isso passou a devolver PGRST116, e
+// como o erro era descartado o sintoma não era um 500, era um fallback
+// mudo para `whatsapp_config` que quebra junto assim que a conta tem
+// dois números.
+//
+// Cada teste abaixo falha na implementação antiga.
+// ---------------------------------------------------------------------
+describe('resolveDefaultChannelId — padrão por tipo (SPEC 064 D-11)', () => {
+  const cloud = {
+    id: 'ch-cloud',
+    type: 'whatsapp_cloud',
+    is_default: true,
+    status: 'connected',
+    created_at: '2026-02-01T00:00:00.000Z',
+  };
+  const qr = {
+    id: 'ch-qr',
+    type: 'whatsapp_qr',
+    is_default: true,
+    status: 'connected',
+    created_at: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('devolve o Cloud quando a conta tem padrão dos DOIS tipos', async () => {
+    // O caso que quebrava: duas linhas com is_default = TRUE.
+    const { client } = makeDb({
+      'channels.select': { data: [qr, cloud], error: null },
+    });
+    await expect(resolveDefaultChannelId(client, 'acct-1')).resolves.toBe(
+      'ch-cloud'
+    );
+  });
+
+  it('cai no QRCode quando a conta não tem canal Cloud', async () => {
+    const { client } = makeDb({
+      'channels.select': { data: [qr], error: null },
+    });
+    await expect(resolveDefaultChannelId(client, 'acct-1')).resolves.toBe(
+      'ch-qr'
+    );
+  });
+
+  it('nunca devolve canal desativado', async () => {
+    // `resolveDefaultChannelId` filtra `status <> 'disabled'` no banco;
+    // aqui o fake devolve só o que o filtro deixaria passar, e o Cloud
+    // desativado simplesmente não está na lista.
+    const { client, ops } = makeDb({
+      'channels.select': { data: [qr], error: null },
+    });
+    await expect(resolveDefaultChannelId(client, 'acct-1')).resolves.toBe(
+      'ch-qr'
+    );
+    expect(ops[0].filters).toContainEqual(['neq', 'status', 'disabled']);
+  });
+
+  it('restringe ao tipo pedido quando `type` é passado', async () => {
+    const { client, ops } = makeDb({
+      'channels.select': { data: [qr], error: null },
+    });
+    await expect(
+      resolveDefaultChannelId(client, 'acct-1', 'whatsapp_qr')
+    ).resolves.toBe('ch-qr');
+    expect(ops[0].filters).toContainEqual(['in', 'type', ['whatsapp_qr']]);
+  });
+
+  it('sem canal nenhum, lança ChannelNotConfiguredError', async () => {
+    const { client } = makeDb({
+      'channels.select': { data: [], error: null },
+    });
+    await expect(resolveDefaultChannelId(client, 'acct-1')).rejects.toThrow(
+      ChannelNotConfiguredError
+    );
+  });
+
+  it('erro de leitura não vira "conta sem canal" silencioso', async () => {
+    // Descartar o erro era metade do problema original: a falha de
+    // leitura precisa chegar ao chamador com o motivo, não virar um
+    // "não configurado" que manda o operador reconectar à toa.
+    const { client } = makeDb({
+      'channels.select': { data: null, error: { message: 'PGRST116' } },
+    });
+    await expect(resolveDefaultChannelId(client, 'acct-1')).rejects.toThrow(
+      /PGRST116/
+    );
+  });
+
+  it('tipo com canal ativo mas sem padrão marcado usa o mais antigo', async () => {
+    // Determinístico, o mesmo critério do backfill da 072 — nunca "o
+    // primeiro que o Postgres devolver".
+    const novo = { ...cloud, id: 'ch-novo', is_default: false };
+    const antigo = {
+      ...cloud,
+      id: 'ch-antigo',
+      is_default: false,
+      created_at: '2025-12-01T00:00:00.000Z',
+    };
+    const { client } = makeDb({
+      'channels.select': { data: [novo, antigo], error: null },
+    });
+    await expect(resolveDefaultChannelId(client, 'acct-1')).resolves.toBe(
+      'ch-antigo'
+    );
   });
 });

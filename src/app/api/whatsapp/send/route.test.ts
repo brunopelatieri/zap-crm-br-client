@@ -31,6 +31,19 @@ const CONTACT = {
   phone: '+15551234567',
 };
 
+// Canal Cloud padrao da conta. Desde a migracao 072 `is_default` e por
+// (conta, TIPO), e `resolveDefaultChannelId` deriva o padrao lendo
+// `channels` em LISTA (Cloud vence QR) em vez de `.maybeSingle()` — que
+// passaria a errar numa conta com Cloud e QRCode marcados.
+const CHANNEL = {
+  id: 'chan-1',
+  account_id: 'acct-1',
+  type: 'whatsapp_cloud',
+  is_default: true,
+  status: 'connected',
+  created_at: '2026-01-01T00:00:00.000Z',
+};
+
 // Chainable Supabase mock. A fresh builder per `.from()` call tracks whether
 // `.insert()` ran so the terminal resolves to the inserted row for creates
 // and the canned select row otherwise.
@@ -68,9 +81,11 @@ function makeSupabaseMock() {
         case 'accounts':
           return { data: { blocked_at: null }, error: null };
         case 'channels':
-          // `resolveDefaultChannelId` tenta este primeiro; devolver vazio
-          // aqui faz o teste exercitar o fallback real (whatsapp_config).
-          return { data: null, error: null };
+          // Leitura por id (`.maybeSingle()`), usada por
+          // `resolveChannelForConversation`. A leitura em LISTA que
+          // `resolveDefaultChannelId` faz desde a migração 072 é servida
+          // por `listResult()`.
+          return { data: CHANNEL, error: null };
         case 'message_templates':
           return { data: null, error: null };
         default:
@@ -105,6 +120,7 @@ function makeSupabaseMock() {
     for (const m of [
       'select',
       'eq',
+      'neq',
       'in',
       'order',
       'limit',
@@ -129,8 +145,13 @@ function makeSupabaseMock() {
     });
     b.single = vi.fn(terminal);
     b.maybeSingle = vi.fn(terminal);
+    // Consulta em lista (sem `.single()`/`.maybeSingle()`): `data` e um
+    // ARRAY. So `channels` exercita esse caminho hoje.
+    const listResult = () =>
+      table === 'channels' ? { data: [CHANNEL], error: null } : selectResult();
+
     b.then = (resolve: (v: unknown) => unknown) =>
-      resolve(didInsert ? insertResult() : selectResult());
+      resolve(didInsert ? insertResult() : listResult());
     return b;
   }
 
