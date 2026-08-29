@@ -5,6 +5,9 @@ import { decrypt } from '@/lib/whatsapp/encryption';
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { createHeaderMediaResolver } from '@/lib/whatsapp/header-media';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -104,6 +107,7 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      channel_id,
     } = body;
 
     // Normalize to a list of {phone, params} regardless of shape.
@@ -135,20 +139,24 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single();
-
-    if (configError || !config) {
-      return NextResponse.json(
-        {
-          error:
-            'WhatsApp not configured. Please set up your WhatsApp integration first.',
-        },
-        { status: 400 }
-      );
+    let config: Awaited<ReturnType<typeof resolveCloudConfig>>['config'];
+    try {
+      ({ config } = await resolveCloudConfig(
+        supabase,
+        accountId,
+        typeof channel_id === 'string' ? channel_id : null
+      ));
+    } catch (e) {
+      if (e instanceof ChannelNotConfiguredError) {
+        return NextResponse.json(
+          {
+            error:
+              'WhatsApp not configured. Please set up your WhatsApp integration first.',
+          },
+          { status: 400 }
+        );
+      }
+      throw e;
     }
 
     const accessToken = decrypt(config.access_token);
@@ -158,13 +166,15 @@ export async function POST(request: Request) {
     // the loop would N+1 against Supabase for every recipient.
     // Guard against a malformed local row crashing every send in
     // the loop with the same opaque TypeError — fail loudly once.
-    const { data: rawTemplateRow } = await supabase
-      .from('message_templates')
-      .select('*')
-      .eq('account_id', accountId)
-      .eq('name', template_name)
-      .eq('language', template_language || 'en_US')
-      .maybeSingle();
+    // Scoped to the resolved channel's WABA (SPEC 064 D-2) — see
+    // template-waba.ts for why a plain `.maybeSingle()` breaks the
+    // moment a second WABA gets a same-named template.
+    const rawTemplateRow = await findTemplateRowForWaba(supabase, {
+      accountId,
+      name: template_name,
+      language: template_language || 'en_US',
+      wabaId: config.waba_id ?? null,
+    });
     if (rawTemplateRow && !isMessageTemplate(rawTemplateRow)) {
       return NextResponse.json(
         {

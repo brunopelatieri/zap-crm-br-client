@@ -76,6 +76,11 @@ interface BroadcastPayload {
     headerMediaUrl?: string;
     splitPercent: number;
   };
+  /**
+   * Número oficial escolhido no passo "Enviar por" (SPEC 064 D-3/§6.3).
+   * Ausente = canal Cloud padrão da conta.
+   */
+  channelId?: string | null;
 }
 
 export interface BroadcastStartResult {
@@ -124,6 +129,9 @@ const ERROR_CODES = new Set([
   'ab_same_template',
   'ab_category_mismatch',
   'ab_audience_too_small',
+  // SPEC 064 D-3 — o número gravado na criação/agendamento não está mais
+  // disponível (desconectado ou removido) na hora do disparo.
+  'channel_unavailable',
 ]);
 
 /**
@@ -182,6 +190,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             payload.timeZone ??
             Intl.DateTimeFormat().resolvedOptions().timeZone,
           windowOverride: payload.windowOverride ?? false,
+          channelId: payload.channelId ?? undefined,
           abTest: payload.abTest
             ? {
                 templateName: payload.abTest.template.name,

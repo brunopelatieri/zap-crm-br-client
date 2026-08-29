@@ -71,9 +71,13 @@ import { decrypt } from '@/lib/whatsapp/encryption';
 import { isMediaHeaderTemplate } from '@/lib/whatsapp/header-media';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { isValidE164, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
   BroadcastError,
   assertAccountCanBroadcast,
+  toBroadcastChannelError,
   type BroadcastPlan,
 } from '@/lib/whatsapp/broadcast-core';
 import {
@@ -120,6 +124,14 @@ export interface DashboardBroadcastInput {
    * Sobrepõe a URL guardada no template.
    */
   headerMediaUrl?: string;
+  /**
+   * Número oficial que envia esta campanha (SPEC 064 D-3/§6.3, passo
+   * "Enviar por"). Ausente = canal Cloud padrão. Resolvido e GRAVADO na
+   * criação (disparo imediato) ou no agendamento — nunca recalculado no
+   * disparo em si, para que trocar o padrão da conta não desvie uma
+   * campanha já criada.
+   */
+  channelId?: string | null;
 }
 
 /**
@@ -187,6 +199,10 @@ export interface PlanDashboardBroadcastParams {
 // ============================================================
 
 interface SendContext {
+  /** Canal que efetivamente envia (SPEC 064 D-3) — vai para `broadcasts.channel_id`. */
+  channelId: string;
+  /** WABA do canal — decide quais templates este número pode usar (D-2). */
+  wabaId: string | null;
   phoneNumberId: string;
   accessToken: string;
   /** A linha local do template, ou `null` se ela não existe por aqui. */
@@ -197,30 +213,46 @@ interface SendContext {
   headerMediaUrl: string;
 }
 
-/** WhatsApp configurado + token decifrado. Falha cedo, antes de tudo. */
+/**
+ * WhatsApp configurado + token decifrado. Falha cedo, antes de tudo.
+ *
+ * `channelId` ausente = canal Cloud padrão (D-11); explícito = o número
+ * escolhido no passo "Enviar por" (imediato) ou o que ficou gravado no
+ * agendamento (cron re-resolvendo). Nos dois casos `resolveCloudConfig`
+ * recusa canal `disabled`/removido — é o que dá ao cron o
+ * `channel_unavailable` do D-3 em vez de cair de volta no padrão sozinho.
+ */
 async function loadWhatsappConfig(
   db: SupabaseClient,
-  accountId: string
-): Promise<{ phoneNumberId: string; accessToken: string }> {
+  accountId: string,
+  channelId?: string | null
+): Promise<{
+  channelId: string;
+  wabaId: string | null;
+  phoneNumberId: string;
+  accessToken: string;
+}> {
   // SPEC 049 §5.3 — before the generic "not configured", tell a QR-only
   // account the real reason: broadcast just isn't available to them.
   await assertAccountCanBroadcast(db, accountId);
 
-  const { data: config, error } = await db
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', accountId)
-    .maybeSingle();
-
-  if (error || !config) {
-    throw new BroadcastError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
+  let channel: Awaited<ReturnType<typeof resolveCloudConfig>>['channel'];
+  let config: Awaited<ReturnType<typeof resolveCloudConfig>>['config'];
+  try {
+    ({ channel, config } = await resolveCloudConfig(
+      db,
+      accountId,
+      channelId ?? null
+    ));
+  } catch (e) {
+    if (e instanceof ChannelNotConfiguredError)
+      throw toBroadcastChannelError(e);
+    throw e;
   }
 
   return {
+    channelId: channel.id,
+    wabaId: config.waba_id ?? null,
     phoneNumberId: config.phone_number_id,
     accessToken: decrypt(config.access_token),
   };
@@ -240,15 +272,18 @@ async function loadTemplateForSend(
   accountId: string,
   templateName: string,
   templateLanguage: string,
-  rawHeaderMediaUrl: string | undefined
-): Promise<Omit<SendContext, 'phoneNumberId' | 'accessToken'>> {
-  const { data: rawTemplateRow } = await db
-    .from('message_templates')
-    .select('*')
-    .eq('account_id', accountId)
-    .eq('name', templateName)
-    .eq('language', templateLanguage)
-    .maybeSingle();
+  rawHeaderMediaUrl: string | undefined,
+  /** WABA do canal resolvido em {@link loadWhatsappConfig} (D-2). */
+  wabaId: string | null
+): Promise<
+  Pick<SendContext, 'templateRow' | 'templateForSend' | 'headerMediaUrl'>
+> {
+  const rawTemplateRow = await findTemplateRowForWaba(db, {
+    accountId,
+    name: templateName,
+    language: templateLanguage,
+    wabaId,
+  });
 
   if (rawTemplateRow && !isMessageTemplate(rawTemplateRow)) {
     throw new BroadcastError(
@@ -495,6 +530,10 @@ async function materializeArm(
     // futuro cron de drenagem (§12, item 8) retomar uma campanha
     // cortada no meio sem perder a mídia do header.
     header_media_url: context.headerMediaUrl || null,
+    // SPEC 064 D-3: gravado AGORA, inclusive no ramo `staged` — a
+    // triagem cria o rascunho antes do passo "Enviar por" decidir o
+    // canal, então esta é a primeira vez que ele existe para a linha.
+    channel_id: context.channelId,
     status: 'sending' as const,
     total_recipients: contacts.length,
   };
@@ -664,6 +703,7 @@ async function materializeArm(
   return {
     broadcastId,
     accountId,
+    channelId: context.channelId,
     templateName,
     templateLanguage,
     phoneNumberId: context.phoneNumberId,
@@ -699,18 +739,23 @@ export async function planDashboardBroadcast(
 ): Promise<DashboardBroadcastPlan> {
   const templateLanguage = input.templateLanguage || 'en_US';
 
-  const { phoneNumberId, accessToken } = await loadWhatsappConfig(
-    db,
-    accountId
-  );
+  const { channelId, wabaId, phoneNumberId, accessToken } =
+    await loadWhatsappConfig(db, accountId, input.channelId);
   const template = await loadTemplateForSend(
     db,
     accountId,
     input.templateName,
     templateLanguage,
-    input.headerMediaUrl
+    input.headerMediaUrl,
+    wabaId
   );
-  const context: SendContext = { phoneNumberId, accessToken, ...template };
+  const context: SendContext = {
+    channelId,
+    wabaId,
+    phoneNumberId,
+    accessToken,
+    ...template,
+  };
 
   const { contacts, excludedOptedOut, excludedInvalidWhatsapp } =
     await resolveSendableAudience(db, {
@@ -834,24 +879,24 @@ export async function planAbTestBroadcast(
     );
   }
 
-  const { phoneNumberId, accessToken } = await loadWhatsappConfig(
-    db,
-    accountId
-  );
+  const { channelId, wabaId, phoneNumberId, accessToken } =
+    await loadWhatsappConfig(db, accountId, input.channelId);
 
   const templateA = await loadTemplateForSend(
     db,
     accountId,
     input.templateName,
     languageA,
-    input.headerMediaUrl
+    input.headerMediaUrl,
+    wabaId
   );
   const templateB = await loadTemplateForSend(
     db,
     accountId,
     variant.templateName,
     languageB,
-    variant.headerMediaUrl
+    variant.headerMediaUrl,
+    wabaId
   );
 
   // Decisão 2. Só compara categorias quando as duas linhas existem
@@ -868,8 +913,20 @@ export async function planAbTestBroadcast(
     );
   }
 
-  const contextA: SendContext = { phoneNumberId, accessToken, ...templateA };
-  const contextB: SendContext = { phoneNumberId, accessToken, ...templateB };
+  const contextA: SendContext = {
+    channelId,
+    wabaId,
+    phoneNumberId,
+    accessToken,
+    ...templateA,
+  };
+  const contextB: SendContext = {
+    channelId,
+    wabaId,
+    phoneNumberId,
+    accessToken,
+    ...templateB,
+  };
 
   const { contacts, excludedOptedOut, excludedInvalidWhatsapp } =
     await resolveSendableAudience(db, {
@@ -1026,30 +1083,23 @@ export async function scheduleDashboardBroadcast(
 ): Promise<ScheduledBroadcast> {
   const templateLanguage = input.templateLanguage || 'en_US';
 
-  // SPEC 049 §5.3 — same guard as the immediate-send path (loadWhatsappConfig
-  // above); a scheduled broadcast on a QR-only account must fail with the
-  // same real reason, not "not configured".
-  await assertAccountCanBroadcast(db, accountId);
-
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select('phone_number_id')
-    .eq('account_id', accountId)
-    .maybeSingle();
-
-  if (!config) {
-    throw new BroadcastError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
-  }
+  // SPEC 049 §5.3 / 064 D-3 — same channel resolution as the immediate
+  // path (`loadWhatsappConfig` above): a scheduled broadcast records its
+  // number NOW, at scheduling, not at the hour it actually fires. That's
+  // what stops "someone changed the default number" from silently
+  // redirecting a campaign that was already scheduled.
+  const { channelId, wabaId } = await loadWhatsappConfig(
+    db,
+    accountId,
+    input.channelId
+  );
 
   await assertTemplateExists(
     db,
     accountId,
     input.templateName,
-    templateLanguage
+    templateLanguage,
+    wabaId
   );
 
   const percent = variant
@@ -1072,7 +1122,8 @@ export async function scheduleDashboardBroadcast(
       db,
       accountId,
       variant.templateName,
-      variantLanguage
+      variantLanguage,
+      wabaId
     );
   }
 
@@ -1093,6 +1144,9 @@ export async function scheduleDashboardBroadcast(
     // header de imagem perderia a mídia escolhida no passo 3 entre o
     // agendamento e o envio — é a lacuna que a §12 item 8 registrava.
     header_media_url: input.headerMediaUrl?.trim() || null,
+    // SPEC 064 D-3: gravado no AGENDAMENTO, não recalculado quando o
+    // cron efetivamente dispara — ver o comentário acima de `loadWhatsappConfig`.
+    channel_id: channelId,
     scheduled_at: scheduledAt.toISOString(),
     scheduled_timezone: timeZone,
     window_override: windowOverride,
@@ -1167,6 +1221,8 @@ export async function scheduleDashboardBroadcast(
       template_variables: variant.variables,
       audience_filter: audienceForVariantB(input.audience),
       header_media_url: variant.headerMediaUrl?.trim() || null,
+      // Mesmo número da variante A — é uma campanha só, com dois textos.
+      channel_id: channelId,
       scheduled_at: scheduledAt.toISOString(),
       scheduled_timezone: timeZone,
       window_override: windowOverride,
@@ -1200,20 +1256,26 @@ export async function scheduleDashboardBroadcast(
   };
 }
 
-/** Falhar hoje é melhor do que falhar às 9h de sábado sem ninguém olhando. */
+/**
+ * Falhar hoje é melhor do que falhar às 9h de sábado sem ninguém olhando.
+ *
+ * Escopado ao WABA do canal agendado (D-2): sem isso, duas WABAs com um
+ * template de mesmo nome fariam `.maybeSingle()` explodir com "multiple
+ * rows" no primeiro agendamento depois que a segunda linha existisse.
+ */
 async function assertTemplateExists(
   db: SupabaseClient,
   accountId: string,
   templateName: string,
-  templateLanguage: string
+  templateLanguage: string,
+  wabaId: string | null
 ): Promise<void> {
-  const { data } = await db
-    .from('message_templates')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('name', templateName)
-    .eq('language', templateLanguage)
-    .maybeSingle();
+  const data = await findTemplateRowForWaba(db, {
+    accountId,
+    name: templateName,
+    language: templateLanguage,
+    wabaId,
+  });
 
   if (!data) {
     throw new BroadcastError(

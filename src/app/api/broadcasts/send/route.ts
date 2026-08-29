@@ -196,6 +196,13 @@ export async function POST(request: Request) {
 
     const schedule = parseSchedule(body);
     const abTest = parseAbTest(body.abTest);
+    // SPEC 064 D-3/§6.3 — passo "Enviar por". Ausente = canal Cloud
+    // padrão, resolvido lá na frente por `planDashboardBroadcast` /
+    // `scheduleDashboardBroadcast`, nunca aqui: resolver duas vezes com
+    // fontes diferentes é como um vira "padrão" e o outro vira "o
+    // escolhido" na mesma requisição.
+    const channelId =
+      typeof body.channelId === 'string' ? body.channelId : undefined;
     const input = {
       name,
       templateName,
@@ -209,6 +216,7 @@ export async function POST(request: Request) {
         typeof body.headerMediaUrl === 'string'
           ? body.headerMediaUrl
           : undefined,
+      channelId,
     };
 
     // ── Janela de horário permitido (§6.3) ─────────────────────────
@@ -309,8 +317,9 @@ export async function POST(request: Request) {
 
     // Teto autoritativo por disparo. Sem WhatsApp configurado não há o
     // que impor — e nem o que enviar; o planner devolve o erro tipado
-    // logo abaixo.
-    const quota = await loadAccountQuota(supabase, accountId);
+    // logo abaixo. Por CANAL (D-4): o tier é da Meta e vale por número,
+    // então o teto tem que ser o do número que vai enviar, não a conta.
+    const quota = await loadAccountQuota(supabase, accountId, { channelId });
     const batchLimit = quota.configured
       ? quota.snapshot.batchLimit
       : Number.POSITIVE_INFINITY;

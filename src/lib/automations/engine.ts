@@ -1031,6 +1031,7 @@ async function sendViaFallbackChannel(
     const { whatsapp_message_id } = await sendAndPersistOutbound({
       db: supabaseAdmin(),
       accountId: args.automation.account_id,
+      origin: 'automation',
       channel: { type: 'whatsapp_qr', id: guard.channelId },
       conversationId,
       contactId: args.contactId,

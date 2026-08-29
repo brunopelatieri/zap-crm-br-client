@@ -7,6 +7,11 @@
 //     "name": "July promo",                 // optional label
 //     "template_name": "promo_july",        // required, approved template
 //     "template_language": "en_US",         // optional (default en_US)
+//     "channel_id": "…",                    // optional — official number
+//                                            // to send from (SPEC 064 D-3).
+//                                            // Absent = default Cloud
+//                                            // channel, resolved and
+//                                            // RECORDED now.
 //     "recipients": [                        // required, 1..1000
 //       { "to": "+14155550123", "params": ["Jane"] },
 //       { "to": "+14155550124" }
@@ -18,7 +23,7 @@
 // `GET /api/v1/broadcasts/{id}` for progress.
 //
 // Response (202):
-//   { "data": { "broadcast_id", "status": "sending",
+//   { "data": { "broadcast_id", "channel_id", "status": "sending",
 //               "total_recipients", "accepted", "rejected" } }
 // ============================================================
 
@@ -76,6 +81,10 @@ export async function POST(request: Request) {
           to: typeof r?.to === 'string' ? r.to : '',
           params: Array.isArray(r?.params) ? r.params : undefined,
         })),
+        // SPEC 064 D-3/F9 — número oficial escolhido. Ausente = canal
+        // Cloud padrão, resolvido e GRAVADO agora por `createBroadcast`.
+        channelId:
+          typeof body.channel_id === 'string' ? body.channel_id : undefined,
       }
     );
 
@@ -87,6 +96,7 @@ export async function POST(request: Request) {
     return ok(
       {
         broadcast_id: plan.broadcastId,
+        channel_id: plan.channelId,
         status: 'sending',
         total_recipients: plan.planned.length,
         accepted: plan.planned.length,

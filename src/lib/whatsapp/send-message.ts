@@ -42,6 +42,7 @@ import {
   type ColdSendCheck,
 } from '@/lib/channels/cold-send-wiring';
 import { describeDenial } from '@/lib/channels/cold-send-limit';
+import { logOutboundSend } from '@/lib/channels/send-log';
 import { encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
@@ -534,6 +535,18 @@ export async function sendMessageToConversation(
     });
     waMessageId = result.providerMessageId;
     workingPhone = result.workingPhone;
+
+    // SPEC 064 §11.1 — reaproveita `coldSendOrigin` (já distingue
+    // inbox/API pública) em vez de um segundo parâmetro que pudesse
+    // divergir dele.
+    logOutboundSend({
+      accountId,
+      conversationId,
+      channelId: channelCtx.channel.id,
+      channelType: channelCtx.channel.type,
+      phoneNumberId: channelCtx.credentials.phoneNumberId ?? null,
+      origin: coldSendOrigin === 'api' ? 'api_v1' : 'inbox',
+    });
   } catch (err) {
     // O canal não sabe fazer o que foi pedido (template ou botão numa
     // conversa QRCode, por exemplo). É erro do PEDIDO, não do provedor —

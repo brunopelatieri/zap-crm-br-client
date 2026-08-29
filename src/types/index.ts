@@ -452,6 +452,14 @@ export interface TemplatePreviewPayload {
 export interface MessageTemplate {
   id: string;
   user_id: string;
+  /** Tenancy — NOT NULL desde a migração 017. */
+  account_id?: string;
+  /**
+   * WABA dono do template na Meta (SPEC 064 D-2, migração 072). `null`
+   * numa linha anterior à 072: trata-se como pertencente ao WABA do
+   * canal Cloud padrão até a próxima sincronização preencher a coluna.
+   */
+  waba_id?: string | null;
   name: string;
   category: 'Marketing' | 'Utility' | 'Authentication';
   language?: string;

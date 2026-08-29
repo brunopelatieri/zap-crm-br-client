@@ -24,8 +24,12 @@ import {
 } from '@/lib/channels/send';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 import { accountCapabilityCoverage } from '@/lib/channels/capabilities';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import { isAccountBlocked } from '@/lib/platform/blocked';
 import { decrypt } from '@/lib/whatsapp/encryption';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import { logOutboundSend } from '@/lib/channels/send-log';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -37,6 +41,47 @@ import { createHeaderMediaResolver } from '@/lib/whatsapp/header-media';
 import type { MessageTemplate } from '@/types';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
 import { detectDeadNumberOnFailure } from '@/lib/contacts/whatsapp-status';
+
+/**
+ * `resolveCloudConfig` fala a língua da camada de canais
+ * (`ChannelNotConfiguredError`); o disparo fala `BroadcastError`. Esta
+ * função é o único ponto de tradução, usada tanto na criação quanto no
+ * replanejamento do cron — sem ela, as duas cópias divergiriam no dia em
+ * que alguém ajustasse só uma (SPEC 064 D-3, canal desativado depois do
+ * agendamento).
+ */
+export function toBroadcastChannelError(
+  e: ChannelNotConfiguredError
+): BroadcastError {
+  if (e.reason === 'no_channel') {
+    return new BroadcastError(
+      'whatsapp_not_configured',
+      'WhatsApp not configured. Please set up your WhatsApp integration first.',
+      400
+    );
+  }
+  // `read_failed` NÃO é "canal indisponível" — é a consulta que falhou,
+  // não o canal que sumiu (ver o comentário de `ChannelNotConfiguredReason`
+  // em `channels/errors.ts`). Misturar os dois manda o operador tentar
+  // reconectar um número que nunca teve problema nenhum, escondendo o
+  // soluço de infraestrutura de verdade atrás de um 409 acionável.
+  if (e.reason === 'read_failed') {
+    return new BroadcastError(
+      'internal',
+      'Failed to resolve the WhatsApp channel — this looks like a transient error, try again.',
+      500
+    );
+  }
+  // Canal explícito que sumiu, foi desativado, ou trocou de conta desde
+  // a criação/agendamento — nunca cai de volta no padrão sozinho (§9
+  // armadilha 1: isso seria "enviar pelo número errado" disfarçado de
+  // resiliência).
+  return new BroadcastError(
+    'channel_unavailable',
+    'The WhatsApp number this broadcast uses is not available right now (disconnected or removed) — reconnect it or choose another number.',
+    409
+  );
+}
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -62,6 +107,13 @@ export interface CreateBroadcastParams {
   templateName: string;
   templateLanguage?: string | null;
   recipients: BroadcastRecipientInput[];
+  /**
+   * Número oficial que envia esta campanha (SPEC 064 D-3). Ausente =
+   * canal Cloud padrão, resolvido e GRAVADO agora — nunca recalculado no
+   * disparo, para que trocar o padrão da conta não desvie uma campanha
+   * já criada.
+   */
+  channelId?: string | null;
 }
 
 interface PlannedRecipient {
@@ -80,6 +132,8 @@ export interface BroadcastPlan {
    * plano é o único lugar de `deliverBroadcast` que sabe qual é.
    */
   accountId: string;
+  /** Canal que efetivamente envia (SPEC 064 D-3) — gravado em `broadcasts.channel_id`. */
+  channelId: string;
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -183,31 +237,36 @@ export async function createBroadcast(
 
   await assertAccountCanBroadcast(db, accountId);
 
-  // Config (fail fast + provides the audit trail owner already resolved
-  // by the caller). Meta send needs phone_number_id + decrypted token.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-  if (configError || !config) {
-    throw new BroadcastError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
+  // Canal (SPEC 064 D-3): explícito no corpo, senão o Cloud padrão —
+  // resolvido AGORA e gravado abaixo, nunca recalculado no fan-out. Meta
+  // send needs phone_number_id + decrypted token.
+  let channel: Awaited<ReturnType<typeof resolveCloudConfig>>['channel'];
+  let config: Awaited<ReturnType<typeof resolveCloudConfig>>['config'];
+  try {
+    ({ channel, config } = await resolveCloudConfig(
+      db,
+      accountId,
+      params.channelId ?? null
+    ));
+  } catch (e) {
+    if (e instanceof ChannelNotConfiguredError)
+      throw toBroadcastChannelError(e);
+    throw e;
   }
   const accessToken = decrypt(config.access_token);
 
   // Template row (once) for header/button components; guard a
-  // malformed local row rather than N identical opaque failures.
-  const { data: rawTemplateRow } = await db
-    .from('message_templates')
-    .select('*')
-    .eq('account_id', accountId)
-    .eq('name', templateName)
-    .eq('language', templateLanguage)
-    .maybeSingle();
+  // malformed local row rather than N identical opaque failures. Scoped
+  // to the WABA of the resolved channel (SPEC 064 D-2/F5): the same
+  // name+language legitimately exists once per WABA, so a plain
+  // `.maybeSingle()` throws the moment a second WABA gets a same-named
+  // template.
+  const rawTemplateRow = await findTemplateRowForWaba(db, {
+    accountId,
+    name: templateName,
+    language: templateLanguage,
+    wabaId: config.waba_id ?? null,
+  });
   if (rawTemplateRow && !isMessageTemplate(rawTemplateRow)) {
     throw new BroadcastError(
       'template_malformed',
@@ -277,6 +336,9 @@ export async function createBroadcast(
       name: name || `API broadcast (${templateName})`,
       template_name: templateName,
       template_language: templateLanguage,
+      // SPEC 064 D-3: gravado NA CRIAÇÃO, inclusive para a API pública
+      // sem `channel_id` explícito (que grava o padrão resolvido acima).
+      channel_id: channel.id,
       status: 'sending',
       total_recipients: deduped.length,
     })
@@ -318,6 +380,7 @@ export async function createBroadcast(
   return {
     broadcastId: broadcast.id,
     accountId,
+    channelId: channel.id,
     templateName,
     templateLanguage,
     phoneNumberId: config.phone_number_id,
@@ -388,6 +451,22 @@ export async function deliverBroadcast(
     accountId: plan.accountId,
     phoneNumberId: plan.phoneNumberId,
     accessToken: plan.accessToken,
+    channelId: plan.channelId,
+  });
+
+  // SPEC 064 §11.1 — UMA vez por campanha, não por destinatário: todo
+  // campo logado (canal, telefone, origem) é o mesmo em toda a
+  // audiência, e repeti-lo a cada envio só infla o volume de log num
+  // fan-out de milhares sem acrescentar informação nenhuma. Sem
+  // `conversationId`: um destinatário de disparo em massa é resolvido
+  // por `contact_id`, não por conversa.
+  logOutboundSend({
+    accountId: plan.accountId,
+    conversationId: null,
+    channelId: plan.channelId,
+    channelType: 'whatsapp_cloud',
+    phoneNumberId: plan.phoneNumberId,
+    origin: 'broadcast',
   });
 
   for (const recipient of plan.planned) {

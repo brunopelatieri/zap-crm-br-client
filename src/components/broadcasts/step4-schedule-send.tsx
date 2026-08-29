@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -15,16 +15,25 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   ArrowLeft,
   CalendarClock,
   FlaskConical,
   Send,
   Loader2,
   ShieldAlert,
+  Smartphone,
   Users,
   Save,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
 
 import { QuotaMeter, exceedsQuota } from './quota-meter';
 import { useMessagingLimit } from './messaging-limit-provider';
@@ -43,6 +52,8 @@ export interface SendOptions {
   scheduledAt?: string;
   /** O usuário aceitou disparar fora da janela permitida. */
   windowOverride: boolean;
+  /** Número oficial escolhido em "Enviar por" (SPEC 064 D-3/§6.3). */
+  channelId?: string;
 }
 
 interface Step4Props {
@@ -90,6 +101,44 @@ export function Step4ScheduleSend({
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
   const { batchLimit, refresh: refreshQuota } = useMessagingLimit();
+
+  // ── Enviar por (SPEC 064 D-3/§6.3) ─────────────────────────────
+  // Só aparece com mais de um número capaz de disparo — com um só, o
+  // servidor já resolve o padrão sozinho e o passo seria ruído.
+  //
+  // ⚠️ O filtro tem de ser o MESMO critério que o servidor usa para
+  // decidir o padrão (`resolveDefaultChannelId`/`resolveCloudConfig`):
+  // só `disabled` é excluído, nunca `error`/`disconnected`. Filtrar por
+  // `status === 'connected'` aqui já causou o bug oposto do que
+  // pretendia evitar: com o padrão em `error` e um segundo canal
+  // `connected`, a lista via a um item só, o seletor sumia (nenhuma
+  // escolha "precisa" ser feita) e a campanha saía pelo padrão QUEBRADO
+  // — exatamente o número que o seletor deveria ter deixado escapar.
+  const accountChannels = useAccountChannels();
+  const eligibleChannels = useMemo(
+    () =>
+      Array.from(accountChannels.byId.values())
+        .filter((c) => c.type === 'whatsapp_cloud' && c.status !== 'disabled')
+        .sort((a, b) => {
+          // `connected` primeiro — a pré-seleção abaixo usa `[0]`, e um
+          // padrão em `error` não pode ganhar de um número saudável só
+          // por ser o padrão.
+          const byHealth =
+            Number(b.status === 'connected') - Number(a.status === 'connected');
+          if (byHealth !== 0) return byHealth;
+          return Number(b.is_default) - Number(a.is_default);
+        }),
+    [accountChannels.byId]
+  );
+  const [channelId, setChannelId] = useState<string | undefined>(undefined);
+  // Pré-seleciona o padrão assim que a lista chega — um seletor vazio
+  // pareceria quebrado, e o padrão é o mesmo que o servidor escolheria
+  // de qualquer forma na ausência de escolha.
+  useEffect(() => {
+    if (channelId || eligibleChannels.length === 0) return;
+    setChannelId(eligibleChannels[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligibleChannels]);
 
   // ── Agendamento (§6.3) ─────────────────────────────────────────
   const [mode, setMode] = useState<'now' | 'schedule'>('now');
@@ -189,6 +238,9 @@ export function Step4ScheduleSend({
           ? scheduledDate.toISOString()
           : undefined,
       windowOverride: outsideWindow && windowOverride,
+      // Um número só: nem mostramos o seletor, então não força uma
+      // escolha que o servidor já faria sozinho (o padrão).
+      channelId: eligibleChannels.length > 1 ? channelId : undefined,
     });
   }
 
@@ -270,6 +322,42 @@ export function Step4ScheduleSend({
           </div>
         </div>
       </div>
+
+      {/* ── Enviar por (SPEC 064 D-3/§6.3) ────────────────────────── */}
+      {eligibleChannels.length > 1 && (
+        <div className="border-border bg-card/50 space-y-2 rounded-xl border p-4">
+          <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
+            <Smartphone className="text-primary h-4 w-4" />
+            {t('scheduleSend.sendFrom')}
+          </p>
+          <Select
+            value={channelId}
+            onValueChange={(val) => val && setChannelId(val)}
+          >
+            <SelectTrigger className="border-border bg-muted text-foreground w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-border bg-popover">
+              {eligibleChannels.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                  {c.identifier ? ` — ${c.identifier}` : ''}
+                  {c.is_default
+                    ? ` (${t('scheduleSend.sendFromDefault')})`
+                    : ''}
+                  {/* O filtro acima inclui `error`/`disconnected` de
+                      propósito (nunca esconder o padrão quebrado atrás
+                      de "só uma opção") — o selo é o que deixa o
+                      operador ver e trocar para o número saudável. */}
+                  {c.status !== 'connected'
+                    ? ` — ${t('scheduleSend.sendFromUnhealthy')}`
+                    : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Teste A/B (§6.6): o que a audiência do card acima vira depois do
           sorteio. Sem esta linha, o usuário confirmaria "1 000 pessoas"

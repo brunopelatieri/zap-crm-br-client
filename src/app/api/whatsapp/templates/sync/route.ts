@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize';
+import {
+  resolveCloudConfig,
+  type WhatsappConfigRow,
+} from '@/lib/whatsapp/cloud-channels';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import type { TemplateButton, TemplateSampleValues } from '@/types';
 
 /**
@@ -124,7 +129,7 @@ function extractSampleValues(
   return sv;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await createClient();
 
@@ -152,20 +157,34 @@ export async function POST() {
       );
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single();
+    // Templates belong to a WABA, and a WABA belongs to a Cloud channel
+    // (SPEC 064 D-2/F5) — a conta with two numbers has no single
+    // "the" `whatsapp_config` anymore. `channel_id` picks which one to
+    // sync from; absent, `resolveCloudConfig` falls back to the default
+    // Cloud channel, same as before this SPEC when there was only one.
+    let channelId: string | null = null;
+    try {
+      const body = await request.json();
+      if (typeof body?.channel_id === 'string') channelId = body.channel_id;
+    } catch {
+      // No body (or invalid JSON) is the common case — sync historically
+      // took none. Fall through to the default channel.
+    }
 
-    if (configError || !config) {
-      return NextResponse.json(
-        {
-          error:
-            'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
-        },
-        { status: 400 }
-      );
+    let config: WhatsappConfigRow;
+    try {
+      ({ config } = await resolveCloudConfig(supabase, accountId, channelId));
+    } catch (e) {
+      if (e instanceof ChannelNotConfiguredError) {
+        return NextResponse.json(
+          {
+            error:
+              'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
+          },
+          { status: 400 }
+        );
+      }
+      throw e;
     }
 
     if (!config.waba_id) {

@@ -174,6 +174,7 @@ export default function NewBroadcastPage() {
         headerMediaUrl,
         scheduledAt: options.scheduledAt,
         windowOverride: options.windowOverride,
+        channelId: options.channelId,
         abTest: variantTemplate
           ? {
               template: variantTemplate,

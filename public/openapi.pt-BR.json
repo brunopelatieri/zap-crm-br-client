@@ -173,6 +173,46 @@
                               }
                             }
                           }
+                        },
+                        "channels": {
+                          "type": "array",
+                          "description": "Números oficiais ativos da conta. Presente só quando a chave tem messages:send ou broadcasts:send — ausente (não um array vazio) para chaves sem esses escopos, porque a lista inclui telefones.",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "name",
+                              "type",
+                              "status",
+                              "phone"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": ["whatsapp_cloud", "whatsapp_qr"]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "connected",
+                                  "disconnected",
+                                  "connecting",
+                                  "error"
+                                ]
+                              },
+                              "phone": {
+                                "type": ["string", "null"],
+                                "description": "null quando o número ainda não foi confirmado com a Meta — use name nesse meio-tempo."
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -207,6 +247,15 @@
                         "key": "channels_whatsapp_qr",
                         "used": 1,
                         "limit": 2
+                      }
+                    ],
+                    "channels": [
+                      {
+                        "id": "8f3c1e2a-0000-4000-8000-000000000003",
+                        "name": "Main Number",
+                        "type": "whatsapp_cloud",
+                        "status": "connected",
+                        "phone": "+14155550100"
                       }
                     ]
                   }
@@ -875,7 +924,8 @@
                   {
                     "to": "+14155550124"
                   }
-                ]
+                ],
+                "channel_id": "8f3c1e2a-0000-4000-8000-000000000003"
               }
             }
           }
@@ -900,7 +950,8 @@
                     "status": "sending",
                     "total_recipients": 2,
                     "accepted": 2,
-                    "rejected": 0
+                    "rejected": 0,
+                    "channel_id": "8f3c1e2a-0000-4000-8000-000000000003"
                   }
                 }
               }
@@ -2331,6 +2382,11 @@
             "items": {
               "$ref": "#/components/schemas/BroadcastRecipient"
             }
+          },
+          "channel_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Número oficial que envia esta campanha (opcional). Ausente = canal Cloud padrão, resolvido e GRAVADO na criação."
           }
         }
       },
@@ -2341,7 +2397,8 @@
           "status",
           "total_recipients",
           "accepted",
-          "rejected"
+          "rejected",
+          "channel_id"
         ],
         "properties": {
           "broadcast_id": {
@@ -2361,6 +2418,10 @@
           "rejected": {
             "type": "integer",
             "description": "Destinatários descartados por número de telefone inválido."
+          },
+          "channel_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -2379,7 +2440,8 @@
           "replied_count",
           "failed_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "channel_id"
         ],
         "properties": {
           "id": {
@@ -2424,6 +2486,11 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "channel_id": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "null numa campanha anterior ao suporte a múltiplos números (SPEC 064)."
           }
         }
       },

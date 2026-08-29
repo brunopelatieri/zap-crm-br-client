@@ -60,6 +60,7 @@ import {
 import { resolveDefaultChannelId } from './default-channel';
 import { ChannelNotConfiguredError, ChannelCapabilityError } from './errors';
 import { getAdapter } from './registry';
+import { logOutboundSend } from './send-log';
 import type {
   Channel,
   ChannelAdapter,
@@ -626,6 +627,8 @@ export interface OutboundPersistSpec {
 export async function sendAndPersistOutbound(input: {
   db: SupabaseClient;
   accountId: string;
+  /** Log estruturado (SPEC 064 §11.1) — qual motor disparou este envio. */
+  origin: 'automation' | 'flow' | 'ai';
   /**
    * Envia por um canal EXPLÍCITO, ignorando o da conversa.
    *
@@ -691,6 +694,15 @@ export async function sendAndPersistOutbound(input: {
     ctx,
     sanitizedPhone: contact.sanitizedPhone,
     content,
+  });
+
+  logOutboundSend({
+    accountId,
+    conversationId,
+    channelId: ctx.channel.id,
+    channelType: ctx.channel.type,
+    phoneNumberId: ctx.credentials.phoneNumberId ?? null,
+    origin: input.origin,
   });
 
   if (workingPhone !== contact.sanitizedPhone) {

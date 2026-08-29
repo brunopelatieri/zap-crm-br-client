@@ -11,12 +11,19 @@
 // parse → hash lookup → liveness → rate limit → envelope — so a
 // green response here means the plumbing every future endpoint
 // depends on is sound.
+//
+// `channels` (SPEC 064 F9): only present when the key has
+// `messages:send` or `broadcasts:send` — it lists phone numbers, and a
+// key scoped only to e.g. `contacts:read` shouldn't see them. Absent
+// the field entirely for other keys, not an empty array.
 // ============================================================
 
 import { requireApiKey } from '@/lib/auth/api-context';
+import { hasScope } from '@/lib/api-keys/scopes';
 import { getAccountName } from '@/lib/api-keys/store';
 import { ok, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { getAccountPlan } from '@/lib/plans/account-plan';
+import { channelIdentifierIsPhone } from '@/lib/channels/identifier';
 
 export async function GET(request: Request) {
   try {
@@ -61,11 +68,57 @@ export async function GET(request: Request) {
       console.error('[api/v1/me] failed to load account plan:', err);
     }
 
+    // SPEC 064 F9/§7 — a lista inclui telefones, então só entra quando a
+    // chave já pode fazer algo com um número (enviar mensagem ou
+    // disparar campanha). Uma chave só de `contacts:read` não ganha o
+    // campo — não é uma lista vazia, é AUSÊNCIA do campo, para o
+    // contrato continuar idêntico ao de antes desta fase para quem não
+    // pediu esse escopo.
+    let channels:
+      | {
+          id: string;
+          name: string;
+          type: string;
+          status: string;
+          phone: string | null;
+        }[]
+      | undefined;
+    if (
+      hasScope(ctx.scopes, 'messages:send') ||
+      hasScope(ctx.scopes, 'broadcasts:send')
+    ) {
+      const { data: rows, error } = await ctx.supabase
+        .from('channels')
+        .select('id, name, type, status, identifier')
+        .eq('account_id', ctx.accountId)
+        .neq('status', 'disabled');
+      if (error) {
+        console.error('[api/v1/me] failed to load channels:', error);
+        channels = [];
+      } else {
+        channels = (rows ?? []).map((c) => ({
+          id: c.id as string,
+          name: c.name as string,
+          type: c.type as string,
+          status: c.status as string,
+          // D-9: só mostra telefone do que sabidamente é um — nunca o
+          // `phone_number_id` da Meta formatado como se fosse número.
+          phone: channelIdentifierIsPhone({
+            type: c.type,
+            identifier: c.identifier,
+          })
+            ? (c.identifier as string | null)
+            : null,
+        }));
+      }
+    }
+
     return ok({
       account: { id: ctx.accountId, name },
       key: { id: ctx.keyId, scopes: ctx.scopes },
       plan,
       usage,
+      ...(channels ? { channels } : {}),
     });
   } catch (err) {
     return toApiErrorResponse(err);

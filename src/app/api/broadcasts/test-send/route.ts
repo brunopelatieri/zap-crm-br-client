@@ -84,6 +84,8 @@ export async function POST(request: Request) {
             ? body.headerMediaUrl
             : undefined,
         contactIds,
+        channelId:
+          typeof body.channelId === 'string' ? body.channelId : undefined,
       },
     });
 

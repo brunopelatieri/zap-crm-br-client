@@ -30,10 +30,16 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { BroadcastError } from '@/lib/whatsapp/broadcast-core';
+import {
+  BroadcastError,
+  toBroadcastChannelError,
+} from '@/lib/whatsapp/broadcast-core';
 import { excludesOptedOut, isOptedOut } from '@/lib/contacts/consent';
 import { isWhatsappInvalid } from '@/lib/contacts/whatsapp-status';
 import { decrypt } from '@/lib/whatsapp/encryption';
+import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
   withSignedHeaderMedia,
   isMediaHeaderTemplate,
@@ -78,6 +84,11 @@ export interface SendBroadcastTestInput {
   headerMediaUrl?: string;
   /** 1 a `MAX_TEST_SEND_RECIPIENTS` ids de `contacts`. */
   contactIds: string[];
+  /**
+   * Número oficial que envia o teste (SPEC 064 D-3/§6.3) — o mesmo
+   * seletor "Enviar por" do disparo real. Ausente = canal Cloud padrão.
+   */
+  channelId?: string | null;
 }
 
 export interface SendBroadcastTestParams {
@@ -114,28 +125,22 @@ export async function sendBroadcastTest(
     );
   }
 
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', accountId)
-    .maybeSingle();
-
-  if (!config) {
-    throw new BroadcastError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
+  let config: Awaited<ReturnType<typeof resolveCloudConfig>>['config'];
+  try {
+    ({ config } = await resolveCloudConfig(db, accountId, input.channelId));
+  } catch (e) {
+    if (e instanceof ChannelNotConfiguredError)
+      throw toBroadcastChannelError(e);
+    throw e;
   }
   const accessToken = decrypt(config.access_token);
 
-  const { data: rawTemplateRow } = await db
-    .from('message_templates')
-    .select('*')
-    .eq('account_id', accountId)
-    .eq('name', input.templateName)
-    .eq('language', templateLanguage)
-    .maybeSingle();
+  const rawTemplateRow = await findTemplateRowForWaba(db, {
+    accountId,
+    name: input.templateName,
+    language: templateLanguage,
+    wabaId: config.waba_id ?? null,
+  });
 
   if (!rawTemplateRow) {
     throw new BroadcastError(

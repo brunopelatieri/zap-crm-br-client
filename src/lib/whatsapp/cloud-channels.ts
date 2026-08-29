@@ -276,6 +276,34 @@ export async function resolveCloudConfig(
 }
 
 /**
+ * A config de um número que atende um WABA específico (SPEC 064 F5/D-2).
+ *
+ * Templates pertencem ao WABA, não ao canal — mas falar com a Meta (editar,
+ * excluir) exige um token, e o token é do canal. `wabaId` nulo (template
+ * legado, anterior à 072) cai no canal Cloud padrão, a mesma regra de D-2
+ * para listagem/envio. Quando dois números compartilham o WABA, usa o
+ * primeiro da ordem de `listCloudChannels` (padrão antes, depois mais
+ * antigo) — qualquer um deles fala pela mesma conta na Meta.
+ */
+export async function resolveCloudConfigForWaba(
+  db: SupabaseClient,
+  accountId: string,
+  wabaId: string | null
+): Promise<{ channel: Channel; config: WhatsappConfigRow }> {
+  if (!wabaId) return resolveCloudConfig(db, accountId, null);
+
+  const channels = await listCloudChannels(db, accountId);
+  const match = channels.find((c) => c.wabaId === wabaId);
+  if (!match) {
+    throw new ChannelNotConfiguredError(
+      `no connected channel found for WABA ${wabaId} in account ${accountId}`,
+      'not_found'
+    );
+  }
+  return resolveCloudConfig(db, accountId, match.channelId);
+}
+
+/**
  * Quantos números oficiais ativos a conta tem.
  *
  * A interface usa para decidir se mostra seletor de número (um número

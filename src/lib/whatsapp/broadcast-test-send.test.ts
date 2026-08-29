@@ -89,10 +89,40 @@ function makeDb(scenario: Scenario) {
 
   const handler = (table: string, ops: QueryOp[]): MockResult | undefined => {
     switch (table) {
+      // SPEC 064 F6 — mesmo raciocínio de broadcast-dispatch.test.ts:
+      // `resolveCloudConfig` passa por `channels` antes de `whatsapp_config`.
+      case 'channels': {
+        const fakeChannel = {
+          id: 'channel-1',
+          account_id: ACCOUNT,
+          user_id: 'user-1',
+          type: 'whatsapp_cloud',
+          name: 'WhatsApp Oficial',
+          identifier: null,
+          status: 'connected',
+          status_detail: null,
+          is_default: true,
+          connected_at: null,
+          last_seen_at: null,
+          created_at: '2020-01-01T00:00:00.000Z',
+          updated_at: '2020-01-01T00:00:00.000Z',
+        };
+        if (!config) return { data: null };
+        const idFilter = ops
+          .filter((o) => o.fn === 'eq')
+          .find((o) => o.args[0] === 'id');
+        if (idFilter) {
+          return {
+            data: idFilter.args[1] === fakeChannel.id ? fakeChannel : null,
+          };
+        }
+        return { data: [fakeChannel] };
+      }
       case 'whatsapp_config':
         return { data: config };
       case 'message_templates':
-        return { data: template };
+        // `findTemplateRowForWaba` sempre lê uma lista de candidatos.
+        return { data: template ? [template] : [] };
       case 'contacts': {
         const ids = opArgs(ops, 'in')?.[1] as string[] | undefined;
         return { data: contacts.filter((c) => ids?.includes(c.id as string)) };

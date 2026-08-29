@@ -23,6 +23,7 @@ import {
   sendWithPhoneVariants,
 } from '@/lib/channels/send';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
+import { logOutboundSend } from '@/lib/channels/send-log';
 import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { createHeaderMediaResolver } from '@/lib/whatsapp/header-media';
@@ -172,6 +173,17 @@ export async function sendIngestTemplate(
       },
     });
     providerMessageId = result.providerMessageId;
+    // SPEC 064 §11.1 — sem `conversationId`: como no disparo em massa,
+    // este envio nasce do webhook de entrada e é resolvido por contato,
+    // não por conversa.
+    logOutboundSend({
+      accountId,
+      conversationId: null,
+      channelId: channel.id,
+      channelType: channel.type,
+      phoneNumberId: config.phone_number_id ?? null,
+      origin: 'ingest',
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     await db

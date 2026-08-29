@@ -798,6 +798,7 @@ describe('sendAndPersistOutbound', () => {
     const r = await sendAndPersistOutbound({
       db: db.client,
       accountId: 'acct-1',
+      origin: 'automation',
       conversationId: 'conv-1',
       contactId: 'contact-1',
       content: { kind: 'text', text: 'olá' },
@@ -842,6 +843,7 @@ describe('sendAndPersistOutbound', () => {
     await sendAndPersistOutbound({
       db: db.client,
       accountId: 'acct-1',
+      origin: 'automation',
       conversationId: 'conv-1',
       contactId: 'contact-1',
       content: { kind: 'text', text: 'olá' },
@@ -871,6 +873,7 @@ describe('sendAndPersistOutbound', () => {
       sendAndPersistOutbound({
         db: db.client,
         accountId: 'acct-1',
+        origin: 'automation',
         conversationId: 'conv-1',
         contactId: 'contact-1',
         content: { kind: 'text', text: 'olá' },
@@ -938,6 +941,7 @@ describe('sendAndPersistOutbound', () => {
         sendAndPersistOutbound({
           db: db.client,
           accountId: 'acct-1',
+          origin: 'automation',
           conversationId: 'conv-1',
           contactId: 'contact-1',
           content: { kind: 'text', text: 'oi' },
@@ -960,6 +964,7 @@ describe('sendAndPersistOutbound', () => {
       await sendAndPersistOutbound({
         db: db.client,
         accountId: 'acct-1',
+        origin: 'automation',
         conversationId: 'conv-1',
         contactId: 'contact-1',
         content: { kind: 'text', text: 'oi' },
@@ -1009,6 +1014,7 @@ describe('sendAndPersistOutbound', () => {
       await sendAndPersistOutbound({
         db: db.client,
         accountId: 'acct-1',
+        origin: 'automation',
         conversationId: 'conv-1',
         contactId: 'contact-1',
         content: { kind: 'text', text: 'oi' },
@@ -1033,6 +1039,7 @@ describe('sendAndPersistOutbound', () => {
       await sendAndPersistOutbound({
         db: db.client,
         accountId: 'acct-1',
+        origin: 'automation',
         conversationId: 'conv-1',
         contactId: 'contact-1',
         content: { kind: 'text', text: 'oi' },
@@ -1086,6 +1093,7 @@ describe('sendAndPersistOutbound', () => {
       await sendAndPersistOutbound({
         db: db.client,
         accountId: 'acct-1',
+        origin: 'automation',
         channel: { type: 'whatsapp_qr', id: 'chan-qr-1' },
         conversationId: 'conv-1',
         contactId: 'contact-1',
@@ -1117,6 +1125,7 @@ describe('sendAndPersistOutbound', () => {
       await sendAndPersistOutbound({
         db: db.client,
         accountId: 'acct-1',
+        origin: 'automation',
         conversationId: 'conv-1',
         contactId: 'contact-1',
         content: { kind: 'text', text: 'oi' },

@@ -83,7 +83,17 @@ export async function engineSendInteractive(
   args: SendInteractiveArgs
 ): Promise<{ whatsapp_message_id: string }> {
   const { payload, accountId, userId, conversationId, contactId } = args;
-  const common = { accountId, userId, conversationId, contactId };
+  // SPEC 064 §11.1 — sem isto, o log estruturado gravava TODO envio
+  // interativo de automação como `origin: 'flow'` (o padrão da função
+  // que este arquivo delega para), poluindo a auditoria de "qual motor
+  // mandou esta mensagem".
+  const common = {
+    accountId,
+    userId,
+    conversationId,
+    contactId,
+    origin: 'automation' as const,
+  };
   if (payload.kind === 'buttons') {
     return engineSendInteractiveButtons({
       ...common,
@@ -193,6 +203,7 @@ async function sendViaMeta(
   return sendAndPersistOutbound({
     db,
     accountId: input.accountId,
+    origin: 'automation',
     conversationId: input.conversationId,
     contactId: input.contactId,
     content:

@@ -1,10 +1,45 @@
 import { describe, it, expect } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
   createBroadcast,
   assertAccountCanBroadcast,
+  toBroadcastChannelError,
   BroadcastError,
 } from './broadcast-core';
+
+// SPEC 064 D-3 — o único lugar que traduz "canal não resolveu" (a
+// linguagem de `cloud-channels.ts`) para "campanha não pode ser
+// criada/disparada" (a linguagem do disparo). Usado tanto na criação
+// quanto no replanejamento do cron.
+describe('toBroadcastChannelError (SPEC 064 D-3)', () => {
+  it('reason "no_channel" (conta sem número nenhum) vira whatsapp_not_configured', () => {
+    const err = toBroadcastChannelError(new ChannelNotConfiguredError());
+    expect(err).toBeInstanceOf(BroadcastError);
+    expect(err).toMatchObject({ code: 'whatsapp_not_configured', status: 400 });
+  });
+
+  it.each(['not_found', 'wrong_type', 'disabled', 'no_credentials'] as const)(
+    'reason "%s" (canal explícito indisponível) vira channel_unavailable — nunca cai no padrão sozinho',
+    (reason) => {
+      const err = toBroadcastChannelError(
+        new ChannelNotConfiguredError('unavailable', reason)
+      );
+      expect(err).toMatchObject({ code: 'channel_unavailable', status: 409 });
+    }
+  );
+
+  it('reason "read_failed" (a CONSULTA falhou, não o canal) vira internal/500, nunca channel_unavailable', () => {
+    // read_failed não é "canal indisponível" — é "não sabemos o estado
+    // do canal". Misturar os dois manda o operador reconectar um número
+    // que nunca teve problema, escondendo um soluço de infra atrás de
+    // um 409 acionável.
+    const err = toBroadcastChannelError(
+      new ChannelNotConfiguredError('db down', 'read_failed')
+    );
+    expect(err).toMatchObject({ code: 'internal', status: 500 });
+  });
+});
 
 // These assertions all fire in the pure validation prologue, before
 // any Supabase call — a bare stub is enough.

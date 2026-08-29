@@ -103,6 +103,8 @@ interface DueBroadcast {
   template_variables: unknown;
   audience_filter: unknown;
   header_media_url: string | null;
+  /** Número gravado no agendamento (SPEC 064 D-3). `null` = campanha legada. */
+  channel_id: string | null;
   scheduled_at: string;
   scheduled_timezone: string | null;
   window_override: boolean;
@@ -143,7 +145,7 @@ export async function GET(request: Request) {
   const { data: due, error } = await admin
     .from('broadcasts')
     .select(
-      'id, account_id, user_id, name, template_name, template_language, template_variables, audience_filter, header_media_url, scheduled_at, scheduled_timezone, window_override, ab_split_percent'
+      'id, account_id, user_id, name, template_name, template_language, template_variables, audience_filter, header_media_url, channel_id, scheduled_at, scheduled_timezone, window_override, ab_split_percent'
     )
     .eq('status', 'scheduled')
     // Decisão 4 do cabeçalho: variante B não é campanha por si só.
@@ -294,7 +296,12 @@ export async function GET(request: Request) {
     }
 
     try {
-      const quota = await loadAccountQuota(admin, row.account_id);
+      // Por canal (D-4): o teto reconferido tem que ser o do número
+      // gravado no agendamento, não o padrão da conta — que pode ter
+      // mudado desde então.
+      const quota = await loadAccountQuota(admin, row.account_id, {
+        channelId: row.channel_id,
+      });
       const batchLimit = quota.configured
         ? quota.snapshot.batchLimit
         : Number.POSITIVE_INFINITY;
@@ -334,6 +341,7 @@ export async function GET(request: Request) {
             audience,
             variables,
             headerMediaUrl: row.header_media_url ?? undefined,
+            channelId: row.channel_id,
           },
           variant: {
             templateName: abVariant.template_name,
@@ -404,6 +412,7 @@ export async function GET(request: Request) {
           audience,
           variables,
           headerMediaUrl: row.header_media_url ?? undefined,
+          channelId: row.channel_id,
         },
         canCreateTags,
       });

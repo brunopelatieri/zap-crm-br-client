@@ -81,16 +81,55 @@ function makeDb(scenario: Scenario) {
       case 'accounts':
         return { data: { blocked_at: null } };
 
+      // SPEC 064 F6 — `loadWhatsappConfig` resolve por `resolveCloudConfig`,
+      // que passa por `channels` duas vezes: uma lista (via
+      // `resolveDefaultChannelId`, sem canal explícito nestes cenários) e
+      // depois uma busca por id. `config: null` simula "conta sem número"
+      // — sem canal nenhum, para que o erro continue `whatsapp_not_configured`
+      // e não um `channel_unavailable` que soaria como "existe, mas está fora".
+      case 'channels': {
+        const fakeChannel = {
+          id: 'channel-1',
+          account_id: ACCOUNT,
+          user_id: USER,
+          type: 'whatsapp_cloud',
+          name: 'WhatsApp Oficial',
+          identifier: null,
+          status: 'connected',
+          status_detail: null,
+          is_default: true,
+          connected_at: null,
+          last_seen_at: null,
+          created_at: '2020-01-01T00:00:00.000Z',
+          updated_at: '2020-01-01T00:00:00.000Z',
+        };
+        if (!config) return { data: null };
+        const idFilter = ops
+          .filter((o) => o.fn === 'eq')
+          .find((o) => o.args[0] === 'id');
+        if (idFilter) {
+          return {
+            data: idFilter.args[1] === fakeChannel.id ? fakeChannel : null,
+          };
+        }
+        return { data: [fakeChannel] };
+      }
+
       case 'whatsapp_config':
         return { data: config };
 
       case 'message_templates': {
-        if (!templatesByName) return { data: template };
+        // SPEC 064 F5/F6 — `findTemplateRowForWaba` sempre lê uma LISTA de
+        // candidatos (nunca `.single()`/`.maybeSingle()`), porque o mesmo
+        // nome+idioma pode existir uma vez por WABA. O mock devolve um
+        // array mesmo quando há no máximo uma linha.
+        if (!templatesByName) return { data: template ? [template] : [] };
         const name =
           opArgs(ops, 'eq')?.[0] === 'account_id'
             ? (ops.filter((o) => o.fn === 'eq')[1]?.args[1] as string)
             : undefined;
-        return { data: name ? (templatesByName[name] ?? null) : null };
+        const row = name ? (templatesByName[name] ?? null) : null;
+        return { data: row ? [row] : [] };
       }
 
       case 'contacts': {

@@ -63,6 +63,11 @@ export async function engineSendText(
   return sendAndPersistOutbound({
     db: supabaseAdmin(),
     accountId: args.accountId,
+    // Este é o único ponto de saída compartilhado entre flows E o
+    // auto-reply de IA (SPEC 064 §11.1) — `aiGenerated` já existe para
+    // marcar a linha de `messages`; reaproveita aqui em vez de inventar
+    // um segundo parâmetro que pudesse divergir do primeiro.
+    origin: args.aiGenerated ? 'ai' : 'flow',
     conversationId: args.conversationId,
     contactId: args.contactId,
     content: { kind: 'text', text: args.text },
@@ -121,6 +126,8 @@ export async function engineSendMedia(
   return sendAndPersistOutbound({
     db,
     accountId: args.accountId,
+    // Sem `aiGenerated` (o auto-reply de IA só envia texto) — sempre 'flow'.
+    origin: 'flow',
     conversationId: args.conversationId,
     contactId: args.contactId,
     content: {
@@ -152,6 +159,16 @@ interface SendInteractiveButtonsEngineArgs {
   buttons: InteractiveButton[];
   headerText?: string;
   footerText?: string;
+  /**
+   * Log estruturado (SPEC 064 §11.1) — quem chamou de verdade.
+   *
+   * `automations/meta-send.ts`'s `engineSendInteractive` DELEGA para
+   * esta função (o motor de automações não tem sender interativo
+   * próprio), então "sempre flow" estava errado: um botão/lista
+   * disparado por uma automação era gravado no log como `flow`. Ausente
+   * = `'flow'` — o chamador de verdade (o runner de flows).
+   */
+  origin?: 'flow' | 'automation';
 }
 
 interface SendInteractiveListEngineArgs {
@@ -164,6 +181,8 @@ interface SendInteractiveListEngineArgs {
   sections: InteractiveListSection[];
   headerText?: string;
   footerText?: string;
+  /** Ver o comentário equivalente em `SendInteractiveButtonsEngineArgs`. */
+  origin?: 'flow' | 'automation';
 }
 
 /**
@@ -226,6 +245,8 @@ async function sendInteractiveViaMeta(
   return sendAndPersistOutbound({
     db: supabaseAdmin(),
     accountId: input.accountId,
+    // O auto-reply de IA não manda interativos — só flow ou automação.
+    origin: input.origin ?? 'flow',
     conversationId: input.conversationId,
     contactId: input.contactId,
     content: { kind: 'interactive', payload: interactivePayload },

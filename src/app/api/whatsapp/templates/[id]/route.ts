@@ -13,6 +13,8 @@ import {
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components';
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle';
 import { resolveMediaUrlForServer } from '@/lib/storage/sign-media';
+import { resolveCloudConfigForWaba } from '@/lib/whatsapp/cloud-channels';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 
 /**
  * Per-template lifecycle endpoint.
@@ -101,7 +103,7 @@ export async function PATCH(
     // meta_template_id and status — fetch explicitly.
     const { data: existing, error: lookupErr } = await supabase
       .from('message_templates')
-      .select('id, name, status, meta_template_id, language')
+      .select('id, name, status, meta_template_id, language, waba_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle();
@@ -161,18 +163,38 @@ export async function PATCH(
     }
 
     if (!isDryRun()) {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single();
-      if (configError || !config) {
-        return NextResponse.json(
-          { error: 'WhatsApp not configured.' },
-          { status: 400 }
+      // Talking to Meta needs a token, and the token is per-canal — but
+      // a template belongs to the WABA (D-2), not to whichever number
+      // the caller happens to be looking at. Resolve by the template's
+      // OWN `waba_id`, never the account's default channel: on a
+      // multi-WABA account those can be two different numbers.
+      let accessToken: string;
+      try {
+        const { config } = await resolveCloudConfigForWaba(
+          supabase,
+          accountId,
+          (existing.waba_id as string | null) ?? null
         );
+        accessToken = decrypt(config.access_token);
+      } catch (e) {
+        if (e instanceof ChannelNotConfiguredError) {
+          // `read_failed` é a CONSULTA falhando, não "sem WhatsApp
+          // configurado" — misturar os dois manda o usuário reconectar
+          // um número que nunca teve problema, escondendo um soluço de
+          // infra atrás de um 400 acionável.
+          if (e.reason === 'read_failed') {
+            return NextResponse.json(
+              { error: 'Failed to resolve the WhatsApp channel. Try again.' },
+              { status: 500 }
+            );
+          }
+          return NextResponse.json(
+            { error: 'WhatsApp not configured.' },
+            { status: 400 }
+          );
+        }
+        throw e;
       }
-      const accessToken = decrypt(config.access_token);
 
       // Image headers need a fresh Resumable-Upload handle on every edit
       // (Meta replaces components wholesale). Derive from header_media_url.
@@ -305,7 +327,7 @@ export async function DELETE(
 
     const { data: existing, error: lookupErr } = await supabase
       .from('message_templates')
-      .select('id, name, status, meta_template_id')
+      .select('id, name, status, meta_template_id, waba_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle();
@@ -337,21 +359,44 @@ export async function DELETE(
       existing.status !== 'PENDING_DELETION' &&
       !isDryRun()
     ) {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single();
-      if (configError || !config || !config.waba_id) {
-        return NextResponse.json(
-          { error: 'WhatsApp not configured — cannot delete on Meta.' },
-          { status: 400 }
+      // Same reasoning as PATCH above: the credential has to belong to
+      // THIS template's WABA, not the account's default channel. `null`
+      // (legacy row, pre-072) falls back to the default Cloud channel —
+      // same D-2 rule as everywhere else.
+      let accessToken: string;
+      let wabaId: string;
+      try {
+        const { config } = await resolveCloudConfigForWaba(
+          supabase,
+          accountId,
+          (existing.waba_id as string | null) ?? null
         );
+        if (!config.waba_id) {
+          return NextResponse.json(
+            { error: 'WhatsApp not configured — cannot delete on Meta.' },
+            { status: 400 }
+          );
+        }
+        accessToken = decrypt(config.access_token);
+        wabaId = config.waba_id as string;
+      } catch (e) {
+        if (e instanceof ChannelNotConfiguredError) {
+          if (e.reason === 'read_failed') {
+            return NextResponse.json(
+              { error: 'Failed to resolve the WhatsApp channel. Try again.' },
+              { status: 500 }
+            );
+          }
+          return NextResponse.json(
+            { error: 'WhatsApp not configured — cannot delete on Meta.' },
+            { status: 400 }
+          );
+        }
+        throw e;
       }
-      const accessToken = decrypt(config.access_token);
       try {
         await deleteMessageTemplate({
-          wabaId: config.waba_id,
+          wabaId,
           accessToken,
           name: existing.name,
           metaTemplateId: existing.meta_template_id,

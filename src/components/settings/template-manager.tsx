@@ -49,6 +49,7 @@ import type {
   TemplateSampleValues,
 } from '@/types';
 import { templateStatusConfig } from '@/lib/template-status';
+import { buildWabaGroups } from '@/lib/whatsapp/waba-groups';
 import {
   extractVariableIndices,
   isMetaSampleTemplate,
@@ -171,6 +172,21 @@ export function TemplateManager() {
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+
+  // ── WABAs da conta (SPEC 064 D-2/F5) ────────────────────────────
+  // Um grupo por WABA distinto entre os canais Cloud ativos — não por
+  // canal: dois números do mesmo WABA compartilham a lista de
+  // templates na Meta, então mostrá-los como duas entradas separadas
+  // aqui seria inventar uma distinção que não existe do lado deles.
+  const [wabaGroups, setWabaGroups] = useState<
+    { wabaId: string; label: string; channelId: string; isDefault: boolean }[]
+  >([]);
+  const [selectedWabaId, setSelectedWabaId] = useState<string | null>(null);
+  // Seletor só aparece com mais de um WABA distinto — com um só, toda
+  // dimmed/badge logic abaixo fica desligada de propósito.
+  const showWabaSelector = wabaGroups.length > 1;
+  const selectedChannelId =
+    wabaGroups.find((g) => g.wabaId === selectedWabaId)?.channelId ?? null;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -243,8 +259,47 @@ export function TemplateManager() {
       return;
     }
     fetchTemplates(user.id);
+    fetchWabaGroups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
+
+  /**
+   * Um grupo por WABA distinto, para o seletor + a lógica de esmaecer
+   * templates de outro WABA (§6.2).
+   *
+   * A lista vem de `GET /api/whatsapp/config` — a mesma rota que a aba
+   * WhatsApp Oficial (F7) usa para listar números — em vez de consultar
+   * `channels`/`whatsapp_config` direto daqui. Duas razões: a rota já
+   * devolve o `waba_id` sem segredo nenhum (a leitura direta de
+   * `whatsapp_config` exigiria selecionar só colunas seguras para não
+   * vazar `access_token` a qualquer membro da conta, já que a policy é
+   * `is_account_member` sem distinção de papel), e ela é a MESMA fonte
+   * que `listCloudChannels()` usa no servidor — duas implementações
+   * independentes da mesma consulta divergem cedo ou tarde (por
+   * exemplo, filtro de conta ou critério de desempate diferentes).
+   */
+  async function fetchWabaGroups() {
+    const res = await fetch('/api/whatsapp/config', { cache: 'no-store' });
+    const payload = await res.json().catch(() => null);
+    const channels = (payload?.channels ?? []) as {
+      channel_id: string;
+      name: string;
+      is_default: boolean;
+      waba_id: string | null;
+    }[];
+    if (!channels.length) return;
+
+    const list = buildWabaGroups(
+      channels.map((c) => ({
+        channelId: c.channel_id,
+        name: c.name,
+        isDefault: c.is_default,
+        wabaId: c.waba_id,
+      }))
+    );
+    setWabaGroups(list);
+    if (list.length > 0) setSelectedWabaId((prev) => prev ?? list[0].wabaId);
+  }
 
   async function fetchTemplates(userId: string) {
     try {
@@ -377,7 +432,15 @@ export function TemplateManager() {
       const res = await fetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSubmitPayload()),
+        body: JSON.stringify(
+          // `channel_id` só faz sentido na CRIAÇÃO: editar/excluir já
+          // resolve pelo `waba_id` do próprio template (§6.2) — mandar
+          // aqui poderia sugerir, incorretamente, que dá para mover um
+          // template existente para outro WABA.
+          isEdit
+            ? buildSubmitPayload()
+            : { ...buildSubmitPayload(), channel_id: selectedChannelId }
+        ),
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) {
@@ -415,6 +478,8 @@ export function TemplateManager() {
     try {
       const res = await fetch('/api/whatsapp/templates/sync', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: selectedChannelId }),
       });
       const data = await parseJsonResponse(res);
       if (!res.ok) {
@@ -636,6 +701,37 @@ export function TemplateManager() {
         }
       />
 
+      {/* Seletor "Conta do WhatsApp Business" (SPEC 064 D-2/§6.2) — só
+          aparece com mais de um WABA distinto entre os canais Cloud da
+          conta. Decide para qual WABA "Novo template"/"Sincronizar"
+          apontam, e qual conjunto de templates aparece "ativo" abaixo. */}
+      {showWabaSelector && (
+        <div className="flex items-center gap-2">
+          <Label className="text-muted-foreground text-xs whitespace-nowrap">
+            {t('wabaSelectorLabel')}
+          </Label>
+          <Select
+            value={selectedWabaId ?? undefined}
+            onValueChange={(val) => val && setSelectedWabaId(val)}
+          >
+            <SelectTrigger className="bg-muted border-border text-foreground h-8 max-w-xs text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border-border">
+              {wabaGroups.map((g) => (
+                <SelectItem
+                  key={g.wabaId}
+                  value={g.wabaId}
+                  className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                >
+                  {g.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {templates.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
@@ -654,8 +750,22 @@ export function TemplateManager() {
             // (PATCH/DELETE come back as an Invalid-parameter error),
             // so the destructive/edit actions never render for it.
             const isSample = isMetaSampleTemplate(template.name);
+            // §6.2: um template de outro WABA fica esmaecido — ainda
+            // visível (é dado real da conta), mas marcado como
+            // indisponível para o WABA selecionado agora. `waba_id`
+            // nulo é caso à parte (linha anterior à 072, D-2): recebe
+            // selo próprio em vez de ser tratado como "de outro WABA".
+            const belongsToOtherWaba =
+              showWabaSelector &&
+              Boolean(template.waba_id) &&
+              template.waba_id !== selectedWabaId;
+            const missingWaba = showWabaSelector && !template.waba_id;
             return (
-              <Card key={template.id}>
+              <Card
+                key={template.id}
+                className={belongsToOtherWaba ? 'opacity-50' : undefined}
+                title={belongsToOtherWaba ? t('wabaOtherTooltip') : undefined}
+              >
                 <CardContent className="flex items-start justify-between pt-4">
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -674,6 +784,14 @@ export function TemplateManager() {
                           title={t('sampleBadgeTitle')}
                         >
                           {t('sampleBadge')}
+                        </Badge>
+                      )}
+                      {missingWaba && (
+                        <Badge
+                          className="border border-amber-600/30 bg-amber-600/20 text-xs text-amber-400"
+                          title={t('wabaMissingTooltip')}
+                        >
+                          {t('wabaMissingBadge')}
                         </Badge>
                       )}
                       <Badge className={`border text-xs ${status.classes}`}>

@@ -11,6 +11,11 @@ import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components';
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle';
 import { resolveMediaUrlForServer } from '@/lib/storage/sign-media';
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize';
+import {
+  resolveCloudConfig,
+  type WhatsappConfigRow,
+} from '@/lib/whatsapp/cloud-channels';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 
 // Header-image submits chain a media download + resumable upload (2
 // round trips) + template create against the Meta Graph API before
@@ -139,8 +144,17 @@ export async function POST(request: Request) {
     }
 
     let payload: TemplatePayload;
+    // `channel_id` picks which official number's WABA gets this template
+    // (SPEC 064 D-2/F5) — a sibling field of the template content, not
+    // part of it, so it rides along on the same body without touching
+    // `TemplatePayload`/`validateTemplatePayload`.
+    let channelId: string | null = null;
     try {
-      payload = (await request.json()) as TemplatePayload;
+      const body = (await request.json()) as TemplatePayload & {
+        channel_id?: unknown;
+      };
+      if (typeof body.channel_id === 'string') channelId = body.channel_id;
+      payload = body;
     } catch {
       return NextResponse.json(
         { error: 'Invalid JSON body.' },
@@ -185,44 +199,60 @@ export async function POST(request: Request) {
       // talks to Meta: leaving it null would put the row outside the
       // conflict target of every real template, so a dry-run re-submit
       // would INSERT a duplicate next to the row migration 072
-      // backfilled instead of updating it. Resolved through the default
-      // Cloud channel — never "the first config that shows up" — and a
-      // dev without any config simply gets null, which is the honest
-      // answer there.
-      // `.maybeSingle()` é seguro aqui porque o filtro inclui `type`:
-      // `idx_channels_one_default_per_account_type` (072) garante no
-      // máximo um padrão por (conta, TIPO). Sem o `type` seriam duas
-      // linhas numa conta com Cloud e QRCode.
-      const { data: defaultCloud } = await supabase
-        .from('channels')
-        .select('id')
-        .eq('account_id', accountId)
-        .eq('type', 'whatsapp_cloud')
-        .eq('is_default', true)
-        .maybeSingle();
-
-      if (defaultCloud?.id) {
-        const { data: cfg } = await supabase
-          .from('whatsapp_config')
-          .select('waba_id')
-          .eq('channel_id', defaultCloud.id)
-          .maybeSingle();
-        wabaId = cfg?.waba_id ?? null;
+      // backfilled instead of updating it. `channelId` (explicit
+      // selection) or the default Cloud channel — never "the first
+      // config that shows up" — and a dev without any config simply
+      // gets null, which is the honest answer there.
+      //
+      // ⚠️ Só `no_channel` ("a conta não tem número nenhum") vira
+      // `wabaId: null` de propósito — é o caso legítimo do dev sem
+      // config. Um `channelId` explícito inválido (de outra conta,
+      // desativado, ou id inexistente) é erro do CHAMADOR, não "sem
+      // config": engolir em silêncio gravaria a linha no alvo de
+      // conflito legado (`waba_id NULL`) por um motivo diferente do
+      // que o comentário acima existe para prevenir.
+      try {
+        const { config: cfg } = await resolveCloudConfig(
+          supabase,
+          accountId,
+          channelId
+        );
+        wabaId = cfg.waba_id ?? null;
+      } catch (e) {
+        if (
+          e instanceof ChannelNotConfiguredError &&
+          e.reason === 'no_channel'
+        ) {
+          wabaId = null;
+        } else if (
+          e instanceof ChannelNotConfiguredError &&
+          e.reason === 'read_failed'
+        ) {
+          return NextResponse.json(
+            { error: 'Failed to resolve the WhatsApp channel. Try again.' },
+            { status: 500 }
+          );
+        } else if (e instanceof ChannelNotConfiguredError) {
+          return NextResponse.json({ error: e.message }, { status: 400 });
+        } else {
+          throw e;
+        }
       }
     } else {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single();
-      if (configError || !config) {
-        return NextResponse.json(
-          {
-            error:
-              'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
-          },
-          { status: 400 }
-        );
+      let config: WhatsappConfigRow;
+      try {
+        ({ config } = await resolveCloudConfig(supabase, accountId, channelId));
+      } catch (e) {
+        if (e instanceof ChannelNotConfiguredError) {
+          return NextResponse.json(
+            {
+              error:
+                'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
+            },
+            { status: 400 }
+          );
+        }
+        throw e;
       }
       if (!config.waba_id) {
         return NextResponse.json(
