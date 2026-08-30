@@ -700,6 +700,13 @@ export interface SessionWindowExpiringTriggerConfig {
    * Integer, 15–1440; absent means the 240 (4h) default.
    */
   margin_minutes: number;
+  /**
+   * Whether to bypass `send-window.ts` (business hours) for this
+   * automation. Absent means `true` (ignore business hours) — see
+   * `DEFAULT_IGNORE_BUSINESS_HOURS` in window-trigger.ts for why the
+   * default flipped from the original SPEC 045 §5.6 item 9 decision.
+   */
+  ignore_business_hours?: boolean;
 }
 
 export type AutomationTriggerConfig =

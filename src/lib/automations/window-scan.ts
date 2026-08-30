@@ -58,7 +58,10 @@ import { shouldTrackSessionWindow } from '@/lib/channels/session-window';
 import type { ChannelType } from '@/lib/channels/types';
 import { supabaseAdmin } from './admin-client';
 import { runSingleAutomation } from './engine';
-import { resolveMarginMinutes } from './window-trigger';
+import {
+  resolveIgnoreBusinessHours,
+  resolveMarginMinutes,
+} from './window-trigger';
 
 /**
  * Teto de conversas que UMA automação processa por tick.
@@ -90,8 +93,8 @@ export interface SessionWindowScanResult {
   dispatched: number;
   /** Despachos que lançaram — a linha de claim registra `failed_at`. */
   failed: number;
-  /** Preenchido quando a varredura parou antes da fase B. */
-  skipped?: 'outside_send_window' | 'no_automations';
+  /** Preenchido quando a varredura parou antes da fase A. */
+  skipped?: 'no_automations';
 }
 
 function emptyResult(
@@ -115,26 +118,6 @@ export async function scanSessionWindows(
   now: Date = new Date()
 ): Promise<SessionWindowScanResult> {
   try {
-    // ── Guardrail 9: janela de horário (§5.6, item 9) ──────────────
-    //
-    // Um reengajamento às 04h é o mesmo dano de reputação que um
-    // broadcast às 23h, e o argumento da urgência ("a janela vai
-    // fechar") é fraco: se a única hora possível é de madrugada, o
-    // custo do disparo excede o benefício de manter aberta uma conversa
-    // que o cliente abandonou.
-    //
-    // Diferente do broadcast, aqui NÃO existe "adiar" — a janela de 24h
-    // não espera. Perder o reengajamento é a consequência assumida.
-    //
-    // Fuso: `isWithinSendWindow` exige um IANA timezone e o broadcast o
-    // tira de quem agendou (`broadcasts.scheduled_timezone`). Aqui não
-    // há "quem agendou", então vale o DEFAULT_TIME_ZONE — coerente com
-    // um CRM localizado para o Brasil. O lugar certo para configurar por
-    // conta, se um dia for preciso, é `whatsapp_config`.
-    if (!isWithinSendWindow(now, DEFAULT_TIME_ZONE)) {
-      return emptyResult('outside_send_window');
-    }
-
     const db = supabaseAdmin();
 
     // ── Fase A: quem quer este trigger (uma query por tick) ─────────
@@ -191,6 +174,22 @@ async function scanForAutomation(
   now: Date,
   result: SessionWindowScanResult
 ): Promise<void> {
+  // ── Guardrail 9: janela de horário (§5.6, item 9) ──────────────────
+  //
+  // Por automação, não mais global: o default (`resolveIgnoreBusinessHours`
+  // → `true`) IGNORA o horário comercial, porque este trigger só reage
+  // numa conversa que o cliente já abriu — não é um disparo frio — e a
+  // janela de 24h não espera (não existe "adiar" aqui). Uma conta que
+  // prefira a política antiga desliga por automação (`ignore_business_hours:
+  // false` no `trigger_config`), e só então `isWithinSendWindow` volta a
+  // valer.
+  if (
+    !resolveIgnoreBusinessHours(automation.trigger_config) &&
+    !isWithinSendWindow(now, DEFAULT_TIME_ZONE)
+  ) {
+    return;
+  }
+
   const db = supabaseAdmin();
   const marginMinutes = resolveMarginMinutes(automation.trigger_config);
 
@@ -210,12 +209,14 @@ async function scanForAutomation(
   // `status = 'open'` precisa aparecer literalmente para o índice
   // PARCIAL ser aproveitado.
   //
-  // Guardrail 8 (§5.6): `assigned_agent_id IS NULL`. Reengajar
-  // automaticamente uma conversa que já tem dono humano interfere no
-  // atendimento de alguém que pode estar prestes a responder. Pular é
-  // defensável e não pular também — o que não é defensável é não
-  // decidir, porque o comportamento emergente ("reengaja todo mundo")
-  // é o mais intrusivo dos dois.
+  // Guardrail 8 (§5.6) REMOVIDO de propósito: a conversa com dono humano
+  // não é mais pulada. Uma janela de 24h fechando é mais urgente que a
+  // cortesia de não falar por cima do agente — o cliente perde o direito
+  // de resposta gratuita se ninguém mandar nada a tempo, atribuída ou
+  // não. O guardrail 6 abaixo (não reengajar com a bola do NOSSO lado)
+  // continua de pé e cobre o caso comum: se o agente atribuído já
+  // respondeu por último, esta automação nem chega a considerar a
+  // conversa.
   //
   // Ordena pela âncora mais antiga: quando o LIMIT trunca, quem está
   // mais perto de fechar é quem passa.
@@ -224,7 +225,6 @@ async function scanForAutomation(
     .select('id, contact_id, last_customer_message_at, last_message_at')
     .eq('account_id', automation.account_id)
     .eq('status', 'open')
-    .is('assigned_agent_id', null)
     .gt('last_customer_message_at', closesNow.toISOString())
     .lte('last_customer_message_at', closesWithinMargin.toISOString())
     .order('last_customer_message_at', { ascending: true })

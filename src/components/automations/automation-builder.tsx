@@ -65,6 +65,7 @@ import {
   MARGIN_WARN_ABOVE_MINUTES,
   MAX_MARGIN_MINUTES,
   MIN_MARGIN_MINUTES,
+  resolveIgnoreBusinessHours,
   resolveMarginMinutes,
 } from '@/lib/automations/window-trigger';
 import { eligibleFallbackChannels } from '@/lib/automations/window-fallback';
@@ -1241,6 +1242,21 @@ function SessionWindowMarginConfig({
           {t('sessionWindowCoverageWarn')}
         </p>
       )}
+      <div className="mt-3 flex items-center gap-2">
+        <Switch
+          checked={resolveIgnoreBusinessHours(config)}
+          onCheckedChange={(v) =>
+            onChange({ ...config, ignore_business_hours: !!v })
+          }
+          aria-label={t('ignoreBusinessHoursLabel')}
+        />
+        <label className="text-foreground text-xs">
+          {t('ignoreBusinessHoursLabel')}
+        </label>
+      </div>
+      <p className="text-muted-foreground mt-1 text-[11px]">
+        {t('ignoreBusinessHoursHint')}
+      </p>
     </div>
   );
 }

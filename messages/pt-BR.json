@@ -2102,9 +2102,11 @@
         "whenSubject": "quando {subject}"
       },
       "marginLabel": "Horas antes de a janela fechar",
-      "marginHint": "Dispara uma vez por conversa, {minutes} minutos antes de a janela de 24 horas expirar. Só reengaja conversas que já estão esperando o cliente, e nunca fora do horário comercial.",
+      "marginHint": "Dispara uma vez por conversa, {minutes} minutos antes de a janela de 24 horas expirar. Só reengaja conversas que já estão esperando o cliente.",
       "marginWarn": "Acima de 12 horas isso reengaja quem acabou de falar com você.",
       "sessionWindowCoverageWarn": "Este gatilho nunca dispara — nenhum canal desta conta tem janela de 24h para expirar.",
+      "ignoreBusinessHoursLabel": "Enviar a qualquer hora, ignorando o horário comercial",
+      "ignoreBusinessHoursHint": "Ligado por padrão: a janela de 24h não espera, então este gatilho envia mesmo à noite ou no fim de semana. Desligue para só enviar em horário comercial (09:00–20:00, dias úteis) — algumas conversas podem então perder a janela.",
       "channelCapabilityNoneWarn": "Nenhum canal desta conta tem suporte a isto — o passo vai falhar em toda execução.",
       "channelCapabilitySomeWarn": "Só funciona em canais com suporte a isto — o passo vai falhar, com o motivo registrado, se a automação rodar numa conversa de um canal sem suporte.",
       "active": "Ativo",

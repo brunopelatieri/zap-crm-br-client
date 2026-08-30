@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_IGNORE_BUSINESS_HOURS,
   DEFAULT_MARGIN_MINUTES,
   MAX_MARGIN_MINUTES,
   MIN_MARGIN_MINUTES,
   isValidMarginMinutes,
+  resolveIgnoreBusinessHours,
   resolveMarginMinutes,
 } from './window-trigger';
 
@@ -58,5 +60,25 @@ describe('resolveMarginMinutes', () => {
 
   it('passes valid values through untouched', () => {
     expect(resolveMarginMinutes({ margin_minutes: 120 })).toBe(120);
+  });
+});
+
+describe('resolveIgnoreBusinessHours', () => {
+  it('defaults to true (ignore business hours) when absent or unusable', () => {
+    expect(DEFAULT_IGNORE_BUSINESS_HOURS).toBe(true);
+    expect(resolveIgnoreBusinessHours({})).toBe(true);
+    expect(resolveIgnoreBusinessHours(null)).toBe(true);
+    expect(resolveIgnoreBusinessHours({ ignore_business_hours: 'yes' })).toBe(
+      true
+    );
+  });
+
+  it('respects an explicit boolean either way', () => {
+    expect(resolveIgnoreBusinessHours({ ignore_business_hours: true })).toBe(
+      true
+    );
+    expect(resolveIgnoreBusinessHours({ ignore_business_hours: false })).toBe(
+      false
+    );
   });
 });

@@ -2102,9 +2102,11 @@
         "whenSubject": "when {subject}"
       },
       "marginLabel": "Hours before the window closes",
-      "marginHint": "Fires once per conversation, {minutes} minutes before its 24-hour window expires. Only conversations already waiting on the customer are re-engaged, and never outside business hours.",
+      "marginHint": "Fires once per conversation, {minutes} minutes before its 24-hour window expires. Only conversations already waiting on the customer are re-engaged.",
       "marginWarn": "Above 12 hours this re-engages people who have only just messaged you.",
       "sessionWindowCoverageWarn": "This trigger never fires — no channel in this account has a 24h session window to expire.",
+      "ignoreBusinessHoursLabel": "Send at any time, ignoring business hours",
+      "ignoreBusinessHoursHint": "On by default: the 24h window doesn't wait, so this trigger sends even at night or on weekends. Turn it off to only send during business hours (09:00–20:00, weekdays) — some conversations may then miss their window.",
       "channelCapabilityNoneWarn": "No channel in this account supports this — the step will fail on every run.",
       "channelCapabilitySomeWarn": "Only works on channels that support it — the step will fail with the reason logged if this automation runs on a conversation from a channel without it.",
       "active": "Active",

@@ -166,14 +166,21 @@ function anchorWithRemaining(minutes: number): string {
   return new Date(NOW.getTime() - 24 * HOUR + minutes * 60_000).toISOString();
 }
 
-function automation(id: string, marginMinutes = 240) {
+function automation(
+  id: string,
+  marginMinutes = 240,
+  triggerConfigOverrides: Record<string, unknown> = {}
+) {
   return {
     id,
     account_id: ACCOUNT,
     user_id: 'u1',
     name: `reengage ${id}`,
     trigger_type: 'session_window_expiring',
-    trigger_config: { margin_minutes: marginMinutes },
+    trigger_config: {
+      margin_minutes: marginMinutes,
+      ...triggerConfigOverrides,
+    },
     is_active: true,
   };
 }
@@ -433,17 +440,23 @@ describe('guardrails (SPEC 045 §5.6)', () => {
     expect(runSingleAutomation).toHaveBeenCalledTimes(1);
   });
 
-  it('item 8: only unassigned conversations are scanned', async () => {
+  it('item 8 (removido): conversas atribuídas a um agente TAMBÉM são reengajadas', async () => {
+    // Decisão revertida a pedido do produto: a janela de 24h fechando é
+    // mais urgente que a cortesia de não falar por cima do agente. A
+    // fase B não filtra mais por `assigned_agent_id`.
     h.state.automations = [automation('a1')];
-    h.state.conversations = [conversation('conv1', 'c1')];
+    h.state.conversations = [
+      conversation('conv1', 'c1', { assigned_agent_id: 'agent-1' }),
+    ];
 
     await scanSessionWindows(NOW);
 
-    expect(h.state.conversationFilters).toContainEqual([
+    expect(h.state.conversationFilters).not.toContainEqual([
       'is',
       'assigned_agent_id',
       null,
     ]);
+    expect(runSingleAutomation).toHaveBeenCalledTimes(1);
   });
 
   it('fails CLOSED when the consent lookup errors', async () => {
@@ -471,20 +484,53 @@ describe('guardrails (SPEC 045 §5.6)', () => {
     expect(result.claimed).toBe(0);
   });
 
-  it('item 9: nothing runs outside the send window', async () => {
+  it('item 9 (default invertido): por padrão dispara fora do horário comercial', async () => {
+    // `ignore_business_hours` ausente → default `true` (SPEC 045 §5.6
+    // item 9, revertido a pedido do produto): a janela de 24h não
+    // espera, e esperar o próximo horário comercial teria o mesmo
+    // efeito de nunca mandar.
     h.state.automations = [automation('a1')];
     h.state.conversations = [conversation('conv1', 'c1')];
 
     // 03:00 em São Paulo, quarta-feira.
     const night = await scanSessionWindows(new Date('2026-08-12T06:00:00Z'));
-    expect(night.skipped).toBe('outside_send_window');
-    // Nem a fase A roda: a varredura sai antes de qualquer query.
-    expect(h.state.fromCalls).toHaveLength(0);
+    expect(night.dispatched).toBe(1);
 
-    // Sábado ao meio-dia — fora pelo dia da semana, não pela hora.
+    vi.mocked(runSingleAutomation).mockClear();
+    h.state.existingClaims = new Set();
+
+    // Sábado ao meio-dia.
     const weekend = await scanSessionWindows(new Date('2026-08-15T15:00:00Z'));
-    expect(weekend.skipped).toBe('outside_send_window');
+    expect(weekend.dispatched).toBe(1);
+  });
+
+  it('item 9: com ignore_business_hours=false, a automação volta a respeitar o horário comercial', async () => {
+    h.state.automations = [
+      automation('a1', 240, { ignore_business_hours: false }),
+    ];
+    h.state.conversations = [conversation('conv1', 'c1')];
+
+    // 03:00 em São Paulo, quarta-feira — automação ainda é encontrada na
+    // fase A, mas a fase B desta automação é pulada.
+    const night = await scanSessionWindows(new Date('2026-08-12T06:00:00Z'));
+    expect(night.automations).toBe(1);
+    expect(night.dispatched).toBe(0);
     expect(runSingleAutomation).not.toHaveBeenCalled();
+  });
+
+  it('item 9: uma automação com ignore_business_hours=false não bloqueia outra automação do mesmo tick', async () => {
+    h.state.automations = [
+      automation('a1', 240, { ignore_business_hours: false }),
+      automation('a2'),
+    ];
+    h.state.conversations = [conversation('conv1', 'c1')];
+
+    await scanSessionWindows(new Date('2026-08-12T06:00:00Z'));
+
+    expect(runSingleAutomation).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runSingleAutomation).mock.calls[0][0]).toMatchObject({
+      id: 'a2',
+    });
   });
 });
 

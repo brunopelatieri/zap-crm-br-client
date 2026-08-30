@@ -77,3 +77,21 @@ export function resolveMarginMinutes(triggerConfig: unknown): number {
     Math.max(MIN_MARGIN_MINUTES, Math.round(raw))
   );
 }
+
+/**
+ * Default: ignora o horário comercial. Diferente de um broadcast (que
+ * fala primeiro), este trigger só reage numa conversa que o CLIENTE já
+ * abriu — a mensagem que ele lê às 22h é resposta a algo que ele mesmo
+ * escreveu, não uma abordagem fria. E como a janela de 24h "não espera"
+ * (não existe adiar, ver window-scan.ts), esperar o próximo horário
+ * comercial teria o mesmo efeito de nunca mandar. Uma conta que prefira
+ * respeitar o horário mesmo assim pode desligar isto por automação.
+ */
+export const DEFAULT_IGNORE_BUSINESS_HOURS = true;
+
+/** Se o horário comercial (`send-window.ts`) deve ser ignorado para esta automação. */
+export function resolveIgnoreBusinessHours(triggerConfig: unknown): boolean {
+  const raw = (triggerConfig as { ignore_business_hours?: unknown } | null)
+    ?.ignore_business_hours;
+  return typeof raw === 'boolean' ? raw : DEFAULT_IGNORE_BUSINESS_HOURS;
+}
