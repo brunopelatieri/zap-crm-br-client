@@ -34,17 +34,28 @@ export function PlanPanel() {
   const [cancelBusy, setCancelBusy] = useState(false);
   const canRequest = accountRole !== null && canEditSettings(accountRole);
 
-  if (loading) {
-    return (
-      <div className="text-muted-foreground flex items-center gap-2 py-10 text-sm">
-        <Loader2 className="size-4 animate-spin" />
-        {t('loading')}
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return <p className="text-destructive py-10 text-sm">{t('loadFailed')}</p>;
+  // Achado de code review: gatear em `!data` (não em `loading`/`error`
+  // isolados) é o que faz esta tela sobreviver a um refetch que falha
+  // (ex.: hiccup de rede logo depois de abrir o diálogo de ciclo).
+  // Uma vez que `data` existe (a carga inicial já teve sucesso alguma
+  // vez), a árvore inteira — incluindo o `PlanCatalog` e o estado local
+  // do diálogo de troca de plano — nunca mais é desmontada por causa de
+  // `loading`/`error` reaparecerem num refetch subsequente.
+  if (!data) {
+    if (loading) {
+      return (
+        <div className="text-muted-foreground flex items-center gap-2 py-10 text-sm">
+          <Loader2 className="size-4 animate-spin" />
+          {t('loading')}
+        </div>
+      );
+    }
+    if (error) {
+      return (
+        <p className="text-destructive py-10 text-sm">{t('loadFailed')}</p>
+      );
+    }
+    return null;
   }
 
   const requestedPlan = data.pendingRequest

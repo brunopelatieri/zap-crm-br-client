@@ -8,6 +8,7 @@ import {
   effectiveMonthlyCents,
   graceEnd,
   isExpired,
+  resolveExpiryOnPlanChange,
   yearlyPriceCents,
   yearlySavingsCents,
 } from './billing';
@@ -187,5 +188,78 @@ describe('describeCycleChange', () => {
     });
     expect(result.hasOverageWarning).toBe(true);
     expect(result.overageKeys).toEqual(['contacts']);
+  });
+});
+
+// SPEC 062 §3.3.1 (decisão B, 2026-08-30) — troca de plano pelo console.
+describe('resolveExpiryOnPlanChange', () => {
+  const now = new Date('2026-08-30T12:00:00Z');
+
+  it('HERDA quando a conta já vencia e o plano novo também vence', () => {
+    const result = resolveExpiryOnPlanChange(
+      new Date('2026-09-01T00:00:00Z'),
+      makePlan({ billingPeriod: 'monthly', priceCents: 29900 }),
+      now
+    );
+    expect(result).toEqual({ kind: 'inherit' });
+  });
+
+  it('aceita `current_period_end` como string ISO (o formato que vem do banco)', () => {
+    const result = resolveExpiryOnPlanChange(
+      '2026-09-01T00:00:00.000Z',
+      makePlan({ billingPeriod: 'monthly', priceCents: 29900 }),
+      now
+    );
+    expect(result).toEqual({ kind: 'inherit' });
+  });
+
+  it('CALCULA um vencimento novo a partir de `now` quando a conta nunca venceu', () => {
+    const plan = makePlan({ billingPeriod: 'monthly', priceCents: 9900 });
+    const result = resolveExpiryOnPlanChange(null, plan, now);
+    expect(result.kind).toBe('started');
+    if (result.kind === 'started') {
+      expect(result.startedAt).toEqual(now);
+      expect(result.billingCycle).toBe('monthly');
+      // +1 mês a partir de `now` — mesma regra de computePeriodEnd.
+      expect(result.currentPeriodEnd).toEqual(
+        computePeriodEnd(now, 'monthly', plan)
+      );
+    }
+  });
+
+  it('sempre usa ciclo mensal ao calcular do zero — nunca lê um billing_cycle órfão do chamador', () => {
+    // O console nunca oferece escolha de ciclo (isso é autosserviço) —
+    // a assinatura da função nem aceita um `billingCycle` de entrada,
+    // então não há como um valor 'yearly' residual de uma assinatura
+    // anterior vazar para o cálculo. Este teste documenta essa garantia
+    // por construção: a data resultante é sempre ~1 mês, nunca ~1 ano.
+    const plan = makePlan({ billingPeriod: 'monthly', priceCents: 9900 });
+    const result = resolveExpiryOnPlanChange(null, plan, now);
+    expect(result.kind).toBe('started');
+    if (result.kind === 'started') {
+      const deltaDays =
+        (result.currentPeriodEnd.getTime() - now.getTime()) /
+        (24 * 60 * 60 * 1000);
+      expect(deltaDays).toBeGreaterThan(25);
+      expect(deltaDays).toBeLessThan(35);
+    }
+  });
+
+  it('LIMPA quando o plano novo não vence, mesmo que a conta já vencesse', () => {
+    const result = resolveExpiryOnPlanChange(
+      new Date('2026-09-01T00:00:00Z'),
+      makePlan({ billingPeriod: 'none', priceCents: 0 }),
+      now
+    );
+    expect(result).toEqual({ kind: 'cleared' });
+  });
+
+  it('LIMPA quando o plano novo é Grátis (billing_period vence, mas preço é zero)', () => {
+    const result = resolveExpiryOnPlanChange(
+      new Date('2026-09-01T00:00:00Z'),
+      makePlan({ billingPeriod: 'monthly', priceCents: 0 }),
+      now
+    );
+    expect(result).toEqual({ kind: 'cleared' });
   });
 });

@@ -15,12 +15,20 @@
  * INSERT account_plan_events") é exatamente a duplicação que este
  * módulo existe para eliminar. Ver `send.ts` (SPEC 048 F2) para o
  * mesmo raciocínio aplicado a "mandar uma mensagem".
+ *
+ * Vencimento (SPEC 062 §3.3.1, decisão B, 2026-08-30): trocar de plano por
+ * aqui **herda** o `current_period_end` já existente — nunca reseta um
+ * ciclo que já estava correndo. A regra completa (herda / calcula do
+ * zero / limpa) é uma função pura em `@/lib/plans/billing.ts`
+ * (`resolveExpiryOnPlanChange`) — este módulo só traduz o resultado
+ * dela em colunas do `update`, nunca reimplementa a lógica.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { resolveExpiryOnPlanChange } from '@/lib/plans/billing';
 import { validateOverrides } from '@/lib/plans/catalog';
-import type { AccountPlanStatus } from '@/lib/plans/types';
+import type { AccountPlanStatus, BillingPeriod } from '@/lib/plans/types';
 
 export interface ChangeAccountPlanInput {
   accountId: string;
@@ -87,9 +95,13 @@ export async function changeAccountPlan(
     }
   }
 
+  const now = new Date();
+
   const { data: current, error: currentErr } = await db
     .from('account_plans')
-    .select('plan_id, status, limit_overrides, plans:plan_id (code)')
+    .select(
+      'plan_id, status, limit_overrides, current_period_end, plans:plan_id (code)'
+    )
     .eq('account_id', input.accountId)
     .maybeSingle();
   if (currentErr || !current) {
@@ -100,10 +112,12 @@ export async function changeAccountPlan(
 
   let nextPlanId = current.plan_id;
   let nextPlanCode = currentPlanCode ?? null;
+  let nextPlanBillingPeriod: BillingPeriod | null = null;
+  let nextPlanPriceCents: number | null = null;
   if (input.planCode !== undefined && input.planCode !== currentPlanCode) {
     const { data: plan } = await db
       .from('plans')
-      .select('id, code')
+      .select('id, code, billing_period, price_cents')
       .eq('code', input.planCode)
       .maybeSingle();
     if (!plan) {
@@ -111,19 +125,58 @@ export async function changeAccountPlan(
     }
     nextPlanId = plan.id;
     nextPlanCode = plan.code;
+    nextPlanBillingPeriod = plan.billing_period;
+    nextPlanPriceCents = plan.price_cents;
   }
 
   const nextStatus = input.status ?? (current.status as AccountPlanStatus);
+  const planChanged = nextPlanId !== current.plan_id;
 
   const update: Record<string, unknown> = {
     plan_id: nextPlanId,
     status: nextStatus,
     updated_by: input.actor,
-    updated_at: new Date().toISOString(),
+    updated_at: now.toISOString(),
   };
   if (input.limitOverrides !== undefined)
     update.limit_overrides = input.limitOverrides;
   if (input.note !== undefined) update.note = input.note;
+
+  // SPEC 062 §3.3.1 (decisão B): ver o docstring do módulo e de
+  // `resolveExpiryOnPlanChange` para o raciocínio completo.
+  if (planChanged) {
+    const expiry = resolveExpiryOnPlanChange(
+      current.current_period_end,
+      {
+        billingPeriod: nextPlanBillingPeriod as BillingPeriod,
+        priceCents: nextPlanPriceCents ?? 0,
+      },
+      now
+    );
+    if (expiry.kind === 'cleared') {
+      update.current_period_end = null;
+      update.cancel_at_period_end = false;
+      update.canceled_at = null;
+      update.grace_until = null;
+    } else if (expiry.kind === 'started') {
+      update.current_period_end = expiry.currentPeriodEnd.toISOString();
+      update.started_at = expiry.startedAt.toISOString();
+      update.billing_cycle = expiry.billingCycle;
+    }
+    // expiry.kind === 'inherit': nada a gravar.
+
+    // Achado de code review: um `status` que vira 'canceled' na MESMA
+    // chamada que troca o plano não pode conviver com um vencimento
+    // (herdado ou recém-calculado) sem `canceled_at` — senão a conta
+    // aparenta uma renovação futura "ativa" que já foi cancelada aqui.
+    // Cobre os dois sub-casos de `expiry.kind` que deixam a conta com
+    // vencimento (`'inherit'` e `'started'`) — só `'cleared'` já não
+    // tem vencimento nenhum para este problema existir.
+    if (nextStatus === 'canceled' && expiry.kind !== 'cleared') {
+      update.canceled_at = now.toISOString();
+      update.cancel_at_period_end = false;
+    }
+  }
 
   const { data: updated, error: updateErr } = await db
     .from('account_plans')

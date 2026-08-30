@@ -147,6 +147,67 @@ export interface CycleChangeDescription {
   overageKeys: string[];
 }
 
+export type ExpiryOnPlanChange =
+  | { kind: 'inherit' }
+  | { kind: 'cleared' }
+  | {
+      kind: 'started';
+      currentPeriodEnd: Date;
+      startedAt: Date;
+      billingCycle: BillingCycle;
+    };
+
+/**
+ * SPEC 062 §3.3.1 (decisão B, 2026-08-30) — o que muda em ciclo/
+ * vencimento quando o CONSOLE troca o plano de uma conta. Diferente do
+ * autosserviço do cliente (`applyPlanChange`, que sempre recomeça o
+ * período, "sem pró-rata"), o console é neutro por padrão: nunca
+ * reseta um ciclo que já está correndo.
+ *
+ * Puro — `changeAccountPlan` (`@/lib/platform/plan-actions.ts`) só
+ * traduz o `kind` do resultado nas colunas do `update`. Chama
+ * `computePeriodEnd` incondicionalmente e ramifica sobre o resultado
+ * dela (em vez de reimplementar em paralelo a regra de "o que vence")
+ * — a MESMA fonte de verdade que decide `billingPeriod`/`priceCents`
+ * decide os dois casos abaixo.
+ *
+ * - `'inherit'`: a conta já vencia e o plano novo também vence — o
+ *   chamador não grava nada de ciclo/vencimento, a linha continua
+ *   exatamente como estava.
+ * - `'cleared'`: o plano novo não vence (Grátis, `unlimited`, sob
+ *   medida sem ciclo) — o chamador limpa vencimento, cancelamento
+ *   agendado e carência.
+ * - `'started'`: a conta nunca teve vencimento — um novo é calculado a
+ *   partir de `now` (a data desta troca, nunca retroativo). O console
+ *   nunca oferece escolha de ciclo (isso é autosserviço) — por isso
+ *   `billingCycle` é sempre `'monthly'` aqui, **inclusive quando a
+ *   conta já tinha um `billing_cycle` gravado**: esse valor pode ser
+ *   resíduo de uma assinatura anterior (ex.: anual, cancelada) e nunca
+ *   deveria ser usado para calcular um vencimento novo que não tem
+ *   nenhuma relação com aquele ciclo antigo.
+ */
+export function resolveExpiryOnPlanChange(
+  currentPeriodEnd: Date | string | null,
+  nextPlan: Pick<Plan, 'billingPeriod' | 'priceCents'>,
+  now: Date
+): ExpiryOnPlanChange {
+  const cycle: BillingCycle = 'monthly';
+  const periodEnd = computePeriodEnd(now, cycle, nextPlan);
+
+  if (periodEnd === null) {
+    return { kind: 'cleared' };
+  }
+  if (currentPeriodEnd !== null) {
+    return { kind: 'inherit' };
+  }
+  return {
+    kind: 'started',
+    currentPeriodEnd: periodEnd,
+    startedAt: now,
+    billingCycle: cycle,
+  };
+}
+
 /**
  * O texto do modal de troca de plano (§5.1): novo vencimento a partir
  * de hoje, e o alerta de overage quando o plano destino tem quota

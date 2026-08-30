@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AccountPlan, Plan, PlanUsage } from '@/lib/plans/types';
 
 export type PlanCatalogEntry = Pick<
@@ -57,12 +57,21 @@ export function useAccountPlan(): UseAccountPlanResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  // Só a carga INICIAL ativa o spinner de tela cheia. Um `refetch()`
+  // (troca de plano, cancelar/retomar) reusa este mesmo efeito — sem
+  // esta guarda, `loading` voltava a `true` a cada refetch e o
+  // consumidor (`PlanPanel`) substituía a árvore inteira por um
+  // spinner, desmontando `PlanCatalog` e derrubando o estado local do
+  // diálogo de ciclo (`cyclePlan`) antes do usuário conseguir
+  // confirmar a troca — a causa do "clica em Escolher este plano e não
+  // acontece nada" no autosserviço de plano pago.
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      setLoading(true);
+      if (!hasLoadedRef.current) setLoading(true);
       setError(null);
       try {
         const res = await fetch('/api/account/plan', { cache: 'no-store' });
@@ -77,7 +86,10 @@ export function useAccountPlan(): UseAccountPlanResult {
           setError(err instanceof Error ? err.message : 'Unknown error');
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          hasLoadedRef.current = true;
+          setLoading(false);
+        }
       }
     })();
 

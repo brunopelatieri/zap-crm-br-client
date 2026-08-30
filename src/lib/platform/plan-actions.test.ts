@@ -221,4 +221,291 @@ describe('changeAccountPlan', () => {
     });
     expect(result).toEqual({ ok: false, error: 'update_failed' });
   });
+
+  // SPEC 062 §3.3 (decisão B, 2026-08-30): trocar de plano pelo console
+  // participa do vencimento sem nunca resetar um ciclo já em curso.
+  describe('vencimento na troca de plano (SPEC 062 §3.3, decisão B)', () => {
+    it('conta que já vencia HERDA o vencimento ao trocar para outro plano pago', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: {
+            ...CURRENT_ROW,
+            started_at: '2026-07-01T00:00:00.000Z',
+            billing_cycle: 'monthly',
+            current_period_end: '2026-08-01T00:00:00.000Z',
+          },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-new',
+            code: 'profissional',
+            billing_period: 'monthly',
+            price_cents: 29900,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'profissional',
+        actor: 'console:owner@x.com',
+      });
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      expect(payload).not.toHaveProperty('current_period_end');
+      expect(payload).not.toHaveProperty('started_at');
+      expect(payload).not.toHaveProperty('billing_cycle');
+    });
+
+    it('conta que nunca venceu calcula um vencimento novo a partir de hoje', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: {
+            ...CURRENT_ROW,
+            started_at: '2026-08-01T00:00:00.000Z',
+            billing_cycle: 'monthly',
+            current_period_end: null,
+          },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-new',
+            code: 'essential',
+            billing_period: 'monthly',
+            price_cents: 9900,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const before = Date.now();
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'essential',
+        actor: 'console:owner@x.com',
+      });
+      const after = Date.now();
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      expect(payload.started_at).toBeDefined();
+      const startedAtMs = new Date(payload.started_at as string).getTime();
+      expect(startedAtMs).toBeGreaterThanOrEqual(before);
+      expect(startedAtMs).toBeLessThanOrEqual(after);
+      expect(payload.current_period_end).toBeDefined();
+      const periodEndMs = new Date(
+        payload.current_period_end as string
+      ).getTime();
+      // +1 mês a partir de agora — checa que não ficou nulo e é
+      // estritamente posterior a `started_at` (a data exata de
+      // "1 mês" é responsabilidade de computePeriodEnd/billing.test.ts).
+      expect(periodEndMs).toBeGreaterThan(startedAtMs);
+      expect(payload.billing_cycle).toBe('monthly');
+    });
+
+    // Achado de code review: `cycle` era lido de `current.billing_cycle`
+    // — um valor que pode ser resíduo de uma assinatura anterior
+    // (ex.: anual, cancelada) e nunca deveria influenciar o cálculo de
+    // um vencimento novo. O console nunca oferece escolha de ciclo, então
+    // este teste fixa: mesmo com `billing_cycle: 'yearly'` já gravado na
+    // conta, o vencimento calculado aqui é sempre mensal (~30 dias),
+    // nunca anual (~365 dias) — e a coluna é regravada para 'monthly'.
+    it('ignora um billing_cycle órfão da conta ao calcular o vencimento do zero', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: {
+            ...CURRENT_ROW,
+            started_at: '2026-01-01T00:00:00.000Z',
+            billing_cycle: 'yearly', // resíduo de uma assinatura anterior
+            current_period_end: null,
+          },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-new',
+            code: 'essential',
+            billing_period: 'monthly',
+            price_cents: 9900,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const now = Date.now();
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'essential',
+        actor: 'console:owner@x.com',
+      });
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      expect(payload.billing_cycle).toBe('monthly');
+      const deltaDays =
+        (new Date(payload.current_period_end as string).getTime() - now) /
+        (24 * 60 * 60 * 1000);
+      expect(deltaDays).toBeGreaterThan(25);
+      expect(deltaDays).toBeLessThan(35);
+    });
+
+    // Achado de code review: trocar plano + status:'canceled' na MESMA
+    // chamada não pode deixar a conta com vencimento (herdado ou
+    // recém-calculado) sem `canceled_at` — senão ela aparenta uma
+    // renovação futura "ativa" que já foi cancelada aqui.
+    it('marca canceled_at quando status vira canceled na mesma troca (herdando vencimento)', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: {
+            ...CURRENT_ROW,
+            current_period_end: '2026-09-01T00:00:00.000Z',
+          },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-new',
+            code: 'profissional',
+            billing_period: 'monthly',
+            price_cents: 29900,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'profissional',
+        status: 'canceled',
+        actor: 'console:owner@x.com',
+      });
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      // Herdou o vencimento (nada gravado em current_period_end), mas
+      // canceled_at precisa existir mesmo assim.
+      expect(payload).not.toHaveProperty('current_period_end');
+      expect(payload.canceled_at).toBeDefined();
+      expect(payload.cancel_at_period_end).toBe(false);
+    });
+
+    it('marca canceled_at quando status vira canceled na mesma troca (calculando vencimento do zero)', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: { ...CURRENT_ROW, current_period_end: null },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-new',
+            code: 'essential',
+            billing_period: 'monthly',
+            price_cents: 9900,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'essential',
+        status: 'canceled',
+        actor: 'console:owner@x.com',
+      });
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      expect(payload.current_period_end).toBeDefined();
+      expect(payload.canceled_at).toBeDefined();
+      expect(payload.cancel_at_period_end).toBe(false);
+    });
+
+    it('NÃO marca canceled_at quando o plano novo não vence (já limpo por completo)', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: {
+            ...CURRENT_ROW,
+            current_period_end: '2026-09-01T00:00:00.000Z',
+          },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-unlimited',
+            code: 'unlimited',
+            billing_period: 'none',
+            price_cents: 0,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'unlimited',
+        status: 'canceled',
+        actor: 'console:owner@x.com',
+      });
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      // O branch 'cleared' já grava canceled_at: null — não deve virar
+      // uma data só porque status também é 'canceled' neste submit.
+      expect(payload.canceled_at).toBeNull();
+    });
+
+    it('conta que já vencia PERDE o vencimento ao trocar para um plano que não vence', async () => {
+      const { client, ops } = makeDb({
+        'account_plans.select': {
+          data: {
+            ...CURRENT_ROW,
+            started_at: '2026-07-01T00:00:00.000Z',
+            billing_cycle: 'monthly',
+            current_period_end: '2026-08-01T00:00:00.000Z',
+          },
+          error: null,
+        },
+        'plans.select': {
+          data: {
+            id: 'plan-unlimited',
+            code: 'unlimited',
+            billing_period: 'none',
+            price_cents: 0,
+          },
+          error: null,
+        },
+        'account_plans.update': { data: UPDATED_ROW, error: null },
+      });
+      const result = await changeAccountPlan(client, {
+        accountId: 'acct-1',
+        planCode: 'unlimited',
+        actor: 'console:owner@x.com',
+      });
+      expect(result.ok).toBe(true);
+      const updateOp = ops.find(
+        (o) => o.table === 'account_plans' && o.verb === 'update'
+      );
+      const payload = updateOp?.payload as Record<string, unknown>;
+      expect(payload.current_period_end).toBeNull();
+      expect(payload.cancel_at_period_end).toBe(false);
+      expect(payload.canceled_at).toBeNull();
+      expect(payload.grace_until).toBeNull();
+    });
+  });
 });
