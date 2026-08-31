@@ -18,9 +18,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { AlertTriangle, Ban, Loader2 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { toast } from 'sonner';
 
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { createClient } from '@/lib/supabase/client';
 import {
   Table,
@@ -102,6 +103,7 @@ export function AudienceTriageTable({
 }: AudienceTriageTableProps) {
   const t = useTranslations('Broadcasts.audience.triage');
   const tTable = useTranslations('Broadcasts.audience.triage.table');
+  const dateFnsLocale = getDateFnsLocale(useLocale());
 
   const [rows, setRows] = useState<TriageRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -305,6 +307,7 @@ export function AudienceTriageTable({
                 {row.last_delivered_at
                   ? formatDistanceToNow(new Date(row.last_delivered_at), {
                       addSuffix: true,
+                      locale: dateFnsLocale,
                     })
                   : t('never')}
               </TableCell>

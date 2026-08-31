@@ -135,7 +135,6 @@ export const viewport: Viewport = {
   colorScheme: 'light dark',
 };
 
-
 // Inline boot script — runs before React hydrates so the user's
 // chosen accent (data-theme) AND mode (data-mode) are on the <html>
 // element before first paint. Without this every page load flashes

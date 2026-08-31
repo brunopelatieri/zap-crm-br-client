@@ -349,6 +349,7 @@
     "responseTimeChart": {
       "title": "Tempo médio de primeira resposta",
       "description": "Minutos até responder a primeira mensagem não respondida do cliente, por dia da semana",
+      "avgMinutesLabel": "Média (min)",
       "target": "meta de {minutes}min",
       "thisWeek": "Esta semana:",
       "lastWeek": "Semana passada:",
@@ -2505,6 +2506,7 @@
       "autoReply": "Resposta automática",
       "drafts": "Rascunhos",
       "tokensPerDay": "Tokens por dia",
+      "tokensCategory": "Tokens",
       "byModel": "Por modelo",
       "modelUsage": "{tokens} tok · {calls} {calls, plural, =1 {chamada} other {chamadas}}",
       "truncatedNote": "Exibindo uma janela parcial — o uso é alto o suficiente para que apenas os registros mais recentes sejam resumidos aqui."

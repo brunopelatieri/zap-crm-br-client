@@ -22,7 +22,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format, formatDistanceToNow } from 'date-fns';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { useTagPicker } from '@/components/inbox/tag-picker/tag-picker-context';
 import { useDealPicker } from '@/components/inbox/deal-picker/deal-picker-context';
 import { canSendMessages } from '@/lib/auth/roles';
@@ -62,6 +63,8 @@ export function ContactSidebar({
   const tSidebar = useTranslations('Inbox.sidebar');
   const tThread = useTranslations('Inbox.messageThread');
   const tDealPicker = useTranslations('Inbox.dealPicker');
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
 
   const { accountId, accountRole } = useAuth();
   const { open: openTagPicker } = useTagPicker();
@@ -85,10 +88,13 @@ export function ContactSidebar({
   const [transferChannelId, setTransferChannelId] = useState<string | null>(
     null
   );
-  const openTransferDialog = useCallback((channelId: string) => {
-    setTransferChannelId(channelId);
-    setTransferDialogOpen(true);
-  }, []);
+  const openTransferDialog = useCallback(
+    (channelId: string) => {
+      setTransferChannelId(channelId);
+      setTransferDialogOpen(true);
+    },
+    [setTransferChannelId, setTransferDialogOpen]
+  );
 
   // As etiquetas vêm de `contact.tags`, já hidratado pela página via
   // CONVERSATION_SELECT (`contact_tags(tags(*))`). Manter uma cópia
@@ -373,7 +379,7 @@ export function ContactSidebar({
                               ` · ${tSidebar('siblingLastMessage', {
                                 time: formatDistanceToNow(
                                   new Date(sibling.lastMessageAt),
-                                  { addSuffix: true }
+                                  { addSuffix: true, locale: dateFnsLocale }
                                 ),
                               })}`}
                           </p>
@@ -547,7 +553,9 @@ export function ContactSidebar({
                       {note.note_text}
                     </p>
                     <p className="text-muted-foreground mt-1 text-[10px]">
-                      {format(new Date(note.created_at), 'MMM d, yyyy HH:mm')}
+                      {format(new Date(note.created_at), 'MMM d, yyyy HH:mm', {
+                        locale: dateFnsLocale,
+                      })}
                     </p>
                   </div>
                 ))}

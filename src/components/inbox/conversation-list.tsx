@@ -28,7 +28,8 @@ import {
   type AccountChannels,
 } from '@/lib/channels/use-account-channels';
 import { formatDistanceToNow } from 'date-fns';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { Input } from '@/components/ui/input';
 import { formatPhoneForDisplay } from '@/lib/phone/br';
 import {
@@ -574,6 +575,7 @@ function ConversationItem({
   onClaim,
   t,
 }: ConversationItemProps) {
+  const locale = useLocale();
   const contact = conversation.contact;
   const displayName =
     contact?.name ||
@@ -634,6 +636,7 @@ function ConversationItem({
   const timeAgo = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
         addSuffix: false,
+        locale: getDateFnsLocale(locale),
       })
     : '';
 

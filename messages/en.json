@@ -349,6 +349,7 @@
     "responseTimeChart": {
       "title": "Average First Response Time",
       "description": "Minutes to reply to a customer's first unreplied message, by weekday",
+      "avgMinutesLabel": "Avg minutes",
       "target": "target {minutes}m",
       "thisWeek": "This week:",
       "lastWeek": "Last week:",
@@ -2505,6 +2506,7 @@
       "autoReply": "Auto-reply",
       "drafts": "Drafts",
       "tokensPerDay": "Tokens per day",
+      "tokensCategory": "Tokens",
       "byModel": "By model",
       "modelUsage": "{tokens} tok · {calls} {calls, plural, =1 {call} other {calls}}",
       "truncatedNote": "Showing a partial window — usage is high enough that only the most recent records are summarized here."

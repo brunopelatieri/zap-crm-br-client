@@ -689,13 +689,22 @@ const BarChart = React.forwardRef<HTMLDivElement, BarChartProps>(
             ) : null}
             <XAxis
               hide={!showXAxis}
+              // Recharts (this project's version) doesn't propagate the
+              // axis-level `className` down to the rendered tick <text>
+              // nodes — they came out at the browser default (16px,
+              // default fill) instead of the intended muted/12px style.
+              // `tick` IS spread onto each <text> as raw SVG attrs
+              // (proven by `transform` below actually landing there),
+              // so the font/color goes here instead of `className`.
               tick={{
                 transform:
                   layout !== 'vertical' ? 'translate(0, 6)' : undefined,
+                fontSize: 12,
+                fill: 'var(--muted-foreground)',
               }}
               fill=""
               stroke=""
-              className={cx('text-xs', 'fill-muted-foreground', {
+              className={cx({
                 'mt-4': layout !== 'vertical',
               })}
               tickLine={false}
@@ -738,12 +747,13 @@ const BarChart = React.forwardRef<HTMLDivElement, BarChartProps>(
               tickLine={false}
               fill=""
               stroke=""
-              className={cx('text-xs', 'fill-muted-foreground')}
               tick={{
                 transform:
                   layout !== 'vertical'
                     ? 'translate(-3, 0)'
                     : 'translate(0, 0)',
+                fontSize: 12,
+                fill: 'var(--muted-foreground)',
               }}
               {...(layout !== 'vertical'
                 ? {

@@ -33,8 +33,9 @@ import {
   QrCode,
   BadgeCheck,
 } from 'lucide-react';
-import { format, isToday, isYesterday } from 'date-fns';
-import { useTranslations } from 'next-intl';
+import { format, isToday, isYesterday, type Locale } from 'date-fns';
+import { useTranslations, useLocale } from 'next-intl';
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -134,12 +135,13 @@ interface MessageThreadProps {
 
 function formatDateSeparator(
   dateStr: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  dateFnsLocale: Locale
 ): string {
   const date = new Date(dateStr);
   if (isToday(date)) return t('today');
   if (isYesterday(date)) return t('yesterday');
-  return format(date, 'MMMM d, yyyy');
+  return format(date, 'MMMM d, yyyy', { locale: dateFnsLocale });
 }
 
 function groupMessagesByDate(messages: Message[]) {
@@ -201,6 +203,7 @@ export function MessageThread({
   const tTimer = useTranslations('Inbox.sessionTimer');
   const tQuote = useTranslations('Inbox.replyQuote');
   const tBubble = useTranslations('Inbox.bubble');
+  const dateFnsLocale = getDateFnsLocale(useLocale());
 
   const { user } = useAuth();
   // Admin/owner podem mover uma conversa para QUALQUER colega; um
@@ -1447,7 +1450,7 @@ export function MessageThread({
                 {/* Date separator */}
                 <div className="mb-4 flex items-center justify-center">
                   <span className="bg-muted text-muted-foreground rounded-full px-3 py-1 text-[10px] font-medium">
-                    {formatDateSeparator(group.date, t)}
+                    {formatDateSeparator(group.date, t, dateFnsLocale)}
                   </span>
                 </div>
                 {/* Messages */}

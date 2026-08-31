@@ -20,7 +20,7 @@ import type {
 } from '@/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { formatRelative } from '@/lib/automations/trigger-meta';
+import { formatRelative, triggerMeta } from '@/lib/automations/trigger-meta';
 import {
   loadWindowStats,
   type WindowStats,
@@ -35,6 +35,7 @@ export default function AutomationLogsPage({
   const router = useRouter();
   const t = useTranslations('Automations.logs');
   const tRelative = useTranslations('Automations.relative');
+  const tTriggers = useTranslations('Automations.builder.triggers');
 
   const [automation, setAutomation] = useState<Automation | null>(null);
   const [logs, setLogs] = useState<AutomationLog[] | null>(null);
@@ -148,7 +149,8 @@ export default function AutomationLogsPage({
                         t('unknownContact')}
                     </div>
                     <div className="text-muted-foreground truncate text-xs">
-                      {log.trigger_event} · {log.steps_executed?.length ?? 0}{' '}
+                      {triggerEventLabel(log.trigger_event, tTriggers)} ·{' '}
+                      {log.steps_executed?.length ?? 0}{' '}
                       {log.steps_executed?.length === 1
                         ? t('step', { count: 1 }).replace('1 ', '')
                         : t('stepPlural', {
@@ -279,6 +281,24 @@ function StatBox({
   );
 }
 
+/**
+ * `log.trigger_event` is the raw `AutomationTriggerType` value the
+ * engine fired on (`engine.ts` writes `trigger_event: input.triggerType`
+ * verbatim) — same lookup `automations/page.tsx` already uses for the
+ * trigger badge, so a run's card and its log rows read the same label
+ * instead of the card showing "Janela de 24h fechando" while the log
+ * underneath still says "session_window_expiring".
+ */
+function triggerEventLabel(
+  triggerEvent: string,
+  tTriggers: ReturnType<typeof useTranslations>
+): string {
+  const key = `${triggerEvent}.label`;
+  return tTriggers.has(key)
+    ? tTriggers(key as 'new_message_received.label')
+    : triggerMeta(triggerEvent).label;
+}
+
 function StatusBadge({
   status,
   t,
@@ -306,6 +326,10 @@ function StatusBadge({
 
 function StepRow({ result }: { result: AutomationLogStepResult }) {
   const ok = result.status === 'success';
+  const tSteps = useTranslations('Automations.builder.steps');
+  const stepLabel = tSteps.has(result.step_type)
+    ? tSteps(result.step_type as 'send_message')
+    : result.step_type;
   return (
     <li className="flex items-start gap-2 text-xs">
       <span
@@ -317,7 +341,7 @@ function StepRow({ result }: { result: AutomationLogStepResult }) {
       >
         {ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
       </span>
-      <span className="text-muted-foreground">{result.step_type}</span>
+      <span className="text-muted-foreground">{stepLabel}</span>
       {result.detail && (
         <span className="text-muted-foreground truncate">
           — {result.detail}

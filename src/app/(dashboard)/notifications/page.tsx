@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import type { Notification } from '@/types';
 import { Bell, CheckCheck, Loader2, UserPlus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -21,6 +22,7 @@ const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
 export default function NotificationsPage() {
   const router = useRouter();
   const t = useTranslations('Notifications');
+  const dateFnsLocale = getDateFnsLocale(useLocale());
   const { accountId } = useAuth();
   const [notifications, setNotifications] = useState<Notification[] | null>(
     null
@@ -256,6 +258,7 @@ export default function NotificationsPage() {
                     <p className="text-muted-foreground/70 mt-1 text-[11px]">
                       {formatDistanceToNow(new Date(n.created_at), {
                         addSuffix: true,
+                        locale: dateFnsLocale,
                       })}
                     </p>
                   </div>

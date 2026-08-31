@@ -17,7 +17,8 @@ import {
 import { toast } from 'sonner';
 import { format, formatDistanceToNow } from 'date-fns';
 
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -222,6 +223,7 @@ function RunCard({
   onToggle: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const dateFnsLocale = getDateFnsLocale(useLocale());
   const meta = STATUS_META[run.status];
   const StatusIcon = meta.icon;
   const contactLabel =
@@ -229,6 +231,7 @@ function RunCard({
   const duration = run.ended_at
     ? formatDistanceToNow(new Date(run.ended_at), {
         addSuffix: false,
+        locale: dateFnsLocale,
       })
     : null;
   return (
@@ -272,7 +275,11 @@ function RunCard({
           </div>
           <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-2 text-[11px]">
             <span>
-              {t('started', { time: format(new Date(run.started_at), 'PP p') })}
+              {t('started', {
+                time: format(new Date(run.started_at), 'PP p', {
+                  locale: dateFnsLocale,
+                }),
+              })}
             </span>
             {run.reprompt_count > 0 && (
               <span>· {t('reprompts', { count: run.reprompt_count })}</span>

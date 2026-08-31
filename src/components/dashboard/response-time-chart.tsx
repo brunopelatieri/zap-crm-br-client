@@ -1,7 +1,8 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Clock } from 'lucide-react';
-import { DOW_SHORT_MON_FIRST } from '@/lib/dashboard/date-utils';
+import { localizedShortWeekdays } from '@/lib/dashboard/date-utils';
 import type { ResponseTimeSummary } from '@/lib/dashboard/types';
 import { BarChart } from '@/components/tremor/bar-chart';
 import { EmptyState } from './empty-state';
@@ -19,13 +20,7 @@ interface ResponseTimeChartProps {
   thresholdMinutes?: number;
 }
 
-import { useTranslations } from 'next-intl';
-
-// Single category, single colour — the data is "average minutes
-// per weekday". Tremor expects categories as the second tuple in
-// the row object, so we shape the buckets into
-// `{ day: 'Mon', 'Avg minutes': 4.2 }` rows below.
-const CATEGORY = 'Avg minutes';
+import { useLocale, useTranslations } from 'next-intl';
 
 export function ResponseTimeChart({
   data,
@@ -33,7 +28,15 @@ export function ResponseTimeChart({
   thresholdMinutes = 5,
 }: ResponseTimeChartProps) {
   const t = useTranslations('Dashboard.responseTimeChart');
+  const locale = useLocale();
   const hasData = data?.buckets.some((b) => b.avgMinutes != null) ?? false;
+
+  // Tremor uses `categories` both as the Recharts dataKey AND as the
+  // legend/tooltip label text (see `components/tremor/bar-chart.tsx`),
+  // so the category name itself must already be translated — there's
+  // no separate "display label" slot to hook into.
+  const category = t('avgMinutesLabel');
+  const dowLabels = useMemo(() => localizedShortWeekdays(locale), [locale]);
 
   // Map buckets → Tremor rows. Null `avgMinutes` (no samples)
   // collapses to 0; the chart will render an empty slot for it.
@@ -41,8 +44,8 @@ export function ResponseTimeChart({
   // surface "no samples" copy without losing the data shape.
   const chartData =
     data?.buckets.map((b, i) => ({
-      day: DOW_SHORT_MON_FIRST[i],
-      [CATEGORY]: b.avgMinutes ?? 0,
+      day: dowLabels[i],
+      [category]: b.avgMinutes ?? 0,
       samples: b.samples,
     })) ?? [];
 
@@ -93,11 +96,11 @@ export function ResponseTimeChart({
           <BarChart
             data={chartData}
             index="day"
-            categories={[CATEGORY]}
+            categories={[category]}
             // 'violet' maps to Tailwind's `fill-violet-500` — matches
             // the brand accent the hand-rolled bars used (#7c3aed).
             colors={['violet']}
-            valueFormatter={(value) => `${value.toFixed(1)}m`}
+            valueFormatter={formatMinutesAxis}
             showLegend={false}
             yAxisWidth={48}
             // Compact height so the chart sits well inside the card
@@ -115,4 +118,19 @@ function fmt(mins: number | null): string {
   if (mins < 1) return `${Math.max(1, Math.round(mins * 60))}s`;
   if (mins < 60) return `${mins.toFixed(1)}m`;
   return `${(mins / 60).toFixed(1)}h`;
+}
+
+/**
+ * Y-axis / tooltip formatter for the bar values. A plain `${v.toFixed(1)}m`
+ * rounds every sub-minute value (a FAST team, replying in seconds) down to
+ * a useless "0.0m" on every gridline. Switches to seconds below a minute —
+ * same idea as `fmt` above, but `0` renders as "0m" (a real zero point on
+ * the axis) instead of `fmt`'s "1s" floor, which exists only to avoid an
+ * ugly "0s" for a genuinely-elapsed-but-tiny reply time.
+ */
+function formatMinutesAxis(value: number): string {
+  if (value <= 0) return '0m';
+  if (value < 1) return `${Math.round(value * 60)}s`;
+  if (value < 60) return `${value.toFixed(1)}m`;
+  return `${(value / 60).toFixed(1)}h`;
 }

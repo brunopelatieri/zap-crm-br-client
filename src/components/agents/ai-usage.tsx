@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { toast } from 'sonner';
 import { BarChart3, Bot, PencilLine } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/dashboard/skeleton';
 import { BarChart } from '@/components/tremor/bar-chart';
 import { formatCompactNumber } from '@/lib/currency';
 import { format, parseISO } from 'date-fns';
+import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 
 interface UsageResponse {
   window_days: number;
@@ -56,6 +57,7 @@ const WINDOWS = [7, 30, 90] as const;
  */
 export function AiUsageCard() {
   const t = useTranslations('Agents.usage');
+  const dateFnsLocale = getDateFnsLocale(useLocale());
   const { accountId, accountRole, profileLoading } = useAuth();
   const canView = accountRole ? canEditSettings(accountRole) : false;
 
@@ -99,10 +101,11 @@ export function AiUsageCard() {
 
   if (profileLoading || !canView) return null;
 
+  const tokensCategory = t('tokensCategory');
   const chartData =
     data?.daily.map((d) => ({
-      day: format(parseISO(d.date), 'MMM d'),
-      Tokens: d.tokens,
+      day: format(parseISO(d.date), 'MMM d', { locale: dateFnsLocale }),
+      [tokensCategory]: d.tokens,
     })) ?? [];
   const hasSpend = (data?.totals.total_tokens ?? 0) > 0;
 
@@ -169,7 +172,7 @@ export function AiUsageCard() {
               <BarChart
                 data={chartData}
                 index="day"
-                categories={['Tokens']}
+                categories={[tokensCategory]}
                 colors={['violet']}
                 valueFormatter={(v) => formatCompactNumber(v)}
                 showLegend={false}
