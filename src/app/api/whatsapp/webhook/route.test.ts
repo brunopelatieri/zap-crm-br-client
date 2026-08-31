@@ -34,6 +34,7 @@ vi.mock('next/server', () => ({
 
 vi.mock('@/lib/whatsapp/webhook-signature', () => ({
   verifyMetaWebhookSignature: () => true,
+  resolveWebhookAppSecrets: async () => [],
 }));
 
 vi.mock('@/lib/whatsapp/encryption', () => ({
@@ -375,6 +376,7 @@ describe('POST /api/whatsapp/webhook — ack e processamento', () => {
     vi.resetModules();
     vi.doMock('@/lib/whatsapp/webhook-signature', () => ({
       verifyMetaWebhookSignature: () => false,
+      resolveWebhookAppSecrets: async () => [],
     }));
     const { POST: PostWithBadSignature } = await import('./route');
 

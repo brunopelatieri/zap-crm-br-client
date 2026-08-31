@@ -433,6 +433,7 @@ export async function POST(request: Request) {
       waba_id,
       access_token,
       verify_token,
+      app_secret,
       pin,
       name,
     } = body;
@@ -523,12 +524,57 @@ export async function POST(request: Request) {
       );
     }
 
+    // App Secret já salvo neste canal (se houver) — lido ANTES do bloco de
+    // criptografia, para o `encryptedAppSecret` abaixo poder preservá-lo.
+    //
+    // Achado de code review: sem isto, todo resave de rotina (rotacionar
+    // o access token, atualizar o PIN) que não reenviasse `app_secret`
+    // apagava a coluna de volta para `null` — a tela nunca pré-preenche
+    // este campo (mesmo padrão do `access_token`/`verify_token`, que
+    // também exigem redigitação), então "salvar sem mexer no App
+    // Secret" era o caminho comum, não a exceção. Diferente do
+    // `verify_token` (cujo erro aparece NA HORA, no "Verificar e salvar"
+    // da Meta), um `app_secret` apagado não dá sinal nenhum — o canal
+    // segue "conectado" e só as mensagens recebidas do App não-padrão
+    // voltam a ser rejeitadas em silêncio, reabrindo exatamente o bug
+    // que a migração 073 fecha.
+    let existingAppSecretCipher: string | null = null;
+    if (
+      !(typeof app_secret === 'string' && app_secret.trim()) &&
+      target.config?.id
+    ) {
+      const { data: secretRow, error: secretError } = await supabaseAdmin()
+        .from('whatsapp_config')
+        .select('app_secret')
+        .eq('id', target.config.id)
+        .maybeSingle();
+      if (secretError) {
+        console.error(
+          'Failed to read existing app_secret before save:',
+          secretError.message
+        );
+      } else {
+        existingAppSecretCipher =
+          (secretRow?.app_secret as string | null) ?? null;
+      }
+    }
+
     // Encrypt sensitive tokens before storing
     let encryptedAccessToken: string;
     let encryptedVerifyToken: string | null;
+    let encryptedAppSecret: string | null;
     try {
       encryptedAccessToken = encrypt(access_token);
       encryptedVerifyToken = verify_token ? encrypt(verify_token) : null;
+      // Migração 073: só precisa quando este número está sob um App da
+      // Meta diferente do App padrão (`META_APP_SECRET`) — ver o
+      // cabeçalho de `resolveWebhookAppSecrets`. Ausente/vazio preserva
+      // o que já estava salvo (ver leitura acima) — nunca `null` só
+      // porque este resave não tratava do App Secret.
+      encryptedAppSecret =
+        typeof app_secret === 'string' && app_secret.trim()
+          ? encrypt(app_secret.trim())
+          : existingAppSecretCipher;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Unknown encryption error';
@@ -671,6 +717,7 @@ export async function POST(request: Request) {
       waba_id: wabaId,
       access_token: encryptedAccessToken,
       verify_token: encryptedVerifyToken,
+      app_secret: encryptedAppSecret,
       status: registrationError ? 'disconnected' : 'connected',
       connected_at: registrationError ? null : now,
       registered_at: registrationError ? null : registeredAt,

@@ -4,9 +4,32 @@ import {
   type MockResult,
   type QueryOp,
 } from '@/lib/audience/supabase-mock';
-import { findTemplateRowForWaba } from './template-waba';
+import { findTemplateRowForWaba, templateBelongsToWaba } from './template-waba';
 
 const ACCOUNT = 'acct-1';
+
+describe('templateBelongsToWaba (SPEC 064 D-2)', () => {
+  it('matches a template whose waba_id equals the channel waba', () => {
+    expect(templateBelongsToWaba('waba-a', 'waba-a')).toBe(true);
+  });
+
+  it('rejects a template belonging to a DIFFERENT waba', () => {
+    expect(templateBelongsToWaba('waba-b', 'waba-a')).toBe(false);
+  });
+
+  it('treats a legacy (null) waba_id as belonging to any channel', () => {
+    expect(templateBelongsToWaba(null, 'waba-a')).toBe(true);
+    expect(templateBelongsToWaba(null, null)).toBe(true);
+  });
+
+  it('treats a missing waba_id key (undefined) the same as null', () => {
+    expect(templateBelongsToWaba(undefined, 'waba-a')).toBe(true);
+  });
+
+  it('rejects a real waba_id when the channel has none on file', () => {
+    expect(templateBelongsToWaba('waba-a', null)).toBe(false);
+  });
+});
 
 function makeDb(candidates: Record<string, unknown>[]) {
   const handler = (table: string, _ops: QueryOp[]): MockResult | undefined => {

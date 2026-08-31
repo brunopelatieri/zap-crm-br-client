@@ -645,6 +645,7 @@ export async function removeCloudChannel(
     .update({
       access_token: '',
       verify_token: null,
+      app_secret: null,
       status: 'disconnected',
       connected_at: null,
       updated_at: new Date().toISOString(),

@@ -55,6 +55,7 @@ const CHAINABLE = [
   'ilike',
   'in',
   'is',
+  'not',
   'order',
   'limit',
   'range',

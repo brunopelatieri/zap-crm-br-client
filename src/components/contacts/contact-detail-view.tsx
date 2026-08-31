@@ -114,6 +114,19 @@ export function ContactDetailView({
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(
     null
   );
+  // O canal que REALMENTE vai enviar, não só o que aparece marcado no
+  // seletor. Achado de code review: `handleSendTemplate` mandava
+  // `channel_id: selectedChannelId ?? undefined` — com o seletor visível
+  // mas nunca tocado (`selectedChannelId` continua `null`), isso virava
+  // "canal nenhum" no payload, e a rota caía no canal PADRÃO da conta
+  // via `resolveDefaultChannelId`. O picker, porém, já filtrava a lista
+  // de templates pelo WABA de `templateCapableChannels[0]` — se o padrão
+  // da conta for outro número, o operador via templates de um WABA e
+  // enviava por outro, reproduzindo o próprio "(#132001) Template name
+  // does not exist" que este filtro existe para evitar. Uma única
+  // variável usada nos dois lugares (lista E envio) fecha o gap.
+  const effectiveTemplateChannelId =
+    selectedChannelId ?? templateCapableChannels[0]?.id ?? null;
 
   // Details tab
   const [editName, setEditName] = useState('');
@@ -452,10 +465,12 @@ export function ContactDetailView({
           contact_id: contactId,
           // Só informado quando o seletor (abaixo) está visível — mais
           // de um canal apto a template. Ausente = padrão implícito de
-          // sempre (SPEC 049 §4.6).
+          // sempre (SPEC 049 §4.6). MESMO canal que filtrou a lista de
+          // templates no picker — nunca "canal nenhum" quando o seletor
+          // está visível mas intocado (ver `effectiveTemplateChannelId`).
           channel_id:
             templateCapableChannels.length > 1
-              ? (selectedChannelId ?? undefined)
+              ? (effectiveTemplateChannelId ?? undefined)
               : undefined,
           message_type: 'template',
           template_name: template.name,
@@ -1052,6 +1067,7 @@ export function ContactDetailView({
         onOpenChange={setTemplatePickerOpen}
         onSelect={handleSendTemplate}
         contact={contact}
+        channelId={effectiveTemplateChannelId}
       />
     </>
   );

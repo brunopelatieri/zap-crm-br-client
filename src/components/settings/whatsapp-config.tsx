@@ -520,6 +520,8 @@ function CloudNumberDetail({
   const [wabaId, setWabaId] = useState(initial?.waba_id || '');
   const [accessToken, setAccessToken] = useState(initial ? MASKED_TOKEN : '');
   const [verifyToken, setVerifyToken] = useState('');
+  const [appSecret, setAppSecret] = useState('');
+  const [showAppSecret, setShowAppSecret] = useState(false);
   const [pin, setPin] = useState('');
   const [tokenEdited, setTokenEdited] = useState(false);
 
@@ -636,6 +638,7 @@ function CloudNumberDetail({
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim() || null,
         verify_token: verifyToken.trim() || null,
+        app_secret: appSecret.trim() || null,
         pin: pin.trim() || null,
         // Idempotência (§5): com o id, o salvamento atualiza ESTE
         // número. Sem ele a rota ainda acerta pelo `phone_number_id`.
@@ -1116,6 +1119,38 @@ function CloudNumberDetail({
               />
               <p className="text-muted-foreground text-xs">
                 {t('webhookVerifyTokenHint')}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">
+                {t('appSecret')}
+                <span className="text-muted-foreground ml-1">
+                  {t('optional')}
+                </span>
+              </Label>
+              <div className="relative">
+                <Input
+                  type={showAppSecret ? 'text' : 'password'}
+                  placeholder={t('appSecretPlaceholder')}
+                  value={appSecret}
+                  onChange={(e) => setAppSecret(e.target.value)}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAppSecret(!showAppSecret)}
+                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
+                >
+                  {showAppSecret ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {t('appSecretHint')}
               </p>
             </div>
 

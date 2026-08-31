@@ -527,6 +527,37 @@ describe('POST — idempotência e criação (§5)', () => {
     expect(state.whatsapp_config[0].waba_id).toBe('999888777');
   });
 
+  // Achado de code review (migração 073): a tela NUNCA pré-preenche o
+  // App Secret (mesmo tratamento do access_token/verify_token), então
+  // "salvar sem mexer nele" é o caminho comum — rotacionar o token,
+  // atualizar o PIN. Sem preservar, isso apagava silenciosamente o
+  // App Secret do segundo número, reabrindo o próprio bug ("invalid
+  // signature" no webhook) que a coluna existe para fechar.
+  it('App Secret em branco no corpo NÃO apaga o que já estava salvo', async () => {
+    state.whatsapp_config[0].app_secret = 'enc(secret-app-b)';
+
+    await post({
+      phone_number_id: '892352847302912',
+      access_token: 'token-novo',
+      // app_secret ausente — simula o formulário reenviando as outras
+      // credenciais sem o operador ter tocado neste campo.
+    });
+
+    expect(state.whatsapp_config[0].app_secret).toBe('enc(secret-app-b)');
+  });
+
+  it('App Secret novo no corpo continua substituindo o antigo', async () => {
+    state.whatsapp_config[0].app_secret = 'enc(secret-app-b)';
+
+    await post({
+      phone_number_id: '892352847302912',
+      access_token: 'token-novo',
+      app_secret: 'secret-app-c',
+    });
+
+    expect(state.whatsapp_config[0].app_secret).toBe('enc(secret-app-c)');
+  });
+
   it('canal explícito de outra conta é 404', async () => {
     state.channels[0].account_id = 'acct-2';
     const res = await post({

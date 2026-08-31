@@ -17,6 +17,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ChevronRight, LayoutTemplate, Loader2 } from 'lucide-react';
 import { extractVariableIndices } from '@/lib/whatsapp/template-validators';
+import { templateBelongsToWaba } from '@/lib/whatsapp/template-waba';
 import { useTranslations } from 'next-intl';
 
 export interface TemplateSendValues {
@@ -31,6 +32,16 @@ interface TemplatePickerProps {
   onSelect: (template: MessageTemplate, values: TemplateSendValues) => void;
   /** Used to auto-suggest the contact's name for the body's {{1}} variable. */
   contact?: Contact | null;
+  /**
+   * `conversations.channel_id` da thread ativa (SPEC 064 D-2). Templates
+   * pertencem ao WABA da Meta, não à conta — sem filtrar por ele, o
+   * seletor oferecia templates aprovados em OUTRO número oficial da
+   * mesma conta, e a Meta rejeitava o envio com
+   * "(#132001) Template name does not exist in the translation" porque,
+   * do ponto de vista do WABA que está enviando, o nome realmente não
+   * existe lá.
+   */
+  channelId?: string | null;
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
@@ -76,6 +87,7 @@ export function TemplatePicker({
   onOpenChange,
   onSelect,
   contact,
+  channelId,
 }: TemplatePickerProps) {
   const t = useTranslations('Inbox.templatePicker');
 
@@ -105,30 +117,84 @@ export function TemplatePicker({
         return;
       }
 
-      // Scope by RLS (message_templates_select → is_account_member), NOT by
-      // user_id. Templates are account-owned, so filtering on the caller's
-      // user_id hid templates that a teammate created — leaving them unable
-      // to send approved templates in a shared account.
-      const { data, error } = await supabase
-        .from('message_templates')
-        .select('*')
-        .eq('status', 'APPROVED')
-        .order('created_at', { ascending: false });
+      // As duas consultas não dependem uma da outra — em paralelo, não em
+      // série. `whatsapp_config` (não `/api/whatsapp/config`) porque só
+      // precisamos do `waba_id`, um select direto sob RLS
+      // (`is_account_member`) sem segredo nenhum; a rota HTTP existe
+      // para a tela de Configurações, que também sonda a Meta ao vivo —
+      // custo desnecessário aqui, num diálogo que abre a cada "Enviar
+      // template".
+      const [templatesResult, wabaResult] = await Promise.all([
+        // Scope by RLS (message_templates_select → is_account_member), NOT
+        // by user_id. Templates are account-owned, so filtering on the
+        // caller's user_id hid templates that a teammate created — leaving
+        // them unable to send approved templates in a shared account.
+        supabase
+          .from('message_templates')
+          .select('*')
+          .eq('status', 'APPROVED')
+          .order('created_at', { ascending: false }),
+        channelId
+          ? supabase
+              .from('whatsapp_config')
+              .select('waba_id')
+              .eq('channel_id', channelId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
 
       if (cancelled) return;
-      if (error) {
-        console.error('Failed to fetch templates:', error);
+
+      if (templatesResult.error) {
+        console.error('Failed to fetch templates:', templatesResult.error);
         setTemplates([]);
-      } else {
-        setTemplates((data as MessageTemplate[]) ?? []);
+        setLoading(false);
+        return;
       }
+      const allTemplates = (templatesResult.data as MessageTemplate[]) ?? [];
+
+      if (wabaResult.error) {
+        // Achado de code review: um erro aqui não pode virar "nenhum
+        // template" — falha ABERTA para a lista inteira sem filtrar, o
+        // mesmo raciocínio de qualquer outra falha transitória de leitura
+        // neste arquivo.
+        console.error(
+          'Failed to resolve channel WABA for templates:',
+          wabaResult.error
+        );
+        setTemplates(allTemplates);
+        setLoading(false);
+        return;
+      }
+
+      // Filtra pelo WABA do canal da conversa (SPEC 064 D-2). Sem isto o
+      // seletor oferece templates aprovados em OUTRO número oficial da
+      // mesma conta — a Meta aceita o payload e rejeita com
+      // "(#132001) Template name does not exist in the translation"
+      // porque, do lado do WABA que envia, o nome de fato não existe lá.
+      //
+      // Só filtra quando o canal foi de fato encontrado. `wabaRow` nulo
+      // cobre dois casos, e os dois têm de falhar ABERTO (lista inteira,
+      // sem filtro) pelo mesmo motivo do bloco de erro acima: sem
+      // `channelId` (chamador antigo), e `channelId` que não bate
+      // nenhuma linha de `whatsapp_config` (canal desativado — achado de
+      // code review: filtrar aqui reduziria a lista a só os templates
+      // legados em vez de mostrar tudo).
+      const wabaRow = wabaResult.data as { waba_id: string | null } | null;
+      setTemplates(
+        wabaRow
+          ? allTemplates.filter((t) =>
+              templateBelongsToWaba(t.waba_id, wabaRow.waba_id)
+            )
+          : allTemplates
+      );
       setLoading(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, channelId]);
 
   function resetSelection() {
     setSelected(null);

@@ -4,7 +4,10 @@ import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api';
 import { normalizePhone } from '@/lib/whatsapp/phone-utils';
 import { detectDeadNumberOnFailure } from '@/lib/contacts/whatsapp-status';
-import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature';
+import {
+  verifyMetaWebhookSignature,
+  resolveWebhookAppSecrets,
+} from '@/lib/whatsapp/webhook-signature';
 import { proxyMediaUrl } from '@/lib/storage/media-url';
 import { buildMediaPath, baseMimeType } from '@/lib/storage/upload-media';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
@@ -211,7 +214,14 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get('x-hub-signature-256');
 
-  if (!verifyMetaWebhookSignature(rawBody, signature)) {
+  // Um segundo número oficial pode estar sob um App da Meta diferente
+  // (WABA/credenciais próprios) — cada App assina com o PRÓPRIO App
+  // Secret. Sem isto, só o `META_APP_SECRET` padrão valida, e todo
+  // evento do outro App cai aqui como assinatura inválida mesmo com o
+  // canal "conectado" e o registro/subscrição OK na Meta (migração 073).
+  const extraSecrets = await resolveWebhookAppSecrets(supabaseAdmin());
+
+  if (!verifyMetaWebhookSignature(rawBody, signature, extraSecrets)) {
     // 401 (not 200) — we want Meta's delivery dashboard to show failures
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.

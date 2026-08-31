@@ -1582,6 +1582,7 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
         contact={contact}
+        channelId={conversation?.channel_id ?? null}
       />
 
       {contact && conversation?.channel_id && (

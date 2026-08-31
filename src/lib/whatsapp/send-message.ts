@@ -48,6 +48,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate, TemplatePreviewPayload } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
 import {
   renderTemplateText,
   type SendTimeParams,
@@ -421,15 +422,24 @@ export async function sendMessageToConversation(
 
   // Template row (for header + button components). isMessageTemplate
   // guards against a malformed local row crashing the send-builder.
+  //
+  // Scoped by WABA (SPEC 064 D-2) via `findTemplateRowForWaba`: with two
+  // numbers on the same account, `name` + `language` can legitimately
+  // match a row on ANOTHER WABA (Meta scopes templates per WABA, not per
+  // account). The old `.eq('name', ...).eq('language', ...).maybeSingle()`
+  // here ignored `channelCtx`'s WABA entirely — for the same name+language
+  // existing on both WABAs it also risked "multiple rows returned" from
+  // `.maybeSingle()`.
   let templateRow: MessageTemplate | null = null;
   if (messageType === 'template' && templateName) {
-    const { data } = await db
-      .from('message_templates')
-      .select('*')
-      .eq('account_id', accountId)
-      .eq('name', templateName)
-      .eq('language', templateLanguage || 'en_US')
-      .maybeSingle();
+    const data = await findTemplateRowForWaba(db, {
+      accountId,
+      name: templateName,
+      language: templateLanguage || 'en_US',
+      wabaId: isCloudChannel
+        ? ((config?.waba_id as string | null) ?? null)
+        : null,
+    });
     if (data && !isMessageTemplate(data)) {
       throw new SendMessageError(
         'template_malformed',

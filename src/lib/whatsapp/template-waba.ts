@@ -21,6 +21,23 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * A regra de adoção, isolada (SPEC 064 D-2) — código de review achou a
+ * mesma regra reimplementada dentro de `template-picker.tsx` (um
+ * componente) só para FILTRAR uma lista, em vez de reutilizar esta.
+ * "Lógica de negócio vive em `src/lib/`, não em componentes" (AGENTS.md)
+ * — daqui em diante os dois caminhos (resolver UMA linha por
+ * nome+idioma, ou filtrar uma LISTA por candidatos) chamam a mesma
+ * função para decidir "esta linha serve para este canal?".
+ */
+export function templateBelongsToWaba(
+  templateWabaId: string | null | undefined,
+  channelWabaId: string | null
+): boolean {
+  const w = (templateWabaId ?? null) as string | null;
+  return w === null || w === channelWabaId;
+}
+
 export async function findTemplateRowForWaba(
   db: SupabaseClient,
   params: {
