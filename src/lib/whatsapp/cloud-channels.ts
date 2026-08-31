@@ -304,6 +304,46 @@ export async function resolveCloudConfigForWaba(
 }
 
 /**
+ * O `waba_id` de UM canal (por `channel_id`), sem nunca lançar.
+ *
+ * Existe para chamadores best-effort (ex.: `hydrateBroadcastReply`) que
+ * precisam saber o WABA de um canal já conhecido só para escolher a
+ * linha certa de `message_templates`, mas não podem deixar uma
+ * credencial ausente, canal apagado ou erro transitório virar exceção —
+ * ao contrário de `resolveCloudConfig`, que EXISTE justamente para
+ * lançar com motivo quando o canal não está pronto para enviar. Aqui
+ * "não sei o WABA" é um resultado válido (`null`), não uma falha do
+ * chamador.
+ *
+ * Loga a diferença entre "canal sem config" (silencioso, esperado — ver
+ * o comentário de canal órfão em `resolveCloudConfig`) e "erro de
+ * leitura" (logado): sem isto, uma falha transitória do Supabase fica
+ * indistinguível de "este canal genuinamente não tem WABA", e o
+ * chamador degradava os dois casos para o mesmo `null` sem deixar
+ * rastro para diagnosticar depois (achado de code review, SPEC 064 D-2).
+ */
+export async function resolveWabaIdForChannel(
+  db: SupabaseClient,
+  accountId: string,
+  channelId: string
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('whatsapp_config')
+    .select('waba_id')
+    .eq('channel_id', channelId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      `[cloud-channels] failed to read waba_id for channel ${channelId}: ${error.message}`
+    );
+    return null;
+  }
+  return (data?.waba_id as string | null | undefined) ?? null;
+}
+
+/**
  * Quantos números oficiais ativos a conta tem.
  *
  * A interface usa para decidir se mostra seletor de número (um número

@@ -412,14 +412,42 @@ export async function stageAudience(
 
   // Falha cedo, antes de gravar qualquer linha — mesmo cuidado de
   // `planDashboardBroadcast` (broadcast-dispatch.ts).
-  const { data: templateRow } = await db
+  //
+  // ⚠️ De propósito SEM escopo de WABA (SPEC 064 D-2) — não é a mesma
+  //    lacuna que `findTemplateRowForWaba` resolve em `meta-send.ts`,
+  //    `hydrate-reply.ts` etc. Lá cada chamador já sabe o CANAL (da
+  //    conversa/do broadcast) e por isso precisa escolher a linha certa
+  //    quando o mesmo nome+idioma existe em dois WABAs. Aqui não: o
+  //    wizard só escolhe o número no Step 4 (`channelId` em
+  //    `step4-schedule-send.tsx`), depois de staging (Step 2) — nenhum
+  //    `channelId` chega a `StageAudienceParams`, e forçar um agora
+  //    seria inventar um canal que o operador ainda não escolheu. Esta
+  //    consulta só confere "existe ALGUMA linha com esse nome+idioma
+  //    nesta conta" (para não deixar seguir para um template inexistente
+  //    até o Step 4), e continua correta por design mesmo sem filtrar
+  //    por WABA. A resolução de VERDADE — a linha específica que
+  //    efetivamente sai no envio — acontece depois, já escopada, em
+  //    `broadcast-dispatch.ts` (`planDashboardBroadcast`/
+  //    `deliverBroadcast`, via `loadWhatsappConfig` + `findTemplateRowForWaba`).
+  //    Não "corrija" isto adicionando `channelId` aqui sem antes mudar o
+  //    Step 2 do wizard para escolher o número primeiro.
+  //
+  //    O que MUDOU aqui: `.maybeSingle()` virou uma leitura de lista.
+  //    Sem escopo de WABA, uma conta com o mesmo nome+idioma em dois
+  //    WABAs tem DUAS linhas para esta consulta — `.maybeSingle()`
+  //    devolve erro ("multiple rows returned") nesse caso, e o código
+  //    ignorava o `error`, então virava `templateRow: null` e um
+  //    `template_not_found` falso para um template que existe (só que
+  //    duas vezes). Continuar como lista e checar `.length` resolve isto
+  //    sem precisar saber QUAL das duas linhas é a certa — pergunta que
+  //    esta função não tem como responder ainda (ver acima).
+  const { data: templateRows } = await db
     .from('message_templates')
     .select('id')
     .eq('account_id', accountId)
     .eq('name', templateName)
-    .eq('language', templateLanguage)
-    .maybeSingle();
-  if (!templateRow) {
+    .eq('language', templateLanguage);
+  if (!templateRows?.length) {
     throw new BroadcastError(
       'template_not_found',
       'Template not found for this account.',

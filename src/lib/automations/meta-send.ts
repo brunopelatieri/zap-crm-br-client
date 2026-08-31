@@ -2,12 +2,16 @@ import { withSignedHeaderMedia } from '@/lib/whatsapp/header-media';
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive';
 import type { MessageTemplate, TemplatePreviewPayload } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
 import { renderTemplateText } from '@/lib/whatsapp/template-send-builder';
 import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
 } from '@/lib/flows/meta-send';
-import { sendAndPersistOutbound } from '@/lib/channels/send';
+import {
+  resolveChannelForConversation,
+  sendAndPersistOutbound,
+} from '@/lib/channels/send';
 import { supabaseAdmin } from './admin-client';
 
 // ------------------------------------------------------------
@@ -127,27 +131,70 @@ async function sendViaMeta(
   //
   // ⚠️ Diferença de ORDEM em relação ao código anterior à F2: a linha do
   //    template e a assinatura do header passaram a ser resolvidas ANTES
-  //    da validação do contato e do canal (antes vinham depois). Nada
-  //    observável muda — as duas primeiras são leituras —, exceto o
-  //    texto do erro quando contato E header de mídia estão quebrados ao
-  //    mesmo tempo.
-
-  // Load the local template row so the send builds the full components
-  // array (required for media-header templates — Meta rejects those
-  // without the header component on every send) and so the persisted
-  // message carries `template_preview` for the inbox bubble. A template
-  // that only exists on Meta (never synced locally) still sends via the
-  // legacy body-only path and just renders as plain text in the chat.
+  //    da validação do contato (antes vinham depois). Nada observável
+  //    muda — as duas primeiras são leituras —, exceto o texto do erro
+  //    quando contato E header de mídia estão quebrados ao mesmo tempo.
+  //
+  // ⚠️ SPEC 064 D-2: para `kind: 'template'` o CANAL da conversa também
+  //    passa a ser resolvido aqui (para saber o WABA e escolher a linha
+  //    certa de `message_templates`) — antes só era resolvido dentro de
+  //    `sendAndPersistOutbound`, mais abaixo. `resolveChannelForConversation`
+  //    roda de novo lá (sem canal explícito, cai no mesmo resultado): uma
+  //    segunda leitura, não uma segunda fonte de verdade.
+  //
+  //    Achado de code review: uma falha aqui (conta bloqueada, canal
+  //    apagado) NÃO deve subir direto — faria o erro "furar a fila" na
+  //    frente da validação do CONTATO, que `sendAndPersistOutbound`
+  //    sempre roda primeiro (`resolveOutboundContact` antes de resolver
+  //    canal, ver `channels/send.ts`). Um contato inválido E uma conta
+  //    bloqueada ao mesmo tempo passaria a logar "conta bloqueada" em vez
+  //    de "contato não encontrado" — motivo errado no `automation_logs`.
+  //    Por isso o catch abaixo degrada para `wabaId: null` (mesmo efeito
+  //    de "sem WABA conhecido" — cai na linha legada ou em nenhuma) e
+  //    deixa a resolução de verdade, na ORDEM original, acontecer dentro
+  //    de `sendAndPersistOutbound` mais abaixo.
   let templateRow: MessageTemplate | null = null;
   if (input.kind === 'template') {
-    const { data } = await db
-      .from('message_templates')
-      .select('*')
-      .eq('account_id', input.accountId)
-      .eq('name', input.templateName)
-      .eq('language', input.language || 'en_US')
-      .maybeSingle();
-    if (data && isMessageTemplate(data)) templateRow = data;
+    let wabaId: string | null = null;
+    // Só vale a pena consultar `message_templates` quando o canal
+    // resolvido é Cloud — nenhum outro tipo (hoje, `whatsapp_qr`)
+    // suporta template (`capabilities.ts`), e `sendContentViaChannel`
+    // vai recusar o envio mais abaixo de qualquer forma. `true` por
+    // padrão: se a resolução falhar (branch acima), não sabemos o tipo
+    // do canal — tentar a consulta best-effort com `wabaId: null` é
+    // inofensivo e mantém o comportamento anterior a este ajuste.
+    let mayHaveTemplate = true;
+    try {
+      // Escopado por WABA (SPEC 064 D-2): com dois números na mesma
+      // conta, name+language pode bater em DUAS linhas (uma por WABA) —
+      // resolve o canal DA CONVERSA primeiro para saber qual delas é a
+      // certa. Antes desta correção a consulta ignorava por completo o
+      // WABA do canal, o que arriscava adotar a linha errada (ou
+      // estourar em "multiple rows" se o Supabase tivesse `.single()`).
+      // Mesmo padrão de `send-message.ts`.
+      const { ctx: channelCtx, configRow } =
+        await resolveChannelForConversation(
+          db,
+          input.accountId,
+          input.conversationId
+        );
+      const isCloud = channelCtx.channel.type === 'whatsapp_cloud';
+      wabaId = isCloud
+        ? ((configRow?.waba_id as string | null | undefined) ?? null)
+        : null;
+      mayHaveTemplate = isCloud;
+    } catch {
+      // Ver o comentário acima da função: degrada, não propaga.
+    }
+    if (mayHaveTemplate) {
+      const data = await findTemplateRowForWaba(db, {
+        accountId: input.accountId,
+        name: input.templateName,
+        language: input.language || 'en_US',
+        wabaId,
+      });
+      if (data && isMessageTemplate(data)) templateRow = data;
+    }
   }
 
   // Header de mídia: o bucket virou privado na migração 040, então a

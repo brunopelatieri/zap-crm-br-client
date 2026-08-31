@@ -9,7 +9,9 @@ const TEMPLATE = 'promo';
 const LANG = 'pt_BR';
 
 function templateFound(table: string) {
-  return table === 'message_templates' ? { data: { id: 'tpl-1' } } : undefined;
+  return table === 'message_templates'
+    ? { data: [{ id: 'tpl-1' }] }
+    : undefined;
 }
 
 describe('stageAudience — csv', () => {
@@ -170,6 +172,41 @@ describe('stageAudience — csv', () => {
     });
 
     expect(result.draftId).toBe('draft-4');
+  });
+
+  // SPEC 064 D-2 — stage.ts não escolhe WABA (o canal só é escolhido no
+  // Step 4), então a checagem de existência tem de aceitar as DUAS
+  // linhas sem estourar. Antes desta correção, `.maybeSingle()` devolvia
+  // erro para "multiple rows" e o código, ignorando `error`, tratava
+  // isso como `template_not_found` — um falso negativo bem no meio do
+  // cenário que a SPEC 064 introduziu.
+  it('não rejeita quando o mesmo nome+idioma existe em dois WABAs', async () => {
+    const mock = createSupabaseMock((table) => {
+      if (table === 'message_templates') {
+        return {
+          data: [{ id: 'tpl-waba-a' }, { id: 'tpl-waba-b' }],
+        };
+      }
+      if (table === 'contacts') return { data: [] };
+      if (table === 'broadcasts') return { data: { id: 'draft-two-waba' } };
+      if (table === 'broadcast_audience_staging') return { data: null };
+      return undefined;
+    });
+
+    const result = await stageAudience(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      templateName: TEMPLATE,
+      templateLanguage: LANG,
+      canCreateTags: false,
+      audience: {
+        type: 'csv',
+        rows: [{ phone: '+5511999990001', name: 'Alice', sourceRow: 2 }],
+        invalidRows: [],
+      },
+    });
+
+    expect(result.draftId).toBe('draft-two-waba');
   });
 
   it('rejeita quando o template não existe para a conta', async () => {

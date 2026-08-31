@@ -10,7 +10,7 @@
  *   não só por "lançou".
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
@@ -18,6 +18,7 @@ import {
   countCloudChannels,
   listCloudChannels,
   resolveCloudConfig,
+  resolveWabaIdForChannel,
 } from './cloud-channels';
 
 // ------------------------------------------------------------
@@ -447,5 +448,52 @@ describe('countCloudChannels', () => {
     await expect(countCloudChannels(db.client, 'acct-1')).rejects.toThrow(
       /boom/
     );
+  });
+});
+
+// Achado de code review (SPEC 064 D-2): chamadores best-effort (ex.:
+// `hydrateBroadcastReply`) precisam do `waba_id` de um canal já
+// conhecido sem que uma falha vire exceção — ao contrário de
+// `resolveCloudConfig`, que existe justamente para lançar.
+describe('resolveWabaIdForChannel', () => {
+  it('devolve o waba_id da linha de whatsapp_config do canal', async () => {
+    const db = makeDb({
+      whatsapp_config: (op) => {
+        expect(eqValue(op, 'channel_id')).toBe('ch-b');
+        expect(eqValue(op, 'account_id')).toBe('acct-1');
+        return { data: { waba_id: 'waba-2' }, error: null };
+      },
+    });
+
+    await expect(
+      resolveWabaIdForChannel(db.client, 'acct-1', 'ch-b')
+    ).resolves.toBe('waba-2');
+  });
+
+  it('devolve null (sem lançar) quando o canal não tem config', async () => {
+    const db = makeDb({
+      whatsapp_config: () => ({ data: null, error: null }),
+    });
+
+    await expect(
+      resolveWabaIdForChannel(db.client, 'acct-1', 'ch-orfao')
+    ).resolves.toBeNull();
+  });
+
+  it('loga e degrada para null (sem lançar) numa falha transitória de leitura', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const db = makeDb({
+      whatsapp_config: () => ({
+        data: null,
+        error: { message: 'connection reset' },
+      }),
+    });
+
+    await expect(
+      resolveWabaIdForChannel(db.client, 'acct-1', 'ch-b')
+    ).resolves.toBeNull();
+    expect(spy).toHaveBeenCalled();
+
+    spy.mockRestore();
   });
 });

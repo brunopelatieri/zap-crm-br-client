@@ -28,7 +28,9 @@ import {
   resolveVariables,
   usesCustomFields,
 } from '@/lib/whatsapp/broadcast-variables';
+import { resolveWabaIdForChannel } from '@/lib/whatsapp/cloud-channels';
 import { renderTemplateText } from '@/lib/whatsapp/template-send-builder';
+import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
 import type { Contact, MessageTemplate, TemplatePreviewPayload } from '@/types';
 
 import { parseVariableMap } from './parse-input';
@@ -86,7 +88,9 @@ export async function hydrateBroadcastReply(
           .maybeSingle(),
         db
           .from('broadcasts')
-          .select('template_name, template_language, template_variables')
+          .select(
+            'template_name, template_language, template_variables, channel_id'
+          )
           .eq('id', broadcastId)
           .maybeSingle(),
         db.from('contacts').select('*').eq('id', contactId).maybeSingle(),
@@ -96,13 +100,35 @@ export async function hydrateBroadcastReply(
     if (!broadcast?.template_name) return;
     if (!contact) return;
 
-    const { data: templateRowData } = await db
-      .from('message_templates')
-      .select('*')
-      .eq('account_id', accountId)
-      .eq('name', broadcast.template_name)
-      .eq('language', broadcast.template_language ?? 'en_US')
-      .maybeSingle();
+    // Escopado por WABA (SPEC 064 D-2): `broadcasts.channel_id` já grava o
+    // canal usado no disparo (D-3, ver `broadcast-dispatch.ts`), então dá
+    // para saber o WABA sem qualquer suposição. A consulta antiga
+    // (`.eq('name', ...).eq('language', ...).maybeSingle()`) ignorava o
+    // WABA por completo — com o mesmo nome+idioma em dois números, ela
+    // podia hidratar a bolha com os componentes (header/botões) do
+    // template ERRADO, ou estourar em "multiple rows" se usasse
+    // `.single()`. Leitura best-effort via `resolveWabaIdForChannel`
+    // (cloud-channels.ts — achado de code review: a leitura inline
+    // anterior duplicava essa mesma derivação e ignorava `error`, então
+    // uma falha transitória do Supabase e "canal genuinamente sem WABA"
+    // eram indistinguíveis; o helper compartilhado loga a diferença):
+    // `channel_id` ausente (broadcast antigo, anterior à 072) ou uma
+    // falha aqui só degradam para `wabaId: null` (adota a linha legada),
+    // nunca lançam — este caminho é best-effort por inteiro (ver o
+    // cabeçalho do arquivo).
+    const wabaId = broadcast.channel_id
+      ? await resolveWabaIdForChannel(
+          db,
+          accountId,
+          broadcast.channel_id as string
+        )
+      : null;
+    const templateRowData = await findTemplateRowForWaba(db, {
+      accountId,
+      name: broadcast.template_name,
+      language: broadcast.template_language ?? 'en_US',
+      wabaId,
+    });
     const templateRow = (templateRowData ?? null) as MessageTemplate | null;
 
     // Trade-off consciente: personaliza com o contato de AGORA, não com
