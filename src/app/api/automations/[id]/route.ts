@@ -202,11 +202,21 @@ export async function PATCH(
     // gatilho é BEFORE e sobrescreveria `NEW.is_active` na mesma
     // instrução. Este não toca em `channel_id`, então
     // `BEFORE UPDATE OF channel_id` nem dispara.
-    const { error: reErr } = await admin
+    //
+    // `.eq('is_active', false)` (achado de code review) é uma trava de
+    // concorrência otimista: só reativa se a linha ainda estiver
+    // exatamente no estado que o GATILHO acabou de deixar. As duas
+    // UPDATEs não são uma transação — sem esta trava, uma segunda
+    // requisição concorrente na mesma automação, entre elas, teria seu
+    // resultado sobrescrito às cegas por esta reativação. Zero linhas
+    // casadas não é erro: outra requisição já decidiu o estado final.
+    const { data: reactivated, error: reErr } = await admin
       .from('automations')
       .update({ is_active: true })
       .eq('id', id)
-      .eq('account_id', accountId);
+      .eq('account_id', accountId)
+      .eq('is_active', false)
+      .select('id');
     if (reErr) {
       return NextResponse.json(
         {
@@ -214,6 +224,12 @@ export async function PATCH(
           code: 'reactivate_failed',
         },
         { status: 500 }
+      );
+    }
+    if (!reactivated || reactivated.length === 0) {
+      console.warn(
+        '[automations] reactivation after channel clear matched no row — a concurrent request already changed it',
+        id
       );
     }
   }

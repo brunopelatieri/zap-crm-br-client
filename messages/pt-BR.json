@@ -1483,7 +1483,8 @@
         "subtitle": "Selecione um template de mensagem aprovado para seu disparo.",
         "noTemplates": "Nenhum template disponível.",
         "createFirst": "Crie um template em Configurações primeiro.",
-        "errorLoad": "Falha ao carregar templates"
+        "errorLoad": "Falha ao carregar templates",
+        "retry": "Tentar de novo"
       },
       "selectAudience": {
         "title": "Selecionar público",
@@ -2120,7 +2121,8 @@
       "channelCapabilityScopedWarn": "O número escolhido não tem suporte a isto — o passo vai falhar em toda execução.",
       "channelScope": {
         "label": "Vale para o número",
-        "allChannels": "Todos os números"
+        "allChannels": "Todos os números",
+        "templateResetWarning": "Trocar o número limpou o template escolhido — selecione um aprovado para ele."
       },
       "active": "Ativo",
       "activeAria": "Ativo",

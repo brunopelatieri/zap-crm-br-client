@@ -10,7 +10,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, FileText, ArrowRight, FlaskConical } from 'lucide-react';
+import {
+  Loader2,
+  FileText,
+  ArrowRight,
+  FlaskConical,
+  AlertTriangle,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import { AB_DEFAULT_SPLIT_PERCENT } from '@/lib/broadcasts/ab-test';
@@ -65,7 +71,7 @@ export function Step1ChooseTemplate({
   // filtra esta lista (§2.E). `templates` já vem só com o que este WABA
   // pode enviar (+ legados); a variante B (abaixo) herda o filtro de
   // graça, por sair da mesma lista.
-  const { templates, loading } = useChannelTemplates(channelId);
+  const { templates, loading, error, refetch } = useChannelTemplates(channelId);
 
   /**
    * Candidatos a variante B.
@@ -103,7 +109,21 @@ export function Step1ChooseTemplate({
         </p>
       </div>
 
-      {templates.length === 0 ? (
+      {error ? (
+        // Achado de code review: uma falha de leitura (RLS/rede
+        // transitória) não pode parecer "esta conta não tem template
+        // nenhum" — o operador criaria um duplicado achando que
+        // realmente não havia nenhum.
+        <div className="border-destructive/30 bg-destructive/5 flex h-48 flex-col items-center justify-center rounded-xl border">
+          <AlertTriangle className="text-destructive mb-2 h-8 w-8" />
+          <p className="text-destructive text-sm">
+            {t('chooseTemplate.errorLoad')}
+          </p>
+          <Button variant="outline" onClick={refetch} className="mt-3">
+            {t('chooseTemplate.retry')}
+          </Button>
+        </div>
+      ) : templates.length === 0 ? (
         <div className="border-border bg-card/50 flex h-48 flex-col items-center justify-center rounded-xl border">
           <FileText className="text-muted-foreground mb-2 h-8 w-8" />
           <p className="text-muted-foreground text-sm">

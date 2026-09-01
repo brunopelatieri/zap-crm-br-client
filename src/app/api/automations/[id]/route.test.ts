@@ -24,6 +24,15 @@ const h = vi.hoisted(() => ({
     channel: null as Record<string, unknown> | null,
     /** Todo UPDATE em `automations`, na ordem. */
     updates: [] as Record<string, unknown>[],
+    /** Filtros `.eq()` de cada UPDATE, na mesma ordem de `updates`. */
+    updateFilters: [] as [string, unknown][][],
+    /**
+     * Simula a trava otimista da reativação (achado de code review):
+     * `false` = a segunda UPDATE (`is_active: true`) não acha a linha
+     * (uma requisição concorrente já mudou o estado) — o teste confere
+     * que a rota não trata isso como erro.
+     */
+    reactivationMatches: true,
   },
 }));
 
@@ -49,12 +58,31 @@ vi.mock('@/lib/automations/admin-client', () => {
   function builder(table: string) {
     let verb = 'select';
     let payload: Record<string, unknown> | null = null;
+    let recorded = false;
+    const filters: [string, unknown][] = [];
 
     const settle = () => {
       if (table === 'automations') {
         if (verb === 'update') {
-          state.updates.push(payload ?? {});
-          return { data: null, error: null };
+          // Só registra uma vez por UPDATE (a cadeia pode chamar
+          // `settle()` mais de uma vez via `.select()` + `then`).
+          if (!recorded) {
+            state.updates.push(payload ?? {});
+            state.updateFilters.push(filters.slice());
+            recorded = true;
+          }
+          // A trava otimista (`.eq('is_active', false)`) da reativação:
+          // simula "achou a linha" vs "requisição concorrente já mudou
+          // o estado" via `reactivationMatches`.
+          const isReactivation =
+            Object.keys(payload ?? {}).length === 1 &&
+            (payload as Record<string, unknown>)?.is_active === true;
+          const data = isReactivation
+            ? state.reactivationMatches
+              ? [{ id: 'auto-1' }]
+              : []
+            : null;
+          return { data, error: null };
         }
         return { data: state.existing, error: null };
       }
@@ -69,7 +97,7 @@ vi.mock('@/lib/automations/admin-client', () => {
         (payload = p),
         b
       ),
-      eq: () => b,
+      eq: (k: string, v: unknown) => (filters.push([k, v]), b),
       maybeSingle: () => Promise.resolve(settle()),
       single: () => Promise.resolve(settle()),
       then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
@@ -103,6 +131,8 @@ function patch(body: unknown) {
 beforeEach(() => {
   h.state.channel = CHANNEL;
   h.state.updates = [];
+  h.state.updateFilters = [];
+  h.state.reactivationMatches = true;
   h.state.existing = {
     id: 'auto-1',
     user_id: 'user-1',
@@ -129,6 +159,31 @@ describe('PATCH — voltar para "Todos os números" (SPEC 065 D-8)', () => {
     expect(h.state.updates[0]).toMatchObject({ channel_id: null });
     expect(h.state.updates[1]).toEqual({ is_active: true });
     expect(h.state.updates[1]).not.toHaveProperty('channel_id');
+  });
+
+  // Achado de code review: as duas UPDATEs não são uma transação — a
+  // reativação precisa de uma trava otimista (`.eq('is_active', false)`)
+  // para não sobrescrever cegamente uma mudança concorrente na mesma
+  // automação, entre o UPDATE que o gatilho desativou e este que a
+  // reativaria.
+  it('a reativação só escreve se a linha ainda estiver desativada (trava otimista)', async () => {
+    await patch({ channel_id: null });
+
+    const reactivationFilters = h.state.updateFilters[1];
+    expect(reactivationFilters).toContainEqual(['is_active', false]);
+    expect(reactivationFilters).toContainEqual(['id', 'auto-1']);
+  });
+
+  it('reativação sem linha casada (requisição concorrente) não vira 500', async () => {
+    h.state.reactivationMatches = false;
+
+    const res = await patch({ channel_id: null });
+
+    // A UPDATE aconteceu (a rota não sabe fazer diferente sem outra
+    // leitura), mas não achar a linha é um caso ESPERADO — outra
+    // requisição já decidiu o estado final — e não um erro do servidor.
+    expect(res.status).toBe(200);
+    expect(h.state.updates).toHaveLength(2);
   });
 
   it('automação já inativa não é reativada por acidente', async () => {

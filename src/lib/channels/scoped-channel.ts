@@ -101,6 +101,39 @@ export async function loadScopedChannel(
  * (status, código), e escrevê-lo à mão em cada uma é como o
  * `channel_not_in_account` acabaria divergindo.
  */
+/**
+ * O canal escolhido para um recurso (automação ou fluxo) serve para
+ * ATIVAÇÃO? (SPEC 065 §5.4/§5.5, achado de code review.)
+ *
+ * Antes esta checagem estava reimplementada byte a byte em
+ * `automations/validate.ts` (`validateChannelForActivation`) e
+ * `flows/validate.ts` (`validateFlowChannel`), já divergindo de wording
+ * entre as duas — exatamente a classe de bug que motivou centralizar
+ * `templateBelongsToWaba`/`selectableChannels` nesta mesma SPEC (§2.E).
+ * As duas continuam existindo (formas de `ValidationIssue` diferentes:
+ * `{path,message}` vs `{severity,scope,field,message}`), mas chamam esta
+ * função para a DECISÃO — só a mensagem final diverge, de propósito.
+ *
+ * `null` = tudo bem (ou nenhum canal escolhido — "vale para todos").
+ * Só `disabled` bloqueia: `error`/`disconnected` não, pelo mesmo motivo
+ * de `selectableChannels` (§5.1) — um número com problema continua
+ * utilizável para poder ser trocado, e no `whatsapp_cloud` o status só é
+ * reconciliado quando alguém passa pela rota de configuração
+ * (`lib/channels/status.ts`).
+ */
+export function channelActivationProblem(
+  channelId: string | null | undefined,
+  channel: { status: string } | null | undefined
+): 'not_found' | 'disabled' | null {
+  if (!channelId) return null;
+  if (!channel) return 'not_found';
+  // SPEC 064 D-12: "remover número" preserva o canal como `disabled`. Um
+  // recurso escopado nele nunca dispararia — deixá-lo ativo é a falha
+  // silenciosa que o AGENTS.md nomeia.
+  if (channel.status === 'disabled') return 'disabled';
+  return null;
+}
+
 export function scopedChannelError(reason: 'not_found' | 'read_failed'): {
   status: number;
   body: { error: string; code: string };

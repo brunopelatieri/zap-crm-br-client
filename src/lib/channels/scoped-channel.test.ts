@@ -5,7 +5,11 @@ import {
   type MockResult,
   type QueryOp,
 } from '@/lib/audience/supabase-mock';
-import { loadScopedChannel, scopedChannelError } from './scoped-channel';
+import {
+  channelActivationProblem,
+  loadScopedChannel,
+  scopedChannelError,
+} from './scoped-channel';
 
 const ACCOUNT = 'acct-1';
 const ROW = {
@@ -110,4 +114,33 @@ describe('scopedChannelError (SPEC 065 §6)', () => {
     expect(e.status).toBe(503);
     expect(e.body.code).toBe('channel_lookup_failed');
   });
+});
+
+// SPEC 065 §5.4/§5.5, achado de code review: `validateChannelForActivation`
+// (automações) e `validateFlowChannel` (fluxos) reimplementavam esta
+// decisão byte a byte, já divergindo em wording. Agora as duas chamam esta
+// função só para a DECISÃO — a mensagem final continua sendo de cada uma.
+describe('channelActivationProblem (SPEC 065 §5.4/§5.5)', () => {
+  it('sem channelId, tudo bem — "vale para todos os canais"', () => {
+    expect(channelActivationProblem(null, null)).toBeNull();
+    expect(channelActivationProblem(undefined, ROW)).toBeNull();
+  });
+
+  it('channelId presente mas canal ausente é "not_found" (inexistente OU de outra conta)', () => {
+    expect(channelActivationProblem('ch-a', null)).toBe('not_found');
+    expect(channelActivationProblem('ch-a', undefined)).toBe('not_found');
+  });
+
+  it('canal `disabled` bloqueia', () => {
+    expect(channelActivationProblem('ch-a', { status: 'disabled' })).toBe(
+      'disabled'
+    );
+  });
+
+  it.each(['connected', 'connecting', 'disconnected', 'error'])(
+    'status "%s" NÃO bloqueia — só disabled bloqueia (mesmo critério de selectableChannels)',
+    (status) => {
+      expect(channelActivationProblem('ch-a', { status })).toBeNull();
+    }
+  );
 });

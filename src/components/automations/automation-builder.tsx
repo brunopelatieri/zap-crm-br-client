@@ -96,15 +96,11 @@ import { VisualCronBuilder } from './visual-cron-builder';
  * BEFORE the save round-trip that would otherwise report it.
  */
 function accountChannelCoverage(
-  channels: { freeformOutsideWindow: boolean }[],
+  channels: { type: ChannelType }[],
   capability: ChannelCapabilityKey
 ): 'none' | 'some' | 'all' {
   const types: ChannelType[] =
-    channels.length > 0
-      ? channels.map((c) =>
-          c.freeformOutsideWindow ? 'whatsapp_qr' : 'whatsapp_cloud'
-        )
-      : ['whatsapp_cloud'];
+    channels.length > 0 ? channels.map((c) => c.type) : ['whatsapp_cloud'];
   return accountCapabilityCoverage(types, capability);
 }
 
@@ -1009,6 +1005,23 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
     }));
   }
 
+  // Troca de canal (SPEC 065, achado de code review): o WABA muda junto,
+  // então qualquer send_template/fallback_template já escolhido pode não
+  // servir mais para o número novo. Sem isto a automação salvava/ativava
+  // normalmente e só falhava em runtime, silenciosa, com
+  // `template_waba_mismatch` em `automation_logs` — o mesmo cuidado que
+  // o assistente de disparo já tem em `handleChannelChange`.
+  function changeChannelScope(next: string | null) {
+    setState((s) => {
+      if (next === s.channel_id) return s;
+      const { steps, cleared } = clearTemplateSteps(s.steps);
+      if (cleared) {
+        toast.warning(t('channelScope.templateResetWarning'));
+      }
+      return { ...s, channel_id: next, steps };
+    });
+  }
+
   // --- Step tree mutations (immutable) ---
 
   function updateStep(
@@ -1134,7 +1147,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
             propriedade da automação inteira, não do disparo. */}
         <ChannelScopeSelect
           channelId={state.channel_id}
-          onChange={(v) => patchTop('channel_id', v)}
+          onChange={changeChannelScope}
           t={t}
         />
       </header>
@@ -1448,7 +1461,7 @@ function ChannelCapabilityNotice({
   capability,
   t,
 }: {
-  channels: { id: string; freeformOutsideWindow: boolean }[];
+  channels: { id: string; type: ChannelType }[];
   capability: ChannelCapabilityKey;
   t: ReturnType<typeof useTranslations>;
 }) {
@@ -1459,10 +1472,7 @@ function ChannelCapabilityNotice({
     // Canal apagado sem `channel_id` mais gravado: a 075 já desativa a
     // automação nesse caso (D-8) — nada a avisar aqui além disso.
     if (!channel) return null;
-    const type: ChannelType = channel.freeformOutsideWindow
-      ? 'whatsapp_qr'
-      : 'whatsapp_cloud';
-    if (can(type, capability)) return null;
+    if (can(channel.type, capability)) return null;
     return (
       <p className="mt-1 text-[11px] text-amber-400">
         {t('channelCapabilityScopedWarn')}
@@ -2298,6 +2308,60 @@ function insertAt(
     list.splice(index, 0, node);
     return { ...s, branches: { ...s.branches, [parent.branch]: list } };
   });
+}
+
+/**
+ * Limpa todo `send_template` e `fallback_template` da árvore (SPEC 065,
+ * achado de code review) — trocar o canal escolhido troca o WABA, e um
+ * template já escolhido do canal ANTERIOR reproduz o `(#132001)` que o
+ * filtro por canal existe para evitar (§2.E). Mesma cautela que o
+ * assistente de disparo já toma em `handleChannelChange`
+ * (`app/(dashboard)/broadcasts/new/page.tsx`): limpa sempre, sem tentar
+ * adivinhar se o template continuaria válido — comparar contra a lista
+ * do canal novo exigiria esperar ela carregar, e nesse meio-tempo a
+ * automação ficaria salvável com um par (template, canal) incompatível.
+ */
+function clearTemplateSteps(steps: BuilderStep[]): {
+  steps: BuilderStep[];
+  cleared: boolean;
+} {
+  let cleared = false;
+
+  function clearOne(cfg: Record<string, unknown>): Record<string, unknown> {
+    if (!cfg.template_name) return cfg;
+    cleared = true;
+    return { ...cfg, template_name: '', language: 'en_US' };
+  }
+
+  function walk(list: BuilderStep[]): BuilderStep[] {
+    return list.map((s) => {
+      let step_config = s.step_config;
+      if (s.step_type === 'send_template') {
+        step_config = clearOne(step_config);
+      } else if (
+        (s.step_type === 'send_message' ||
+          s.step_type === 'send_buttons' ||
+          s.step_type === 'send_list') &&
+        step_config.on_window_closed === 'fallback_template' &&
+        step_config.fallback_template
+      ) {
+        const fallback = clearOne(
+          step_config.fallback_template as Record<string, unknown>
+        );
+        if (fallback !== step_config.fallback_template) {
+          step_config = { ...step_config, fallback_template: fallback };
+        }
+      }
+      const branches = s.branches
+        ? { yes: walk(s.branches.yes), no: walk(s.branches.no) }
+        : s.branches;
+      return step_config === s.step_config && branches === s.branches
+        ? s
+        : { ...s, step_config, branches };
+    });
+  }
+
+  return { steps: walk(steps), cleared };
 }
 
 function mapAtPath(

@@ -795,6 +795,9 @@ export async function planDashboardBroadcast(
     channelId,
     templateName: input.templateName,
     templateLanguage,
+    // `loadWhatsappConfig` já devolveu o WABA acima (achado de code
+    // review) — evita reconsultar `whatsapp_config`.
+    channelWabaId: wabaId,
   });
   const template = await loadTemplateForSend(
     db,
@@ -955,6 +958,9 @@ export async function planAbTestBroadcast(
       channelId,
       templateName: name,
       templateLanguage: language,
+      // Mesmo canal para os dois braços — `wabaId` já resolvido acima
+      // (achado de code review) evita reconsultar duas vezes.
+      channelWabaId: wabaId,
     });
   }
 

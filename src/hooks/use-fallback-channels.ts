@@ -6,6 +6,17 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import type { FallbackChannel } from '@/lib/automations/window-fallback';
 import type { ColdSendLimits } from '@/lib/channels/cold-send-limit';
+import type { ChannelType } from '@/lib/channels/types';
+
+/**
+ * `FallbackChannel` mais o `type` real (SPEC 065, achado de code
+ * review). `window-fallback.ts` continua puro e só enxerga
+ * `freeformOutsideWindow` — mas um consumidor desta tela que precise do
+ * `ChannelType` de verdade (ex.: capacidade de um passo, `can(type, …)`)
+ * não precisa mais reconstruí-lo às cegas a partir do booleano, que só
+ * distingue QR de Cloud e nunca daria certo para um terceiro tipo.
+ */
+export type FallbackChannelWithType = FallbackChannel & { type: ChannelType };
 
 export interface ColdSendPolicy extends ColdSendLimits {
   enabled: boolean;
@@ -56,9 +67,9 @@ export function useColdSendPolicy(): ColdSendPolicy | null {
  * Falha fechada de propósito — um erro de rede não pode fazer o
  * construtor oferecer um canal que o runtime não encontraria.
  */
-export function useFallbackChannels(): FallbackChannel[] {
+export function useFallbackChannels(): FallbackChannelWithType[] {
   const { accountId } = useAuth();
-  const [channels, setChannels] = useState<FallbackChannel[]>([]);
+  const [channels, setChannels] = useState<FallbackChannelWithType[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +101,7 @@ export function useFallbackChannels(): FallbackChannel[] {
           // Migra para `capabilities()` na F1, junto com o gêmeo em
           // `engine.ts`.
           freeformOutsideWindow: row.type === 'whatsapp_qr',
+          type: row.type as ChannelType,
         }))
       );
     })();

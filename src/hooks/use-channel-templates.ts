@@ -14,6 +14,14 @@ export interface ChannelTemplates {
   /** Templates `APPROVED` que ESTE canal consegue enviar. */
   templates: MessageTemplate[];
   loading: boolean;
+  /**
+   * `true` quando a ÚLTIMA tentativa de leitura falhou (achado de code
+   * review) — sem isto, uma falha transitória de RLS/rede virava
+   * `templates: []`, indistinguível de "esta conta não tem template
+   * nenhum". A tela decide o que fazer com o sinal (mostrar erro em vez
+   * do estado vazio de "criar o primeiro").
+   */
+  error: boolean;
   /** Força uma releitura — para quem sincroniza templates na mesma tela. */
   refetch: () => void;
 }
@@ -47,6 +55,7 @@ export function useChannelTemplates(
 ): ChannelTemplates {
   const { accountId } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[] | null>(null);
+  const [error, setError] = useState(false);
   const [nonce, setNonce] = useState(0);
 
   const refetch = useCallback(() => setNonce((n) => n + 1), []);
@@ -64,11 +73,19 @@ export function useChannelTemplates(
     // nunca ofereceu o template errado, não uma campanha rejeitada.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTemplates(null);
+    setError(false);
 
     (async () => {
       // Sem conta resolvida não dá para saber o WABA do canal, e listar
-      // sem filtrar mostraria templates de outro número.
-      if (!accountId) return;
+      // sem filtrar mostraria templates de outro número. Trata como
+      // "sem templates" (achado de code review) em vez de deixar
+      // `loading` preso em `true` para sempre: uma sessão parada/parcial
+      // nunca chamaria `setTemplates` de novo, e o seletor girava sem
+      // fim em vez de mostrar erro ou lista vazia.
+      if (!accountId) {
+        setTemplates([]);
+        return;
+      }
 
       const supabase = createClient();
 
@@ -90,11 +107,17 @@ export function useChannelTemplates(
       if (templatesResult.error) {
         // Sem a lista não há o que filtrar. Diferente de "não sei o
         // WABA", que falha aberto: aqui não existe lista nenhuma.
+        // `error: true` (achado de code review) é o que deixa a tela
+        // distinguir isto de "esta conta genuinamente não tem template
+        // nenhum" — as duas caíam no mesmo `templates: []` antes, e o
+        // operador via "crie seu primeiro template" para uma falha de
+        // rede/RLS transitória.
         console.error(
           '[use-channel-templates] falha ao carregar templates:',
           templatesResult.error
         );
         setTemplates([]);
+        setError(true);
         return;
       }
 
@@ -118,8 +141,9 @@ export function useChannelTemplates(
     () => ({
       templates: templates ?? [],
       loading: templates === null,
+      error,
       refetch,
     }),
-    [templates, refetch]
+    [templates, error, refetch]
   );
 }

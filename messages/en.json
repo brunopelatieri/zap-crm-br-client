@@ -1483,7 +1483,8 @@
         "subtitle": "Select an approved message template for your broadcast.",
         "noTemplates": "No templates available.",
         "createFirst": "Create a template in Settings first.",
-        "errorLoad": "Failed to load templates"
+        "errorLoad": "Failed to load templates",
+        "retry": "Retry"
       },
       "selectAudience": {
         "title": "Select Audience",
@@ -2120,7 +2121,8 @@
       "channelCapabilityScopedWarn": "The chosen number doesn't support this — the step will fail on every run.",
       "channelScope": {
         "label": "Applies to number",
-        "allChannels": "All numbers"
+        "allChannels": "All numbers",
+        "templateResetWarning": "Changing the number reset any chosen template — pick one approved for it."
       },
       "active": "Active",
       "activeAria": "Active",

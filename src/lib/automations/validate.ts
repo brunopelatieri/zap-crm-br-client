@@ -12,7 +12,10 @@ import {
   type ChannelCapabilityKey,
 } from '@/lib/channels/capabilities';
 import type { ChannelType } from '@/lib/channels/types';
-import type { ScopedChannel as ScopedChannelRow } from '@/lib/channels/scoped-channel';
+import {
+  channelActivationProblem,
+  type ScopedChannel as ScopedChannelRow,
+} from '@/lib/channels/scoped-channel';
 
 // ------------------------------------------------------------
 // Pre-flight config validation for automations about to be activated.
@@ -500,30 +503,15 @@ export function validateChannelForActivation(
   channelId: string | null | undefined,
   channel: ScopedChannelRow | null | undefined
 ): ValidationIssue[] {
-  if (!channelId) return [];
-
-  if (!channel) {
-    return [
-      {
-        path: 'channel_id',
-        message:
-          'the selected channel does not exist in this account — pick another number',
-      },
-    ];
-  }
-
-  // SPEC 064 D-12: "remover número" preserva o canal como `disabled`.
-  // Uma automação escopada nele nunca dispararia — deixá-la ativa é a
-  // falha silenciosa que o AGENTS.md nomeia.
-  if (channel.status === 'disabled') {
-    return [
-      {
-        path: 'channel_id',
-        message:
-          'the selected channel is disabled — reconnect the number or pick another one',
-      },
-    ];
-  }
-
-  return [];
+  const problem = channelActivationProblem(channelId, channel);
+  if (!problem) return [];
+  return [
+    {
+      path: 'channel_id',
+      message:
+        problem === 'not_found'
+          ? 'the selected channel does not exist in this account — pick another number'
+          : 'the selected channel is disabled — reconnect the number or pick another one',
+    },
+  ];
 }

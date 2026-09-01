@@ -37,6 +37,7 @@ import {
   assertTemplateChannelCompatible,
   findTemplateRowForWaba,
   TemplateChannelMismatchError,
+  type ChannelWabaId,
 } from '@/lib/whatsapp/template-waba';
 import {
   sanitizePhoneForMeta,
@@ -126,6 +127,8 @@ export async function assertBroadcastTemplateChannel(
     channelId: string | null | undefined;
     templateName: string;
     templateLanguage: string;
+    /** Já resolvido pelo chamador — ver o mesmo campo em `assertTemplateChannelCompatible`. */
+    channelWabaId?: ChannelWabaId;
   }
 ): Promise<void> {
   try {
@@ -315,6 +318,9 @@ export async function createBroadcast(
     channelId: channel.id,
     templateName,
     templateLanguage,
+    // `resolveCloudConfig` já devolveu o WABA acima (achado de code
+    // review) — evita reconsultar `whatsapp_config`.
+    channelWabaId: config.waba_id ?? null,
   });
 
   // Template row (once) for header/button components; guard a

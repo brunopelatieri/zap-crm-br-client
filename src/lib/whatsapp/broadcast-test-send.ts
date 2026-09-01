@@ -156,6 +156,9 @@ export async function sendBroadcastTest(
     channelId: channel.id,
     templateName: input.templateName,
     templateLanguage,
+    // `resolveCloudConfig` já devolveu o WABA acima (achado de code
+    // review) — evita reconsultar `whatsapp_config`.
+    channelWabaId: config.waba_id ?? null,
   });
 
   const rawTemplateRow = await findTemplateRowForWaba(db, {

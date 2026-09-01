@@ -200,6 +200,9 @@ export async function sendIngestTemplate(
       channelId: channel.id,
       templateName: template.name,
       templateLanguage: template.language || 'en_US',
+      // `resolveCloudConfig` já devolveu o WABA acima (achado de code
+      // review) — evita reconsultar `whatsapp_config`.
+      channelWabaId: config.waba_id ?? null,
     });
   } catch (err) {
     if (!(err instanceof TemplateChannelMismatchError)) throw err;

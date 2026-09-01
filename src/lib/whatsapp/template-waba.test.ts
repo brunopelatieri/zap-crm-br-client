@@ -329,3 +329,72 @@ describe('assertTemplateChannelCompatible (SPEC 065 D-3)', () => {
     ).rejects.toThrow(TemplateChannelMismatchError);
   });
 });
+
+// ------------------------------------------------------------
+// SPEC 065 §11, achado de code review — `channelWabaId` pré-resolvido
+// evita reconsultar `whatsapp_config` quando o chamador já o tem em
+// mãos (todos os seis pontos de chamada resolvem a credencial do canal
+// segundos antes, e cada um pagava uma segunda leitura idêntica).
+// ------------------------------------------------------------
+describe('assertTemplateChannelCompatible — channelWabaId pré-resolvido (SPEC 065 §11)', () => {
+  it('com channelWabaId informado, NUNCA consulta whatsapp_config', async () => {
+    const mock = createSupabaseMock((table) => {
+      if (table === 'message_templates') {
+        return { data: [{ id: 't-a', waba_id: 'waba-a' }] };
+      }
+      // whatsapp_config não deveria nem ser perguntado.
+      return undefined;
+    });
+
+    await expect(
+      assertTemplateChannelCompatible(mock.db, {
+        ...COMPAT,
+        channelWabaId: 'waba-a',
+      })
+    ).resolves.toBeUndefined();
+
+    expect(mock.callsFor('whatsapp_config')).toHaveLength(0);
+  });
+
+  it('channelWabaId incompatível recusa com o mesmo mismatch, sem consultar whatsapp_config', async () => {
+    const mock = createSupabaseMock((table) => {
+      if (table === 'message_templates') {
+        return { data: [{ id: 't-b', waba_id: 'waba-b' }] };
+      }
+      return undefined;
+    });
+
+    await expect(
+      assertTemplateChannelCompatible(mock.db, {
+        ...COMPAT,
+        channelWabaId: 'waba-a',
+      })
+    ).rejects.toThrow(TemplateChannelMismatchError);
+    expect(mock.callsFor('whatsapp_config')).toHaveLength(0);
+  });
+
+  it('channelWabaId: null (canal Cloud sem WABA gravado) só aceita legado, sem consultar whatsapp_config', async () => {
+    const mock = createSupabaseMock((table) => {
+      if (table === 'message_templates') {
+        return { data: [{ id: 't-a', waba_id: 'waba-a' }] };
+      }
+      return undefined;
+    });
+
+    await expect(
+      assertTemplateChannelCompatible(mock.db, {
+        ...COMPAT,
+        channelWabaId: null,
+      })
+    ).rejects.toThrow(TemplateChannelMismatchError);
+    expect(mock.callsFor('whatsapp_config')).toHaveLength(0);
+  });
+
+  it('channelWabaId AUSENTE volta a consultar whatsapp_config, como antes (compatibilidade)', async () => {
+    const db = makeCompatDb([{ id: 't-a', waba_id: 'waba-a' }]);
+
+    await expect(
+      assertTemplateChannelCompatible(db, COMPAT)
+    ).resolves.toBeUndefined();
+  });
+});

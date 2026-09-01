@@ -228,6 +228,10 @@ async function sendViaMeta(
         channelId: resolvedChannelId,
         templateName: input.templateName,
         templateLanguage: input.language || 'en_US',
+        // Já resolvido acima (linhas 190-193) — evita reconsultar
+        // `whatsapp_config` no caminho quente de todo passo
+        // `send_template` (achado de code review).
+        channelWabaId: wabaId,
       });
     }
     if (mayHaveTemplate) {

@@ -29,6 +29,7 @@
  */
 
 import { INTERACTIVE_LIMITS } from '@/lib/whatsapp/meta-api';
+import { channelActivationProblem } from '@/lib/channels/scoped-channel';
 
 export interface ValidationIssue {
   severity: 'error' | 'warning';
@@ -822,17 +823,11 @@ export interface ScopedFlowChannel {
 /**
  * O canal escolhido para o fluxo serve? (SPEC 065 §5.5)
  *
- * Gêmeo de `validateChannelForActivation` das automações, com o formato
- * de `ValidationIssue` deste módulo (`severity` obrigatório). `channel`
- * nulo com `channelId` preenchido cobre id inexistente E id de outra
- * conta — indistinguíveis de propósito, porque distinguir confirmaria
- * que o id existe em algum lugar.
- *
- * Só `disabled` bloqueia: `error`/`disconnected` não, pelo mesmo motivo
- * de `selectableChannels` (§5.1) — um número com problema continua
- * utilizável para poder ser trocado, e no `whatsapp_cloud` o status só
- * é reconciliado quando alguém passa pela rota de configuração
- * (`lib/channels/status.ts`).
+ * A decisão em si (achado de code review) é `channelActivationProblem`
+ * (`lib/channels/scoped-channel.ts`), compartilhada com o gêmeo das
+ * automações (`validateChannelForActivation`) — as duas reimplementavam
+ * a mesma regra byte a byte, já divergindo em wording. Só a FORMA de
+ * `ValidationIssue` diverge aqui (`severity` obrigatório).
  *
  * ⚠️ **Capacidade do canal NÃO é checada aqui**, ao contrário do lado
  * das automações — onde `validateStepsForActivation` já recebia os
@@ -847,33 +842,17 @@ export function validateFlowChannel(
   channelId: string | null | undefined,
   channel: ScopedFlowChannel | null | undefined
 ): ValidationIssue[] {
-  if (!channelId) return [];
-
-  if (!channel) {
-    return [
-      {
-        severity: 'error',
-        scope: 'flow',
-        field: 'channel_id',
-        message:
-          'The selected channel does not exist in this account — pick another number.',
-      },
-    ];
-  }
-
-  // SPEC 064 D-12: "remover número" preserva o canal como `disabled`.
-  // Um fluxo escopado nele nunca dispararia.
-  if (channel.status === 'disabled') {
-    return [
-      {
-        severity: 'error',
-        scope: 'flow',
-        field: 'channel_id',
-        message:
-          'The selected channel is disabled — reconnect the number or pick another one.',
-      },
-    ];
-  }
-
-  return [];
+  const problem = channelActivationProblem(channelId, channel);
+  if (!problem) return [];
+  return [
+    {
+      severity: 'error',
+      scope: 'flow',
+      field: 'channel_id',
+      message:
+        problem === 'not_found'
+          ? 'The selected channel does not exist in this account — pick another number.'
+          : 'The selected channel is disabled — reconnect the number or pick another one.',
+    },
+  ];
 }

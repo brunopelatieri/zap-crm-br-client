@@ -685,11 +685,22 @@ async function runStep(
         );
       }
 
-      await db
+      let assignQuery = db
         .from('conversations')
         .update({ assigned_agent_id: agentId })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId);
+      // SPEC 065 D-4 (achado de code review): uma automação ESCOPADA a
+      // um canal só pode reatribuir a conversa DAQUELE canal — sem
+      // isto, ela reatribuía as conversas do contato em TODO canal da
+      // conta, já que desde a migração 059 um contato pode ter uma
+      // conversa por canal. Sem escopo (`channel_id` null), o
+      // comportamento continua o de sempre: qualquer conversa do
+      // contato.
+      if (args.automation.channel_id) {
+        assignQuery = assignQuery.eq('channel_id', args.automation.channel_id);
+      }
+      await assignQuery;
       return success(`assigned to ${agentId}`);
     }
 
@@ -807,11 +818,19 @@ async function runStep(
     case 'close_conversation': {
       if (!args.contactId)
         throw new Error('close_conversation needs a contact');
-      await db
+      let closeQuery = db
         .from('conversations')
         .update({ status: 'closed', updated_at: new Date().toISOString() })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId);
+      // Mesmo cuidado de `assign_conversation` acima (SPEC 065 D-4,
+      // achado de code review): sem isto, fechar a conversa de uma
+      // automação escopada a um número fechava a conversa do contato em
+      // TODOS os números da conta.
+      if (args.automation.channel_id) {
+        closeQuery = closeQuery.eq('channel_id', args.automation.channel_id);
+      }
+      await closeQuery;
       return success('conversation closed');
     }
 

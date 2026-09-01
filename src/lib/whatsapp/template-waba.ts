@@ -252,11 +252,26 @@ export async function assertTemplateChannelCompatible(
     channelId: string | null | undefined;
     templateName: string;
     templateLanguage: string;
+    /**
+     * WABA do canal, quando o chamador JÁ o resolveu (achado de code
+     * review). `resolveCloudConfig`/`loadWhatsappConfig`/
+     * `resolveChannelForConversation` devolvem `waba_id` como parte da
+     * credencial, momentos antes de todo chamador desta função — sem
+     * este atalho, `wabaIdOfChannel` reconsultava `whatsapp_config` do
+     * zero em cada um dos seis pontos de chamada, inclusive no caminho
+     * quente de `automations/meta-send.ts` (uma vez por passo
+     * `send_template` executado). Ausente = resolve aqui, como sempre;
+     * `undefined` explícito tem o mesmo efeito que omitir o campo.
+     */
+    channelWabaId?: ChannelWabaId;
   }
 ): Promise<void> {
   const { accountId, channelId, templateName, templateLanguage } = params;
 
-  const channelWabaId = await wabaIdOfChannel(db, accountId, channelId);
+  const channelWabaId =
+    params.channelWabaId !== undefined
+      ? params.channelWabaId
+      : await wabaIdOfChannel(db, accountId, channelId);
   if (channelWabaId === undefined) return;
 
   const candidates = await loadTemplateCandidates(db, {

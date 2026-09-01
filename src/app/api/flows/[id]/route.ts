@@ -5,6 +5,7 @@ import {
   loadScopedChannel,
   scopedChannelError,
 } from '@/lib/channels/scoped-channel';
+import { validateFlowChannel } from '@/lib/flows/validate';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 
 /**
@@ -163,16 +164,37 @@ export async function PUT(
       const e = scopedChannelError(lookup.reason);
       return NextResponse.json(e.body, { status: e.status });
     }
+
+    // Achado de code review: PUT não tem campo `status` (só
+    // `/activate` liga um fluxo), então "continua ativo depois deste
+    // PUT" é simplesmente "está ativo agora". Sem esta checagem, um
+    // fluxo ativo podia ser re-escopado para um canal `disabled` sem
+    // erro nenhum — ele só parava de casar qualquer mensagem em
+    // `dispatchInboundToFlows` (filtro por `channel_id` exato),
+    // silenciosamente, o mesmo gêmeo do PATCH de automações
+    // (`validateChannelForActivation`) que já bloqueia esse caso.
+    const { data: current } = await admin
+      .from('flows')
+      .select('status, channel_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (current?.status === 'active') {
+      const issues = validateFlowChannel(scopedChannelId, lookup.channel);
+      const blockers = issues.filter((i) => i.severity !== 'warning');
+      if (blockers.length > 0) {
+        return NextResponse.json(
+          { error: 'Cannot keep flow active with invalid channel', issues },
+          { status: 400 }
+        );
+      }
+    }
+
     flowPatch.channel_id = scopedChannelId;
 
     if (scopedChannelId === null) {
-      const { data: before } = await admin
-        .from('flows')
-        .select('status, channel_id')
-        .eq('id', id)
-        .maybeSingle();
       clearedChannelWhileActive =
-        before?.status === 'active' && before?.channel_id != null;
+        current?.status === 'active' && current?.channel_id != null;
     }
   }
 
@@ -189,10 +211,20 @@ export async function PUT(
     // gatilho é BEFORE e sobrescreveria `NEW.status` na mesma
     // instrução. Este não toca em `channel_id`, então
     // `BEFORE UPDATE OF channel_id` nem dispara.
-    const { error: reErr } = await admin
+    //
+    // `.eq('status', 'draft')` (achado de code review) é uma trava de
+    // concorrência otimista: só reativa se a linha ainda estiver
+    // exatamente no estado que o GATILHO acabou de deixar. As duas
+    // UPDATEs não são uma transação — sem esta trava, um PUT/activate
+    // concorrente no mesmo fluxo, entre elas, teria seu resultado
+    // sobrescrito às cegas por esta reativação. Zero linhas casadas não
+    // é erro: outra requisição já decidiu o estado final.
+    const { data: reactivated, error: reErr } = await admin
       .from('flows')
       .update({ status: 'active' })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('status', 'draft')
+      .select('id');
     if (reErr) {
       return NextResponse.json(
         {
@@ -200,6 +232,12 @@ export async function PUT(
           code: 'reactivate_failed',
         },
         { status: 500 }
+      );
+    }
+    if (!reactivated || reactivated.length === 0) {
+      console.warn(
+        '[flows] reactivation after channel clear matched no row — a concurrent request already changed it',
+        id
       );
     }
   }

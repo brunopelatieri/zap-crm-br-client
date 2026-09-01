@@ -651,6 +651,112 @@ describe('assign_conversation — eligibility of the target (F-41-A)', () => {
 });
 
 // ============================================================
+// assign_conversation / close_conversation — escopo de canal
+// (SPEC 065 D-4, achado de code review)
+//
+// Desde a migração 059 um contato pode ter UMA CONVERSA POR CANAL. Uma
+// automação escopada a um número só pode mexer na conversa DAQUELE
+// número — sem o filtro `channel_id`, ela reatribuía/fechava as
+// conversas do contato em TODOS os canais da conta.
+// ============================================================
+
+describe('assign_conversation / close_conversation — escopo de canal (SPEC 065 D-4)', () => {
+  it('assign_conversation: automação ESCOPADA filtra o UPDATE por channel_id', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.eligibleProfile = { user_id: 'agent-1' };
+    h.state.automations = [
+      { ...automationWithUpdateStep(), channel_id: 'ch-a' },
+    ];
+    h.state.steps = [assignStep({ mode: 'specific', agent_id: 'agent-1' })];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {},
+    });
+
+    const updates = conversationUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].filters).toContainEqual(['eq', 'account_id', ACCOUNT]);
+    expect(updates[0].filters).toContainEqual(['eq', 'contact_id', 'c1']);
+    expect(updates[0].filters).toContainEqual(['eq', 'channel_id', 'ch-a']);
+  });
+
+  it('assign_conversation: automação SEM escopo ("Todos os números") não filtra por canal — comportamento de sempre', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.eligibleProfile = { user_id: 'agent-1' };
+    h.state.automations = [automationWithUpdateStep()]; // channel_id ausente
+    h.state.steps = [assignStep({ mode: 'specific', agent_id: 'agent-1' })];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {},
+    });
+
+    const updates = conversationUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].filters.some(([, k]) => k === 'channel_id')).toBe(false);
+  });
+
+  it('close_conversation: automação ESCOPADA filtra o UPDATE por channel_id', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [
+      { ...automationWithUpdateStep(), channel_id: 'ch-b' },
+    ];
+    h.state.steps = [
+      {
+        id: 's1',
+        automation_id: 'a1',
+        step_type: 'close_conversation',
+        position: 0,
+        parent_step_id: null,
+        step_config: {},
+      },
+    ];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {},
+    });
+
+    const updates = conversationUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].filters).toContainEqual(['eq', 'channel_id', 'ch-b']);
+  });
+
+  it('close_conversation: automação SEM escopo fecha sem filtrar por canal — comportamento de sempre', async () => {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [automationWithUpdateStep()];
+    h.state.steps = [
+      {
+        id: 's1',
+        automation_id: 'a1',
+        step_type: 'close_conversation',
+        position: 0,
+        parent_step_id: null,
+        step_config: {},
+      },
+    ];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {},
+    });
+
+    const updates = conversationUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].filters.some(([, k]) => k === 'channel_id')).toBe(false);
+  });
+});
+
+// ============================================================
 // SPEC 045 — janela de sessão de 24h (fases 2 e 3)
 // ============================================================
 
