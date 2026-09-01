@@ -42,6 +42,7 @@ export default function NewAutomationPage() {
         description: tpl.description,
         trigger_type: tpl.trigger_type,
         trigger_config: tpl.trigger_config as Record<string, unknown>,
+        channel_id: null,
         is_active: false,
         steps,
       };
@@ -51,6 +52,7 @@ export default function NewAutomationPage() {
       description: '',
       trigger_type: 'new_message_received' as AutomationTriggerType,
       trigger_config: {},
+      channel_id: null,
       is_active: false,
       steps: [],
     };

@@ -47,6 +47,9 @@ import {
 } from '@/lib/automations/templates';
 import { triggerMeta, formatRelative } from '@/lib/automations/trigger-meta';
 import { cn } from '@/lib/utils';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import { ChannelBadge } from '@/components/channels/channel-badge';
+import type { Channel } from '@/lib/channels/types';
 
 const TEMPLATE_ORDER: TemplateSlug[] = [
   'welcome_message',
@@ -71,6 +74,7 @@ export default function AutomationsPage() {
   const router = useRouter();
   const canCreate = useCan('send-messages');
   const t = useTranslations('Automations.list');
+  const channels = useAccountChannels();
   const [automations, setAutomations] = useState<Automation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
@@ -246,6 +250,11 @@ export default function AutomationsPage() {
             <AutomationCard
               key={a.id}
               automation={a}
+              channel={
+                channels.count > 1 && a.channel_id
+                  ? channels.byId.get(a.channel_id)
+                  : undefined
+              }
               onToggle={(next) => toggleActive(a, next)}
               onEdit={() => router.push(`/automations/${a.id}/edit`)}
               onDuplicate={() => duplicate(a)}
@@ -297,6 +306,7 @@ export default function AutomationsPage() {
 
 function AutomationCard({
   automation,
+  channel,
   onToggle,
   onEdit,
   onDuplicate,
@@ -305,6 +315,8 @@ function AutomationCard({
   t,
 }: {
   automation: Automation;
+  /** Undefined = conta com um canal só, ou automação "Todos os números" — nada a rotular. */
+  channel: Channel | undefined;
   onToggle: (next: boolean) => void;
   onEdit: () => void;
   onDuplicate: () => void;
@@ -359,6 +371,7 @@ function AutomationCard({
             >
               {triggerLabel}
             </span>
+            {channel && <ChannelBadge channel={channel} />}
             <span className="tabular-nums">
               {automation.execution_count === 1
                 ? t('runs', { count: automation.execution_count })

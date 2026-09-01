@@ -2117,6 +2117,11 @@
       "ignoreBusinessHoursHint": "Ligado por padrão: a janela de 24h não espera, então este gatilho envia mesmo à noite ou no fim de semana. Desligue para só enviar em horário comercial (09:00–20:00, dias úteis) — algumas conversas podem então perder a janela.",
       "channelCapabilityNoneWarn": "Nenhum canal desta conta tem suporte a isto — o passo vai falhar em toda execução.",
       "channelCapabilitySomeWarn": "Só funciona em canais com suporte a isto — o passo vai falhar, com o motivo registrado, se a automação rodar numa conversa de um canal sem suporte.",
+      "channelCapabilityScopedWarn": "O número escolhido não tem suporte a isto — o passo vai falhar em toda execução.",
+      "channelScope": {
+        "label": "Vale para o número",
+        "allChannels": "Todos os números"
+      },
       "active": "Ativo",
       "activeAria": "Ativo",
       "save": "Salvar",
@@ -2312,6 +2317,8 @@
       "triggerManualTitle": "Somente manual (sem gatilho automático)",
       "keywordsLabel": "Palavras-chave (separadas por vírgula)",
       "keywordsPlaceholder": "suporte, ajuda, oi",
+      "keywordConflictScopedWins": "Esta palavra-chave também casa com \"{name}\", que vale para todos os números — no número deste fluxo, este fluxo ganha (um fluxo escopado a um número sempre ganha de um genérico).",
+      "keywordConflictGenericLoses": "Esta palavra-chave também casa com \"{name}\", que está escopado a um número — nesse número, \"{name}\" ganha deste fluxo (um fluxo escopado a um número sempre ganha de um genérico).",
       "entryNodeTitle": "Nó de entrada:",
       "entryNodePlaceholder": "Escolha o primeiro nó…",
       "nodesTitle": "Nós ({count})",
@@ -2447,7 +2454,11 @@
       "fixIssues": "Corrija os problemas abaixo antes de ativar.",
       "statusActivated": "Fluxo ativado.",
       "statusArchived": "Arquivado.",
-      "statusDraft": "Salvo como rascunho."
+      "statusDraft": "Salvo como rascunho.",
+      "channelScope": {
+        "label": "Vale para o número",
+        "allChannels": "Todos os números"
+      }
     },
     "summary": {
       "options": "{count} {count, plural, =1 {opção} other {opções}}",

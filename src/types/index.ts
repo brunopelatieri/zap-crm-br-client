@@ -589,6 +589,12 @@ export interface Broadcast {
   /** SPEC 055 D-15. Conta POSTs aceitos (com ou sem disparo) — distinto
    *  de `total_recipients`, que só conta envios tentados. */
   ingested_count?: number;
+  /**
+   * Número oficial escolhido em "Enviar por" (SPEC 064 D-3, migração
+   * 072; seleção no wizard desde a SPEC 065 F5). `null` = canal Cloud
+   * padrão da conta no momento do disparo.
+   */
+  channel_id?: string | null;
   status: BroadcastStatus;
   total_recipients: number;
   sent_count: number;

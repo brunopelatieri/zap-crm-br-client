@@ -2117,6 +2117,11 @@
       "ignoreBusinessHoursHint": "On by default: the 24h window doesn't wait, so this trigger sends even at night or on weekends. Turn it off to only send during business hours (09:00–20:00, weekdays) — some conversations may then miss their window.",
       "channelCapabilityNoneWarn": "No channel in this account supports this — the step will fail on every run.",
       "channelCapabilitySomeWarn": "Only works on channels that support it — the step will fail with the reason logged if this automation runs on a conversation from a channel without it.",
+      "channelCapabilityScopedWarn": "The chosen number doesn't support this — the step will fail on every run.",
+      "channelScope": {
+        "label": "Applies to number",
+        "allChannels": "All numbers"
+      },
       "active": "Active",
       "activeAria": "Active",
       "save": "Save",
@@ -2312,6 +2317,8 @@
       "triggerManualTitle": "Manual only (no auto-trigger)",
       "keywordsLabel": "Keywords (comma-separated)",
       "keywordsPlaceholder": "support, help, hi",
+      "keywordConflictScopedWins": "This keyword also matches \"{name}\", which applies to all numbers — on this flow's number, this flow wins (a flow scoped to a number always beats a generic one).",
+      "keywordConflictGenericLoses": "This keyword also matches \"{name}\", which is scoped to one number — on that number, \"{name}\" wins over this flow (a flow scoped to a number always beats a generic one).",
       "entryNodeTitle": "Entry node:",
       "entryNodePlaceholder": "Pick the first node…",
       "nodesTitle": "Nodes ({count})",
@@ -2447,7 +2454,11 @@
       "fixIssues": "Fix the issues below before activating.",
       "statusActivated": "Flow activated.",
       "statusArchived": "Archived.",
-      "statusDraft": "Saved as draft."
+      "statusDraft": "Saved as draft.",
+      "channelScope": {
+        "label": "Applies to number",
+        "allChannels": "All numbers"
+      }
     },
     "summary": {
       "options": "{count} {count, plural, =1 {option} other {options}}",

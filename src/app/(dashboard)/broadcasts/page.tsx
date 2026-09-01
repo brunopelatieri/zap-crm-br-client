@@ -18,6 +18,8 @@ import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
 import { useTranslations } from 'next-intl';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import { ChannelBadge } from '@/components/channels/channel-badge';
 
 /**
  * Poll cadence while any broadcast is sending. Kept modest so we don't
@@ -73,6 +75,7 @@ export default function BroadcastsPage() {
   const tStatus = useTranslations('Broadcasts.status');
   const tSource = useTranslations('Broadcasts.sourceFilter');
   const canCreate = useCan('send-messages');
+  const channels = useAccountChannels();
   const [view, setView] = useState<BroadcastView>('campaigns');
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
@@ -318,6 +321,11 @@ export default function BroadcastsPage() {
                           <span className="border-primary/30 bg-primary/10 text-primary inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
                             {t('variant', { variant: broadcast.variant_label })}
                           </span>
+                        )}
+                        {channels.count > 1 && broadcast.channel_id && (
+                          <ChannelBadge
+                            channel={channels.byId.get(broadcast.channel_id)}
+                          />
                         )}
                       </span>
                     </TableCell>

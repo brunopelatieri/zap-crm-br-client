@@ -65,6 +65,13 @@ export interface BuilderState {
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
   status: FlowRow['status'];
+  /**
+   * Canal a que este fluxo está escopado (SPEC 065 D-6). `null` = vale
+   * para todos os canais — o comportamento de todo fluxo anterior a esta
+   * coluna. Escopo do GATILHO apenas: o fluxo sempre responde pelo canal
+   * da conversa, nunca por este campo.
+   */
+  channel_id: string | null;
   nodes: BuilderNode[];
 }
 
@@ -241,6 +248,7 @@ export function FlowEditorProvider({
     trigger_config: initialFlow.trigger_config as Record<string, unknown>,
     entry_node_id: initialFlow.entry_node_id,
     status: initialFlow.status,
+    channel_id: initialFlow.channel_id ?? null,
     nodes: initialNodes.map((n) => ({
       node_key: n.node_key,
       node_type: n.node_type as NodeType,
@@ -335,6 +343,7 @@ export function FlowEditorProvider({
           trigger_type: state.trigger_type,
           trigger_config: state.trigger_config,
           entry_node_id: state.entry_node_id,
+          channel_id: state.channel_id,
           nodes: state.nodes,
         }),
       });

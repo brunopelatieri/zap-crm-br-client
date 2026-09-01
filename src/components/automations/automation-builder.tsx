@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
@@ -77,9 +78,14 @@ import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 import {
   accountCapabilityCoverage,
+  can,
   type ChannelCapabilityKey,
 } from '@/lib/channels/capabilities';
 import type { ChannelType } from '@/lib/channels/types';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import { selectableChannels } from '@/lib/channels/selectable';
+import { useChannelTemplates } from '@/hooks/use-channel-templates';
+import { buildWabaGroups } from '@/lib/whatsapp/waba-groups';
 import { VisualCronBuilder } from './visual-cron-builder';
 
 /**
@@ -120,6 +126,11 @@ export interface BuilderInitial {
   description: string;
   trigger_type: AutomationTriggerType;
   trigger_config: Record<string, unknown>;
+  /**
+   * Canal a que a automação está escopada (SPEC 065 D-4). `null` =
+   * "Todos os números" — o comportamento de toda automação existente.
+   */
+  channel_id: string | null;
   is_active: boolean;
   steps: BuilderStep[];
 }
@@ -354,10 +365,27 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
 interface AutomationResources {
   tags: TagRecord[];
   members: AccountMember[];
+  /**
+   * Templates que o canal ESCOLHIDO (`channelId` abaixo) pode enviar —
+   * já filtrados por `useChannelTemplates` (SPEC 065 D-2). Com "Todos os
+   * números" (`channelId === null`), a lista falha aberto: vem inteira,
+   * sem filtrar, e `wabaLabels` é o que deixa o autor ver a qual número
+   * cada opção pertence antes de escolher.
+   */
   templates: MessageTemplate[];
   customFields: CustomField[];
   pipelines: PipelineOption[];
   stages: PipelineStageOption[];
+  /** Canal a que a automação está escopada — mesmo valor de `state.channel_id`,
+   *  exposto para os avisos de capacidade por passo (SPEC 065 §7.2). */
+  channelId: string | null;
+  /**
+   * `waba_id → nome(s) de canal`, só populado quando `channelId` é
+   * `null` — é exatamente quando a lista de templates mistura WABAs
+   * diferentes e o selo evita reproduzir o `#132001` (escolher um
+   * template de um WABA que este canal não fala) às cegas.
+   */
+  wabaLabels: Map<string, string>;
 }
 
 interface PipelineOption {
@@ -379,37 +407,44 @@ const ResourcesContext = createContext<AutomationResources>({
   customFields: [],
   pipelines: [],
   stages: [],
+  channelId: null,
+  wabaLabels: new Map(),
 });
 
 function useResources(): AutomationResources {
   return useContext(ResourcesContext);
 }
 
-function ResourcesProvider({ children }: { children: ReactNode }) {
+function ResourcesProvider({
+  channelId,
+  children,
+}: {
+  channelId: string | null;
+  children: ReactNode;
+}) {
   const [tags, setTags] = useState<TagRecord[]>([]);
   const [members, setMembers] = useState<AccountMember[]>([]);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [pipelines, setPipelines] = useState<PipelineOption[]>([]);
   const [stages, setStages] = useState<PipelineStageOption[]>([]);
+  // SPEC 065 D-2 — o mesmo hook que o passo "escolher template" da
+  // campanha usa. Substitui a leitura direta de `message_templates` que
+  // havia aqui: com `channelId` (o WABA do canal), a lista já vem
+  // filtrada; com `null` ("Todos os números"), falha aberto e devolve
+  // tudo — mesmo comportamento de antes desta SPEC.
+  const { templates } = useChannelTemplates(channelId);
+  const [wabaLabels, setWabaLabels] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
     const supabase = createClient();
 
-    // Tags, templates and custom fields come straight from the DB — RLS
-    // scopes them to the caller's account. Only APPROVED templates can
-    // actually be sent (anything else 400s at send time), matching the
-    // broadcast picker.
+    // Tags and custom fields come straight from the DB — RLS scopes
+    // them to the caller's account.
     void (async () => {
-      const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes] =
+      const [tagsRes, customFieldsRes, pipelinesRes, stagesRes] =
         await Promise.all([
           supabase.from('tags').select('*').order('name'),
-          supabase
-            .from('message_templates')
-            .select('*')
-            .eq('status', 'APPROVED')
-            .order('name'),
           supabase.from('custom_fields').select('*').order('field_name'),
           supabase.from('pipelines').select('id, name').order('name'),
           supabase
@@ -419,7 +454,6 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
         ]);
       if (cancelled) return;
       setTags((tagsRes.data as TagRecord[] | null) ?? []);
-      setTemplates((templatesRes.data as MessageTemplate[] | null) ?? []);
       setCustomFields((customFieldsRes.data as CustomField[] | null) ?? []);
       setPipelines((pipelinesRes.data as PipelineOption[] | null) ?? []);
       setStages((stagesRes.data as PipelineStageOption[] | null) ?? []);
@@ -444,9 +478,60 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Selo de WABA na lista de templates (SPEC 065 §7.2 item 2) — só faz
+  // sentido buscar quando a lista pode misturar WABAs, ou seja, com
+  // "Todos os números". Mesma fonte que a aba WhatsApp Oficial usa
+  // (`GET /api/whatsapp/config`), pelo mesmo motivo documentado em
+  // `template-manager.tsx`: já devolve `waba_id` sem segredo nenhum.
+  useEffect(() => {
+    if (channelId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setWabaLabels(new Map());
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/whatsapp/config', { cache: 'no-store' });
+        const payload = await res.json().catch(() => null);
+        const channels = (payload?.channels ?? []) as {
+          channel_id: string;
+          name: string;
+          is_default: boolean;
+          waba_id: string | null;
+        }[];
+        if (cancelled || !channels.length) return;
+        const groups = buildWabaGroups(
+          channels.map((c) => ({
+            channelId: c.channel_id,
+            name: c.name,
+            isDefault: c.is_default,
+            wabaId: c.waba_id,
+          }))
+        );
+        setWabaLabels(new Map(groups.map((g) => [g.wabaId, g.label])));
+      } catch {
+        // Best-effort: sem grupos, a lista aparece sem selo — nunca
+        // impede escolher um template, só perde a pista visual.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId]);
+
   return (
     <ResourcesContext.Provider
-      value={{ tags, members, templates, customFields, pipelines, stages }}
+      value={{
+        tags,
+        members,
+        templates,
+        customFields,
+        pipelines,
+        stages,
+        channelId,
+        wabaLabels,
+      }}
     >
       {children}
     </ResourcesContext.Provider>
@@ -713,7 +798,7 @@ function SendTemplateFields({
   onChange: (patch: { template_name: string; language: string }) => void;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const { templates } = useResources();
+  const { templates, channelId, wabaLabels } = useResources();
 
   if (templates.length === 0) {
     return (
@@ -764,9 +849,18 @@ function SendTemplateFields({
         <option value="">{t('templates.select')}</option>
         {templates.map((tmpl) => {
           const lang = tmpl.language ?? 'en_US';
+          // SPEC 065 §7.2 item 2 — só com "Todos os números" (sem
+          // `channelId`) a lista mistura WABAs; o selo é o que deixa o
+          // autor ver qual número cada template pertence ANTES de
+          // escolher (senão `assertTemplateChannelCompatible` recusa no
+          // disparo, sem que a tela tenha dado nenhuma pista aqui).
+          const wabaSuffix =
+            !channelId && tmpl.waba_id && wabaLabels.get(tmpl.waba_id)
+              ? ` — ${wabaLabels.get(tmpl.waba_id)}`
+              : '';
           return (
             <option key={tmpl.id} value={toValue(tmpl.name, lang)}>
-              {tmpl.name} ({lang})
+              {tmpl.name} ({lang}){wabaSuffix}
             </option>
           );
         })}
@@ -955,6 +1049,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         description: state.description || null,
         trigger_type: state.trigger_type,
         trigger_config: state.trigger_config,
+        channel_id: state.channel_id,
         is_active: state.is_active,
         steps: toApiSteps(state.steps),
       };
@@ -1001,44 +1096,54 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
       {/* Top bar. At sub-sm widths the "Active" label is hidden and the
           switch moves to the right of the save button, so the name input
           gets maximum width. */}
-      <header className="border-border bg-card/80 flex flex-shrink-0 items-center gap-2 border-b px-3 py-3 sm:gap-3 sm:px-4">
-        <button
-          type="button"
-          onClick={() => router.push('/automations')}
-          className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors"
-          aria-label={t('backToAutomations')}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <input
-          value={state.name}
-          onChange={(e) => patchTop('name', e.target.value)}
-          placeholder={t('untitled')}
-          className="text-foreground placeholder:text-muted-foreground focus:bg-muted min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold focus:outline-none sm:text-base"
-        />
-        <div className="text-muted-foreground flex items-center gap-2 text-xs">
-          <span className="hidden sm:inline">{t('active')}</span>
-          <Switch
-            checked={state.is_active}
-            onCheckedChange={(v) => patchTop('is_active', !!v)}
-            aria-label={t('activeAria')}
+      <header className="border-border bg-card/80 flex flex-shrink-0 flex-col gap-2 border-b px-3 py-3 sm:px-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => router.push('/automations')}
+            className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors"
+            aria-label={t('backToAutomations')}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <input
+            value={state.name}
+            onChange={(e) => patchTop('name', e.target.value)}
+            placeholder={t('untitled')}
+            className="text-foreground placeholder:text-muted-foreground focus:bg-muted min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold focus:outline-none sm:text-base"
           />
+          <div className="text-muted-foreground flex items-center gap-2 text-xs">
+            <span className="hidden sm:inline">{t('active')}</span>
+            <Switch
+              checked={state.is_active}
+              onCheckedChange={(v) => patchTop('is_active', !!v)}
+              aria-label={t('activeAria')}
+            />
+          </div>
+          <Button
+            onClick={save}
+            disabled={saving}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {isEditing ? t('save') : t('saveDraft')}
+          </Button>
         </div>
-        <Button
-          onClick={save}
-          disabled={saving}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {isEditing ? t('save') : t('saveDraft')}
-        </Button>
+        {/* "Vale para o número" (SPEC 065 D-4/D-10) — ao lado de nome e
+            gatilho, não dentro do card do gatilho: escopo é uma
+            propriedade da automação inteira, não do disparo. */}
+        <ChannelScopeSelect
+          channelId={state.channel_id}
+          onChange={(v) => patchTop('channel_id', v)}
+          t={t}
+        />
       </header>
 
       {/* Canvas */}
       <div className="relative flex-1 overflow-y-auto">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px]" />
         <div className="relative mx-auto flex max-w-2xl flex-col items-center gap-0 px-4 py-10">
-          <ResourcesProvider>
+          <ResourcesProvider channelId={state.channel_id}>
             <TriggerCard
               type={state.trigger_type}
               config={state.trigger_config}
@@ -1059,6 +1164,66 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           </ResourcesProvider>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Channel scope — "Vale para o número" (SPEC 065 D-4/D-10)
+// ------------------------------------------------------------
+
+/**
+ * NULL = "Todos os números", a primeira opção e o padrão — é o
+ * comportamento de toda automação criada antes desta SPEC, então nada
+ * muda para quem nunca mexe aqui. Escolher um canal específico decide
+ * DUAS coisas só (D-4): o gatilho passa a só disparar em eventos
+ * daquele canal, e um passo de envio sem conversa abre a conversa nele
+ * (D-5) — nunca redireciona a resposta de uma conversa já existente.
+ *
+ * A lista vem de `selectableChannels(..., 'scope')`: aceita qualquer
+ * tipo de canal (inclusive QRCode), porque escopar a uma instância sem
+ * capacidade de template/broadcast é legítimo — a automação pode não
+ * usar nenhum passo que precise dela.
+ */
+function ChannelScopeSelect({
+  channelId,
+  onChange,
+  t,
+}: {
+  channelId: string | null;
+  onChange: (v: string | null) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const accountChannels = useAccountChannels();
+  const channels = useMemo(
+    () =>
+      selectableChannels(Array.from(accountChannels.byId.values()), 'scope'),
+    [accountChannels.byId]
+  );
+
+  // Conta sem canal nenhum (deploy novo, camada de canais ainda não
+  // alcançada): nada a escolher, e um seletor com uma opção só
+  // ("Todos os números") seria ruído puro.
+  if (channels.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 pl-11">
+      <label className="text-muted-foreground shrink-0 text-xs font-medium">
+        {t('channelScope.label')}
+      </label>
+      <select
+        value={channelId ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        className={`${SELECT_CLASS} max-w-xs`}
+      >
+        <option value="">{t('channelScope.allChannels')}</option>
+        {channels.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.identifier ? ` — ${c.identifier}` : ''}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -1269,15 +1434,42 @@ function SessionWindowMarginConfig({
  * "will never work" from "works on some channels" because only the
  * former blocks activation server-side.
  */
+/**
+ * SPEC 065 §7.2 item 3 — quando a automação está ESCOPADA a um canal
+ * (`channelId`, lido do contexto de recursos), o aviso deixa de ser
+ * "cobertura da conta" e vira "este número específico sabe fazer isto?".
+ * Um passo de template numa automação escopada a uma instância QRCode é
+ * o exemplo canônico: `accountChannelCoverage` (com "Todos os números")
+ * diria "some" e deixaria passar batido — aqui a resposta certa é
+ * recusar, porque É ESTE canal, e só ele, que vai tentar enviar.
+ */
 function ChannelCapabilityNotice({
   channels,
   capability,
   t,
 }: {
-  channels: { freeformOutsideWindow: boolean }[];
+  channels: { id: string; freeformOutsideWindow: boolean }[];
   capability: ChannelCapabilityKey;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const { channelId } = useResources();
+
+  if (channelId) {
+    const channel = channels.find((c) => c.id === channelId);
+    // Canal apagado sem `channel_id` mais gravado: a 075 já desativa a
+    // automação nesse caso (D-8) — nada a avisar aqui além disso.
+    if (!channel) return null;
+    const type: ChannelType = channel.freeformOutsideWindow
+      ? 'whatsapp_qr'
+      : 'whatsapp_cloud';
+    if (can(type, capability)) return null;
+    return (
+      <p className="mt-1 text-[11px] text-amber-400">
+        {t('channelCapabilityScopedWarn')}
+      </p>
+    );
+  }
+
   const coverage = accountChannelCoverage(channels, capability);
   if (coverage === 'all') return null;
   return (

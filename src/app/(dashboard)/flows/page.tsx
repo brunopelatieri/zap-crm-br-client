@@ -33,6 +33,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import { ChannelBadge } from '@/components/channels/channel-badge';
+import type { Channel } from '@/lib/channels/types';
 
 /**
  * Flows list page.
@@ -49,6 +52,8 @@ interface FlowRow {
   status: 'draft' | 'active' | 'archived';
   trigger_type: 'keyword' | 'first_inbound_message' | 'manual';
   trigger_config: { keywords?: string[] } | Record<string, unknown>;
+  /** SPEC 065 D-6. `null` = vale para todos os canais. */
+  channel_id?: string | null;
   execution_count: number;
   last_executed_at: string | null;
   created_at: string;
@@ -120,6 +125,7 @@ export default function FlowsPage() {
   const router = useRouter();
   const canCreate = useCan('send-messages');
   const t = useTranslations('Flows.list');
+  const channels = useAccountChannels();
   const [flows, setFlows] = useState<FlowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -271,6 +277,11 @@ export default function FlowsPage() {
             <FlowCard
               key={flow.id}
               flow={flow}
+              channel={
+                channels.count > 1 && flow.channel_id
+                  ? channels.byId.get(flow.channel_id)
+                  : undefined
+              }
               onEdit={() => router.push(`/flows/${flow.id}`)}
               onDelete={() => handleDelete(flow)}
               t={t}
@@ -401,11 +412,14 @@ function EmptyState({
 
 function FlowCard({
   flow,
+  channel,
   onEdit,
   onDelete,
   t,
 }: {
   flow: FlowRow;
+  /** Undefined = conta com um canal só, ou fluxo "Todos os números". */
+  channel: Channel | undefined;
   onEdit: () => void;
   onDelete: () => void;
   t: ReturnType<typeof useTranslations>;
@@ -447,6 +461,7 @@ function FlowCard({
           <MessageSquare className="h-3 w-3" />
           {t('runCount', { count: flow.execution_count })}
         </span>
+        {channel && <ChannelBadge channel={channel} />}
       </div>
 
       <div className="border-border mt-4 flex items-center justify-end gap-2 border-t pt-3">

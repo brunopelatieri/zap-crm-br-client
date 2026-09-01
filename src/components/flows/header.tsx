@@ -23,6 +23,8 @@
  */
 
 import { useRouter } from 'next/navigation';
+import { useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   ArrowLeft,
   CircleDot,
@@ -37,6 +39,8 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import { selectableChannels } from '@/lib/channels/selectable';
 import { useFlowEditor, type BuilderState } from './flow-editor-state';
 
 export function EditorHeader() {
@@ -167,6 +171,61 @@ export function EditorHeader() {
         aria-label="Flow description"
         className="text-muted-foreground placeholder:text-muted-foreground/60 hover:bg-muted/50 focus:border-primary focus:text-foreground w-full max-w-[78ch] rounded-md border border-transparent bg-transparent px-2 py-1 text-[13px] transition-colors outline-none focus:bg-transparent"
       />
+
+      {/* ---- channel scope: "Vale para o número" (SPEC 065 D-6/D-10) ---- */}
+      <ChannelScopeSelect
+        channelId={state.channel_id}
+        onChange={(v) => setState((s) => ({ ...s, channel_id: v }))}
+      />
+    </div>
+  );
+}
+
+/**
+ * NULL = "Todos os números" (padrão, e o comportamento de todo fluxo
+ * anterior a esta coluna). Escopo do GATILHO apenas — o fluxo sempre
+ * responde pelo canal da conversa (SPEC 065 D-6); esta escolha só decide
+ * a QUAIS conversas ele reage.
+ *
+ * Mesmo vocabulário do construtor de automações (D-10), mesma fonte de
+ * elegibilidade (`selectableChannels(..., 'scope')`) — aceita qualquer
+ * tipo de canal, inclusive QRCode.
+ */
+function ChannelScopeSelect({
+  channelId,
+  onChange,
+}: {
+  channelId: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const t = useTranslations('Flows.editorState');
+  const accountChannels = useAccountChannels();
+  const channels = useMemo(
+    () =>
+      selectableChannels(Array.from(accountChannels.byId.values()), 'scope'),
+    [accountChannels.byId]
+  );
+
+  if (channels.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-muted-foreground shrink-0 text-[13px]">
+        {t('channelScope.label')}
+      </label>
+      <select
+        value={channelId ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="border-border bg-muted text-foreground focus:border-primary max-w-xs rounded-md border px-2 py-1 text-[13px] outline-none"
+      >
+        <option value="">{t('channelScope.allChannels')}</option>
+        {channels.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+            {c.identifier ? ` — ${c.identifier}` : ''}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

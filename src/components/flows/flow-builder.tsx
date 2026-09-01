@@ -83,6 +83,7 @@ import { useFlowEditor, type BuilderState } from './flow-editor-state';
 export function FlowBuilder() {
   const t = useTranslations('Flows.builder');
   const {
+    flow,
     state,
     setState,
     issues,
@@ -164,6 +165,7 @@ export function FlowBuilder() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-7">
       <TriggerPanel
+        flowId={flow.id}
         state={state}
         setState={setState}
         triggerIssues={issues.filter((i) => i.scope === 'trigger')}
@@ -271,11 +273,13 @@ function KeywordsInput({
 // ============================================================
 
 function TriggerPanel({
+  flowId,
   state,
   setState,
   triggerIssues,
   t,
 }: {
+  flowId: string;
   state: BuilderState;
   setState: React.Dispatch<React.SetStateAction<BuilderState>>;
   triggerIssues: ValidationIssue[];
@@ -335,6 +339,16 @@ function TriggerPanel({
               }
               t={t}
             />
+            <KeywordConflictWarning
+              flowId={flowId}
+              channelId={state.channel_id}
+              keywords={
+                Array.isArray(state.trigger_config.keywords)
+                  ? (state.trigger_config.keywords as string[])
+                  : []
+              }
+              t={t}
+            />
           </div>
         )}
       </div>
@@ -346,6 +360,98 @@ function TriggerPanel({
         </div>
       )}
     </section>
+  );
+}
+
+// ============================================================
+// Keyword conflict warning (SPEC 065 D-6)
+// ============================================================
+
+interface SiblingFlow {
+  id: string;
+  name: string;
+  status: 'draft' | 'active' | 'archived';
+  trigger_type: 'keyword' | 'first_inbound_message' | 'manual';
+  trigger_config: { keywords?: unknown } | Record<string, unknown>;
+  channel_id: string | null;
+}
+
+/** Fluxos ATIVOS da conta, exceto este — best-effort: uma falha de rede
+ *  só significa "sem aviso", nunca bloqueia o editor. */
+function useSiblingActiveFlows(excludeId: string): SiblingFlow[] {
+  const [flows, setFlows] = useState<SiblingFlow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/flows', { cache: 'no-store' });
+        if (!res.ok) return;
+        const json = (await res.json()) as { flows?: SiblingFlow[] };
+        if (cancelled) return;
+        setFlows(
+          (json.flows ?? []).filter(
+            (f) => f.id !== excludeId && f.status === 'active'
+          )
+        );
+      } catch {
+        // Silencioso de propósito — ver o comentário acima.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [excludeId]);
+  return flows;
+}
+
+/**
+ * Avisa quando ESTE gatilho por palavra-chave cruza com um fluxo ativo
+ * de escopo OPOSTO (um escopado, outro genérico) — é o único cruzamento
+ * com precedência definida pela SPEC 065 D-6: "o escopado ganha do
+ * genérico". Dois fluxos genéricos com a mesma palavra, ou dois
+ * escopados ao MESMO canal, são um empate que esta SPEC não resolve —
+ * fora do escopo deste aviso, de propósito.
+ */
+function KeywordConflictWarning({
+  flowId,
+  channelId,
+  keywords,
+  t,
+}: {
+  flowId: string;
+  channelId: string | null;
+  keywords: string[];
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const siblings = useSiblingActiveFlows(flowId);
+  const normalized = new Set(
+    keywords.map((k) => k.trim().toLowerCase()).filter(Boolean)
+  );
+
+  if (normalized.size === 0) return null;
+
+  const conflict = siblings.find((f) => {
+    if (f.trigger_type !== 'keyword') return false;
+    const scopedVsGeneric =
+      (channelId !== null && f.channel_id === null) ||
+      (channelId === null && f.channel_id !== null);
+    if (!scopedVsGeneric) return false;
+    const otherKeywords = Array.isArray(
+      (f.trigger_config as { keywords?: unknown }).keywords
+    )
+      ? ((f.trigger_config as { keywords: string[] }).keywords ?? [])
+      : [];
+    return otherKeywords.some((k) => normalized.has(k.trim().toLowerCase()));
+  });
+
+  if (!conflict) return null;
+
+  return (
+    <p className="mt-1 text-[11px] text-amber-400">
+      {channelId
+        ? t('keywordConflictScopedWins', { name: conflict.name })
+        : t('keywordConflictGenericLoses', { name: conflict.name })}
+    </p>
   );
 }
 
