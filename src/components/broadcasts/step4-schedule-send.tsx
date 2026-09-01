@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -15,13 +15,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   ArrowLeft,
   CalendarClock,
   FlaskConical,
@@ -33,7 +26,7 @@ import {
   Save,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import type { Channel } from '@/lib/channels/types';
 
 import { QuotaMeter, exceedsQuota } from './quota-meter';
 import { useMessagingLimit } from './messaging-limit-provider';
@@ -52,8 +45,6 @@ export interface SendOptions {
   scheduledAt?: string;
   /** O usuário aceitou disparar fora da janela permitida. */
   windowOverride: boolean;
-  /** Número oficial escolhido em "Enviar por" (SPEC 064 D-3/§6.3). */
-  channelId?: string;
 }
 
 interface Step4Props {
@@ -65,6 +56,15 @@ interface Step4Props {
   /** Fatia da audiência sorteada para a variante A. */
   splitPercent?: number;
   audience: AudienceConfig;
+  /**
+   * Canal escolhido no passo "Enviar por" (SPEC 065 D-1) — só para
+   * EXIBIR o resumo somente-leitura abaixo. `null` = conta com um canal
+   * só, e a linha de resumo nem aparece: a decisão inteira (estado +
+   * envio) mora em `new/page.tsx`, este passo nunca re-decide o canal.
+   */
+  channel: Channel | null;
+  /** Ausente quando `channel` é `null` — não há para onde "alterar". */
+  onChangeChannel?: () => void;
   onSend: (options: SendOptions) => void;
   onSaveDraft?: () => void;
   onBack: () => void;
@@ -88,6 +88,8 @@ export function Step4ScheduleSend({
   variantTemplate = null,
   splitPercent = 50,
   audience,
+  channel,
+  onChangeChannel,
   onSend,
   onSaveDraft,
   onBack,
@@ -101,44 +103,6 @@ export function Step4ScheduleSend({
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
   const { batchLimit, refresh: refreshQuota } = useMessagingLimit();
-
-  // ── Enviar por (SPEC 064 D-3/§6.3) ─────────────────────────────
-  // Só aparece com mais de um número capaz de disparo — com um só, o
-  // servidor já resolve o padrão sozinho e o passo seria ruído.
-  //
-  // ⚠️ O filtro tem de ser o MESMO critério que o servidor usa para
-  // decidir o padrão (`resolveDefaultChannelId`/`resolveCloudConfig`):
-  // só `disabled` é excluído, nunca `error`/`disconnected`. Filtrar por
-  // `status === 'connected'` aqui já causou o bug oposto do que
-  // pretendia evitar: com o padrão em `error` e um segundo canal
-  // `connected`, a lista via a um item só, o seletor sumia (nenhuma
-  // escolha "precisa" ser feita) e a campanha saía pelo padrão QUEBRADO
-  // — exatamente o número que o seletor deveria ter deixado escapar.
-  const accountChannels = useAccountChannels();
-  const eligibleChannels = useMemo(
-    () =>
-      Array.from(accountChannels.byId.values())
-        .filter((c) => c.type === 'whatsapp_cloud' && c.status !== 'disabled')
-        .sort((a, b) => {
-          // `connected` primeiro — a pré-seleção abaixo usa `[0]`, e um
-          // padrão em `error` não pode ganhar de um número saudável só
-          // por ser o padrão.
-          const byHealth =
-            Number(b.status === 'connected') - Number(a.status === 'connected');
-          if (byHealth !== 0) return byHealth;
-          return Number(b.is_default) - Number(a.is_default);
-        }),
-    [accountChannels.byId]
-  );
-  const [channelId, setChannelId] = useState<string | undefined>(undefined);
-  // Pré-seleciona o padrão assim que a lista chega — um seletor vazio
-  // pareceria quebrado, e o padrão é o mesmo que o servidor escolheria
-  // de qualquer forma na ausência de escolha.
-  useEffect(() => {
-    if (channelId || eligibleChannels.length === 0) return;
-    setChannelId(eligibleChannels[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eligibleChannels]);
 
   // ── Agendamento (§6.3) ─────────────────────────────────────────
   const [mode, setMode] = useState<'now' | 'schedule'>('now');
@@ -238,9 +202,6 @@ export function Step4ScheduleSend({
           ? scheduledDate.toISOString()
           : undefined,
       windowOverride: outsideWindow && windowOverride,
-      // Um número só: nem mostramos o seletor, então não força uma
-      // escolha que o servidor já faria sozinho (o padrão).
-      channelId: eligibleChannels.length > 1 ? channelId : undefined,
     });
   }
 
@@ -323,39 +284,37 @@ export function Step4ScheduleSend({
         </div>
       </div>
 
-      {/* ── Enviar por (SPEC 064 D-3/§6.3) ────────────────────────── */}
-      {eligibleChannels.length > 1 && (
-        <div className="border-border bg-card/50 space-y-2 rounded-xl border p-4">
-          <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
-            <Smartphone className="text-primary h-4 w-4" />
-            {t('scheduleSend.sendFrom')}
+      {/* ── Enviar por (SPEC 065 D-1) ───────────────────────────────
+          Resumo somente-leitura: a escolha já foi feita no passo 1, e
+          repeti-la aqui como um SEGUNDO seletor é a segunda fonte de
+          verdade que sempre acaba divergindo dela. "Alterar" volta ao
+          passo 1 — nunca reabre uma decisão local. */}
+      {channel && (
+        <div className="border-border bg-card/50 flex items-center justify-between gap-2 rounded-xl border p-4">
+          <p className="text-foreground flex items-center gap-1.5 text-sm">
+            <Smartphone className="text-primary h-4 w-4 shrink-0" />
+            <span className="font-medium">{t('scheduleSend.sendFrom')}:</span>
+            <span className="text-muted-foreground">
+              {channel.name}
+              {channel.identifier ? ` — ${channel.identifier}` : ''}
+              {channel.is_default
+                ? ` (${t('scheduleSend.sendFromDefault')})`
+                : ''}
+              {channel.status !== 'connected'
+                ? ` — ${t('scheduleSend.sendFromUnhealthy')}`
+                : ''}
+            </span>
           </p>
-          <Select
-            value={channelId}
-            onValueChange={(val) => val && setChannelId(val)}
-          >
-            <SelectTrigger className="border-border bg-muted text-foreground w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="border-border bg-popover">
-              {eligibleChannels.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                  {c.identifier ? ` — ${c.identifier}` : ''}
-                  {c.is_default
-                    ? ` (${t('scheduleSend.sendFromDefault')})`
-                    : ''}
-                  {/* O filtro acima inclui `error`/`disconnected` de
-                      propósito (nunca esconder o padrão quebrado atrás
-                      de "só uma opção") — o selo é o que deixa o
-                      operador ver e trocar para o número saudável. */}
-                  {c.status !== 'connected'
-                    ? ` — ${t('scheduleSend.sendFromUnhealthy')}`
-                    : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {onChangeChannel && (
+            <button
+              type="button"
+              onClick={onChangeChannel}
+              disabled={isProcessing}
+              className="text-primary shrink-0 text-xs font-medium hover:underline disabled:opacity-50"
+            >
+              {t('scheduleSend.sendFromChange')}
+            </button>
+          )}
         </div>
       )}
 

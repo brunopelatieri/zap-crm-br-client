@@ -46,6 +46,12 @@ interface VariableMapping {
 type VariableMap = Record<string, VariableMapping>;
 
 interface Step3Props {
+  /**
+   * Canal escolhido no passo "Enviar por" (SPEC 065 §7.1 A5) — o teste
+   * de envio manda o MESMO canal da campanha, senão ele deixa de testar
+   * a campanha (§2.A A5).
+   */
+  channelId: string | null;
   template: MessageTemplate;
   variables: VariableMap;
   onUpdate: (variables: VariableMap) => void;
@@ -157,6 +163,7 @@ function HeaderImagePreview({ url }: { url: string }) {
 }
 
 interface VariantFormProps {
+  channelId: string | null;
   template: MessageTemplate;
   variables: VariableMap;
   onUpdate: (variables: VariableMap) => void;
@@ -171,6 +178,7 @@ interface VariantFormProps {
 
 /** O miolo do passo 3, para UM template. */
 function VariantForm({
+  channelId,
   template,
   variables,
   onUpdate,
@@ -457,6 +465,7 @@ function VariantForm({
             template={template}
             variables={variables}
             headerMediaUrl={headerMediaUrl}
+            channelId={channelId}
           />
         </div>
         <div className="rounded-lg bg-[#0e1a12] p-3">
@@ -478,6 +487,7 @@ function VariantForm({
 }
 
 export function Step3Personalize({
+  channelId,
   template,
   variables,
   onUpdate,
@@ -546,6 +556,7 @@ export function Step3Personalize({
   }, []);
 
   const shared = {
+    channelId,
     customFields,
     loadingFields,
     firstContact,

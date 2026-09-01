@@ -94,6 +94,17 @@ export interface StageAudienceParams {
    * lá — este parâmetro nunca grava nada aqui.
    */
   canCreateTags: boolean;
+  /**
+   * SPEC 065 D-1 — canal escolhido no passo "Enviar por", agora ANTES do
+   * staging (o comentário histórico logo abaixo, no INSERT, explicava
+   * por que isto não existia: o wizard só escolhia o número no Step 4,
+   * DEPOIS do stage. Deixou de ser verdade nesta SPEC). `undefined`/de
+   * outra conta = ignorado silenciosamente — é só o que a retomada do
+   * rascunho usa para reidratar o template pelo WABA certo, nunca a
+   * credencial de envio de verdade (essa é resolvida de novo, escopada,
+   * no disparo).
+   */
+  channelId?: string | null;
 }
 
 export interface StageAudienceSummary {
@@ -408,29 +419,39 @@ export async function stageAudience(
     templateLanguage,
     audience,
     canCreateTags,
+    channelId,
   } = params;
+
+  // Confere que o canal é DESTA conta antes de gravar — um `channelId`
+  // forjado (ou de outra conta) é descartado em silêncio, não recusa o
+  // stage inteiro: esta coluna só ajuda a retomada a reidratar o
+  // template certo, nunca decide por onde a campanha realmente sai
+  // (isso é resolvido de novo, escopado, no disparo).
+  let verifiedChannelId: string | null = null;
+  if (channelId) {
+    const { data: channelRow } = await db
+      .from('channels')
+      .select('id')
+      .eq('id', channelId)
+      .eq('account_id', accountId)
+      .maybeSingle();
+    verifiedChannelId = channelRow ? channelId : null;
+  }
 
   // Falha cedo, antes de gravar qualquer linha — mesmo cuidado de
   // `planDashboardBroadcast` (broadcast-dispatch.ts).
   //
   // ⚠️ De propósito SEM escopo de WABA (SPEC 064 D-2) — não é a mesma
   //    lacuna que `findTemplateRowForWaba` resolve em `meta-send.ts`,
-  //    `hydrate-reply.ts` etc. Lá cada chamador já sabe o CANAL (da
-  //    conversa/do broadcast) e por isso precisa escolher a linha certa
-  //    quando o mesmo nome+idioma existe em dois WABAs. Aqui não: o
-  //    wizard só escolhe o número no Step 4 (`channelId` em
-  //    `step4-schedule-send.tsx`), depois de staging (Step 2) — nenhum
-  //    `channelId` chega a `StageAudienceParams`, e forçar um agora
-  //    seria inventar um canal que o operador ainda não escolheu. Esta
-  //    consulta só confere "existe ALGUMA linha com esse nome+idioma
-  //    nesta conta" (para não deixar seguir para um template inexistente
-  //    até o Step 4), e continua correta por design mesmo sem filtrar
-  //    por WABA. A resolução de VERDADE — a linha específica que
-  //    efetivamente sai no envio — acontece depois, já escopada, em
-  //    `broadcast-dispatch.ts` (`planDashboardBroadcast`/
+  //    `hydrate-reply.ts` etc. Esta consulta só confere "existe ALGUMA
+  //    linha com esse nome+idioma nesta conta" (para não deixar seguir
+  //    para um template inexistente), e continua correta por design
+  //    mesmo sem filtrar por WABA — a resolução de VERDADE, a linha
+  //    específica que efetivamente sai no envio, acontece depois, já
+  //    escopada, em `broadcast-dispatch.ts` (`planDashboardBroadcast`/
   //    `deliverBroadcast`, via `loadWhatsappConfig` + `findTemplateRowForWaba`).
-  //    Não "corrija" isto adicionando `channelId` aqui sem antes mudar o
-  //    Step 2 do wizard para escolher o número primeiro.
+  //    `channelId` (abaixo) só serve a retomada do rascunho reidratar
+  //    pelo WABA certo (SPEC 065 §2.A A4) — não esta checagem.
   //
   //    O que MUDOU aqui: `.maybeSingle()` virou uma leitura de lista.
   //    Sem escopo de WABA, uma conta com o mesmo nome+idioma em dois
@@ -470,6 +491,7 @@ export async function stageAudience(
       name: templateName,
       template_name: templateName,
       template_language: templateLanguage,
+      channel_id: verifiedChannelId,
       status: 'draft',
       total_recipients: summary.valid,
     })

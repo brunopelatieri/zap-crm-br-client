@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { MessageTemplate } from '@/types';
+import { Step0ChooseChannel } from '@/components/broadcasts/step0-choose-channel';
 import { Step1ChooseTemplate } from '@/components/broadcasts/step1-choose-template';
 import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audience';
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
@@ -22,20 +23,48 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useAccountChannels } from '@/lib/channels/use-account-channels';
 import { accountCapabilityCoverage } from '@/lib/channels/capabilities';
+import { selectableChannels } from '@/lib/channels/selectable';
 import type { ChannelType } from '@/lib/channels/types';
+import {
+  findTemplateRowForWaba,
+  wabaIdOfChannel,
+} from '@/lib/whatsapp/template-waba';
 
-const steps = [
-  { label: 'template', key: 'template' },
-  { label: 'audience', key: 'audience' },
-  { label: 'personalize', key: 'personalize' },
-  { label: 'send', key: 'send' },
-] as const;
+/**
+ * Os passos do assistente, na ordem fixa (SPEC 065 D-1). `'sendFrom'` só
+ * é MONTADO com dois ou mais canais elegíveis — com um canal só, ele
+ * nunca entra em `visibleStepKeys` e o assistente segue com quatro
+ * etapas, exatamente como antes desta SPEC.
+ *
+ * Navegar por CHAVE, não por índice numérico, é o que evita o
+ * off-by-one: `eligibleChannels` só termina de carregar depois do
+ * primeiro render, então um índice fixo (0/1/2/3) apontaria para o
+ * passo errado assim que a lista chegasse e o passo "Enviar por"
+ * aparecesse ou sumisse.
+ */
+type StepKey = 'sendFrom' | 'template' | 'audience' | 'personalize' | 'send';
+const ALL_STEP_KEYS: StepKey[] = [
+  'sendFrom',
+  'template',
+  'audience',
+  'personalize',
+  'send',
+];
+
+interface DraftRow {
+  id: string;
+  status: string;
+  template_name: string;
+  template_language: string;
+  channel_id: string | null;
+}
 
 export default function NewBroadcastPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const resumeDraftId = searchParams.get('draftId');
   const t = useTranslations('Broadcasts.new');
+  const tWizard = useTranslations('Broadcasts.wizard');
   const tAudience = useTranslations('Broadcasts.audience');
   const { accountId } = useAuth();
   const { createAndSendBroadcast, isProcessing, progress } =
@@ -55,13 +84,58 @@ export default function NewBroadcastPage() {
     !accountChannels.loading &&
     accountCapabilityCoverage(channelTypes, 'broadcast') === 'none';
 
+  // ── "Enviar por" (SPEC 065 D-1) ─────────────────────────────────
+  // Elegibilidade vem de UM lugar só — a regra que já corrigiu o bug do
+  // passo 4 original (esconder o padrão quebrado atrás de "só uma
+  // opção"). Nunca reescrever este filtro à mão aqui.
+  const eligibleChannels = useMemo(
+    () =>
+      selectableChannels(
+        Array.from(accountChannels.byId.values()),
+        'broadcast'
+      ),
+    [accountChannels.byId]
+  );
+  const showChannelStep = eligibleChannels.length > 1;
+
+  const [channelId, setChannelId] = useState<string | null>(null);
+  // Pré-seleciona o padrão assim que a lista chega — o padrão é o mesmo
+  // que o servidor escolheria de qualquer forma na ausência de escolha,
+  // e é o que a SPEC descreve como "sempre aparecerá como selecionado".
+  useEffect(() => {
+    if (channelId || eligibleChannels.length === 0) return;
+    setChannelId(eligibleChannels[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligibleChannels]);
+
+  // Com um canal só, ninguém É FORÇADO a escolher — o servidor resolve o
+  // padrão sozinho (mesmo comportamento de antes desta SPEC). É esta
+  // variável, não `channelId` cru, que alimenta o disparo, o teste de
+  // envio e o resumo do passo 4.
+  const effectiveChannelId = showChannelStep ? channelId : null;
+
+  const [currentStepKey, setCurrentStepKey] = useState<StepKey>('template');
+  // Assim que os canais terminam de carregar, se a conta tem mais de um
+  // e ninguém navegou ainda (ainda no passo padrão 'template'), entra
+  // pelo passo novo. A checagem `prev === 'template'` torna isto
+  // idempotente: não empurra para trás quem já avançou.
+  useEffect(() => {
+    if (resumeDraftId) return;
+    if (accountChannels.loading || !showChannelStep) return;
+    setCurrentStepKey((prev) => (prev === 'template' ? 'sendFrom' : prev));
+  }, [accountChannels.loading, showChannelStep, resumeDraftId]);
+
+  const visibleStepKeys = showChannelStep
+    ? ALL_STEP_KEYS
+    : ALL_STEP_KEYS.filter((key) => key !== 'sendFrom');
+  const currentStepIndex = visibleStepKeys.indexOf(currentStepKey);
+
   // Retoma de um rascunho já triado (SPEC 044 §3.3): a triagem não
   // guarda `template`/`variables` — só navega de volta para cá com
   // `?draftId=`, e é aqui que o template é reidratado a partir do que
   // o stage já persistiu (`template_name`/`template_language`).
   const [resuming, setResuming] = useState(Boolean(resumeDraftId));
 
-  const [currentStep, setCurrentStep] = useState(0);
   const [template, setTemplate] = useState<MessageTemplate | null>(null);
   const [audience, setAudience] = useState<AudienceConfig>({ type: 'all' });
   const [variables, setVariables] = useState<
@@ -83,18 +157,20 @@ export default function NewBroadcastPage() {
   const [splitPercent, setSplitPercent] = useState(AB_DEFAULT_SPLIT_PERCENT);
 
   useEffect(() => {
-    if (!resumeDraftId) return;
+    if (!resumeDraftId || !accountId) return;
     let cancelled = false;
 
     (async () => {
       const supabase = createClient();
-      const { data: draft } = await supabase
+      const { data } = await supabase
         .from('broadcasts')
-        .select('id, status, template_name, template_language')
+        .select('id, status, template_name, template_language, channel_id')
         .eq('id', resumeDraftId)
         .maybeSingle();
 
       if (cancelled) return;
+
+      const draft = data as DraftRow | null;
 
       if (!draft || draft.status !== 'draft') {
         toast.error(tAudience('triage.draftNotFound'));
@@ -102,12 +178,22 @@ export default function NewBroadcastPage() {
         return;
       }
 
-      const { data: templateRow } = await supabase
-        .from('message_templates')
-        .select('*')
-        .eq('name', draft.template_name)
-        .eq('language', draft.template_language)
-        .maybeSingle();
+      // SPEC 065 §2.A A4 — o mesmo nome+idioma pode existir em DOIS
+      // WABAs (migração 072): `.eq(name).eq(language).maybeSingle()`
+      // quebra com "multiple rows" assim que o segundo WABA ganha um
+      // template de mesmo nome. Resolve pelo WABA do canal GRAVADO no
+      // rascunho — a mesma regra de adoção que o disparo de verdade usa.
+      const wabaId = await wabaIdOfChannel(
+        supabase,
+        accountId,
+        draft.channel_id
+      );
+      const templateRow = await findTemplateRowForWaba(supabase, {
+        accountId,
+        name: draft.template_name,
+        language: draft.template_language,
+        wabaId: wabaId ?? null,
+      });
 
       if (cancelled) return;
 
@@ -117,9 +203,10 @@ export default function NewBroadcastPage() {
         return;
       }
 
+      setChannelId(draft.channel_id ?? null);
       setTemplate(templateRow as MessageTemplate);
       setAudience({ type: 'staged', draftId: resumeDraftId });
-      setCurrentStep(2);
+      setCurrentStepKey('personalize');
       setResuming(false);
     })();
 
@@ -127,7 +214,7 @@ export default function NewBroadcastPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumeDraftId]);
+  }, [resumeDraftId, accountId]);
 
   /**
    * Trocar o template A pode invalidar a variante B: ela precisa ser
@@ -155,6 +242,23 @@ export default function NewBroadcastPage() {
     setVariantHeaderMediaUrl('');
   }
 
+  /**
+   * Trocar de canal no passo "Enviar por" muda o WABA — a lista de
+   * templates do passo seguinte passa a ser outra. Manter um template
+   * já escolhido do canal ANTERIOR reproduziria o `#132001` que o
+   * filtro por canal existe para evitar (SPEC 065 §2.E), então limpa os
+   * dois braços, com aviso (mesmo cuidado de `handleTemplateSelect`).
+   */
+  function handleChannelChange(next: string) {
+    if (next === channelId) return;
+    setChannelId(next);
+    if (template) {
+      setTemplate(null);
+      handleVariantSelect(null);
+      toast.warning(tWizard('chooseChannel.templateResetWarning'));
+    }
+  }
+
   async function handleSend(options: SendOptions) {
     if (!template) return;
 
@@ -174,7 +278,7 @@ export default function NewBroadcastPage() {
         headerMediaUrl,
         scheduledAt: options.scheduledAt,
         windowOverride: options.windowOverride,
-        channelId: options.channelId,
+        channelId: effectiveChannelId ?? undefined,
         abTest: variantTemplate
           ? {
               template: variantTemplate,
@@ -250,6 +354,9 @@ export default function NewBroadcastPage() {
       // `custom_field`, uma importação ou uma triagem já feita
       // (`draftId`) perdia tudo além do tipo ao ser reaberto.
       audience_filter: audience,
+      // SPEC 065 D-1 — o rascunho leva o canal escolhido, para a
+      // retomada reidratar o mesmo template×WABA (ver o efeito acima).
+      channel_id: effectiveChannelId,
       status: 'draft',
       total_recipients: 0,
       sent_count: 0,
@@ -299,12 +406,12 @@ export default function NewBroadcastPage() {
 
       {/* Step Indicator */}
       <div className="flex items-center justify-between">
-        {steps.map((step, index) => {
-          const isActive = index === currentStep;
-          const isCompleted = index < currentStep;
+        {visibleStepKeys.map((key, index) => {
+          const isActive = index === currentStepIndex;
+          const isCompleted = index < currentStepIndex;
 
           return (
-            <div key={step.key} className="flex flex-1 items-center">
+            <div key={key} className="flex flex-1 items-center">
               <div className="flex items-center gap-2">
                 <div
                   className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-all ${
@@ -326,13 +433,13 @@ export default function NewBroadcastPage() {
                         : 'text-muted-foreground'
                   }`}
                 >
-                  {t(`steps.${step.label}`)}
+                  {t(`steps.${key}`)}
                 </span>
               </div>
-              {index < steps.length - 1 && (
+              {index < visibleStepKeys.length - 1 && (
                 <div
                   className={`mx-3 h-px flex-1 ${
-                    index < currentStep ? 'bg-primary' : 'bg-muted'
+                    index < currentStepIndex ? 'bg-primary' : 'bg-muted'
                   }`}
                 />
               )}
@@ -355,28 +462,44 @@ export default function NewBroadcastPage() {
               pointerEvents: isProcessing ? 'none' : 'auto',
             }}
           >
-            {currentStep === 0 && (
+            {currentStepKey === 'sendFrom' && (
+              <Step0ChooseChannel
+                channels={eligibleChannels}
+                selectedChannelId={channelId}
+                onSelect={handleChannelChange}
+                onNext={() => setCurrentStepKey('template')}
+                onBack={() => router.push('/broadcasts')}
+              />
+            )}
+            {currentStepKey === 'template' && (
               <Step1ChooseTemplate
+                channelId={channelId}
                 selectedTemplate={template}
                 onSelect={handleTemplateSelect}
                 variantTemplate={variantTemplate}
                 onVariantSelect={handleVariantSelect}
                 splitPercent={splitPercent}
                 onSplitPercentChange={setSplitPercent}
-                onNext={() => setCurrentStep(1)}
-                onBack={() => router.push('/broadcasts')}
+                onNext={() => setCurrentStepKey('audience')}
+                onBack={() =>
+                  showChannelStep
+                    ? setCurrentStepKey('sendFrom')
+                    : router.push('/broadcasts')
+                }
               />
             )}
-            {currentStep === 1 && template && (
+            {currentStepKey === 'audience' && template && (
               <Step2SelectAudience
                 template={template}
+                channelId={effectiveChannelId}
                 audience={audience}
                 onUpdate={setAudience}
-                onBack={() => setCurrentStep(0)}
+                onBack={() => setCurrentStepKey('template')}
               />
             )}
-            {currentStep === 2 && template && (
+            {currentStepKey === 'personalize' && template && (
               <Step3Personalize
+                channelId={effectiveChannelId}
                 template={template}
                 variables={variables}
                 onUpdate={setVariables}
@@ -387,21 +510,21 @@ export default function NewBroadcastPage() {
                 onVariantUpdate={setVariantVariables}
                 variantHeaderMediaUrl={variantHeaderMediaUrl}
                 onVariantHeaderMediaUrlChange={setVariantHeaderMediaUrl}
-                onNext={() => setCurrentStep(3)}
+                onNext={() => setCurrentStepKey('send')}
                 onBack={() =>
-                  // Uma audiência `staged` não tem "passo 2" para voltar
-                  // — a triagem que produziu o rascunho é que faz esse
-                  // papel. `setCurrentStep(1)` aqui reabriria um Step2
-                  // sem a fonte original (Sheets/Excel/tags/…), então
-                  // volta para a triagem em vez de reconstruir um estado
-                  // que já não existe no cliente.
+                  // Uma audiência `staged` não tem "passo audiência" para
+                  // voltar — a triagem que produziu o rascunho é que faz
+                  // esse papel. `setCurrentStepKey('audience')` aqui
+                  // reabriria um Step2 sem a fonte original (Sheets/
+                  // Excel/tags/…), então volta para a triagem em vez de
+                  // reconstruir um estado que já não existe no cliente.
                   audience.type === 'staged' && audience.draftId
                     ? router.push(`/broadcasts/new/${audience.draftId}/triage`)
-                    : setCurrentStep(1)
+                    : setCurrentStepKey('audience')
                 }
               />
             )}
-            {currentStep === 3 && template && (
+            {currentStepKey === 'send' && template && (
               <Step4ScheduleSend
                 name={name}
                 onNameChange={setName}
@@ -409,6 +532,16 @@ export default function NewBroadcastPage() {
                 variantTemplate={variantTemplate}
                 splitPercent={splitPercent}
                 audience={audience}
+                channel={
+                  showChannelStep
+                    ? (accountChannels.byId.get(channelId ?? '') ?? null)
+                    : null
+                }
+                onChangeChannel={
+                  showChannelStep
+                    ? () => setCurrentStepKey('sendFrom')
+                    : undefined
+                }
                 onSend={handleSend}
                 onSaveDraft={
                   // Rascunho guarda UM template (`template_name`), então
@@ -420,7 +553,7 @@ export default function NewBroadcastPage() {
                     ? undefined
                     : handleSaveDraft
                 }
-                onBack={() => setCurrentStep(2)}
+                onBack={() => setCurrentStepKey('personalize')}
                 isProcessing={isProcessing}
                 progress={progress}
               />

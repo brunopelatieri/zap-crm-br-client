@@ -1452,6 +1452,7 @@
       "title": "Novo disparo",
       "subtitle": "Crie e envie uma mensagem de disparo para seus contatos.",
       "steps": {
+        "sendFrom": "Enviar por",
         "template": "Template",
         "audience": "Público",
         "personalize": "Personalizar",
@@ -1472,6 +1473,11 @@
       "next": "Avançar",
       "back": "Voltar",
       "cancel": "Cancelar",
+      "chooseChannel": {
+        "title": "Enviar por",
+        "subtitle": "Escolha qual número oficial do WhatsApp vai enviar este disparo.",
+        "templateResetWarning": "Trocar o número limpou o template — escolha um aprovado para ele."
+      },
       "chooseTemplate": {
         "title": "Escolha um template",
         "subtitle": "Selecione um template de mensagem aprovado para seu disparo.",
@@ -1594,7 +1600,8 @@
         "serverSideHint": "O envio roda no nosso servidor. Você pode fechar esta aba — ele continua.",
         "sendFrom": "Enviar por",
         "sendFromDefault": "padrão",
-        "sendFromUnhealthy": "não conectado — o envio pode falhar"
+        "sendFromUnhealthy": "não conectado — o envio pode falhar",
+        "sendFromChange": "Alterar"
       },
       "abTest": {
         "enable": "Testar dois templates (A/B)",

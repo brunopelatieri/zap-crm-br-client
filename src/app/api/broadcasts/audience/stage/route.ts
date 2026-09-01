@@ -207,12 +207,20 @@ export async function POST(request: Request) {
     const audience = parseAudience(body.audience);
     if (!audience) return badRequest("'audience' is missing or malformed");
 
+    // SPEC 065 D-1 — o wizard agora escolhe o canal ANTES do stage (Step
+    // "Enviar por" passou a ser o passo 1), então o rascunho já pode
+    // gravar o canal ao nascer. `undefined`/ausente = conta com um canal
+    // só; nada muda para quem nunca vê o passo novo.
+    const channelId =
+      typeof body.channelId === 'string' ? body.channelId : undefined;
+
     const result = await stageAudience(supabase, {
       accountId,
       userId,
       templateName,
       templateLanguage,
       audience,
+      channelId,
       // SPEC 057 D-7 — só decide a PROJEÇÃO mostrada na triagem; a
       // criação de verdade (D-1) acontece no envio, com o papel LIDO DE
       // NOVO naquele momento (revisão de código pós-057). Isto é

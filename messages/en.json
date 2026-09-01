@@ -1452,6 +1452,7 @@
       "title": "New Broadcast",
       "subtitle": "Create and send a broadcast message to your contacts.",
       "steps": {
+        "sendFrom": "Send from",
         "template": "Template",
         "audience": "Audience",
         "personalize": "Personalize",
@@ -1472,6 +1473,11 @@
       "next": "Next",
       "back": "Back",
       "cancel": "Cancel",
+      "chooseChannel": {
+        "title": "Send from",
+        "subtitle": "Choose which official WhatsApp number will send this broadcast.",
+        "templateResetWarning": "Changing the number reset the template — pick one that's approved for it."
+      },
       "chooseTemplate": {
         "title": "Choose a Template",
         "subtitle": "Select an approved message template for your broadcast.",
@@ -1594,7 +1600,8 @@
         "serverSideHint": "The send runs on our server. You can close this tab — it will keep going.",
         "sendFrom": "Send from",
         "sendFromDefault": "default",
-        "sendFromUnhealthy": "not connected — sending may fail"
+        "sendFromUnhealthy": "not connected — sending may fail",
+        "sendFromChange": "Change"
       },
       "abTest": {
         "enable": "Test two templates (A/B)",

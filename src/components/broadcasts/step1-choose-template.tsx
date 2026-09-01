@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useMemo } from 'react';
 import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +14,7 @@ import { Loader2, FileText, ArrowRight, FlaskConical } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import { AB_DEFAULT_SPLIT_PERCENT } from '@/lib/broadcasts/ab-test';
+import { useChannelTemplates } from '@/hooks/use-channel-templates';
 
 /** Divisões oferecidas. Configurável, mas não com um campo livre. */
 const SPLIT_OPTIONS = [50, 60, 70, 80, 90];
@@ -26,6 +26,13 @@ const categoryColors: Record<string, string> = {
 };
 
 interface Step1Props {
+  /**
+   * Canal escolhido no passo "Enviar por" (SPEC 065 D-1). `null` = conta
+   * com um canal só (o passo não existe) ou canal ainda não escolhido —
+   * `useChannelTemplates` responde com a lista INTEIRA nesse caso (falha
+   * aberto), nunca com uma lista vazia.
+   */
+  channelId: string | null;
   selectedTemplate: MessageTemplate | null;
   onSelect: (template: MessageTemplate) => void;
   /**
@@ -42,6 +49,7 @@ interface Step1Props {
 }
 
 export function Step1ChooseTemplate({
+  channelId,
   selectedTemplate,
   onSelect,
   variantTemplate,
@@ -53,9 +61,11 @@ export function Step1ChooseTemplate({
 }: Step1Props) {
   const t = useTranslations('Broadcasts.wizard');
   const tAb = useTranslations('Broadcasts.wizard.abTest');
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // SPEC 065 D-2 — a MESMA variável que decide o `channel_id` do envio
+  // filtra esta lista (§2.E). `templates` já vem só com o que este WABA
+  // pode enviar (+ legados); a variante B (abaixo) herda o filtro de
+  // graça, por sair da mesma lista.
+  const { templates, loading } = useChannelTemplates(channelId);
 
   /**
    * Candidatos a variante B.
@@ -74,45 +84,10 @@ export function Step1ChooseTemplate({
     );
   }, [templates, selectedTemplate]);
 
-  useEffect(() => {
-    async function fetchTemplates() {
-      try {
-        const supabase = createClient();
-        // Only APPROVED templates can be sent via Meta — anything else
-        // would 400 at broadcast time. Hide them rather than letting
-        // the user pick a template that will fail.
-        const { data, error: fetchError } = await supabase
-          .from('message_templates')
-          .select('*')
-          .eq('status', 'APPROVED')
-          .order('created_at', { ascending: false });
-
-        if (fetchError) throw fetchError;
-        setTemplates(data ?? []);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : t('chooseTemplate.errorLoad')
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchTemplates();
-  }, []);
-
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="text-primary h-6 w-6 animate-spin" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-64 flex-col items-center justify-center gap-2">
-        <p className="text-sm text-red-400">{error}</p>
       </div>
     );
   }

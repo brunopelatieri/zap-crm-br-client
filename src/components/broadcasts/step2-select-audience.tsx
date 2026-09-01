@@ -52,6 +52,12 @@ const STAGE_ERROR_CODES = new Set([
 interface Step2Props {
   /** Escolhido no passo 1 — obrigatório para gravar o rascunho no stage. */
   template: MessageTemplate;
+  /**
+   * Canal escolhido no passo "Enviar por" (SPEC 065 D-1) — grava junto do
+   * rascunho staged, para a retomada (`new/page.tsx`) reidratar o mesmo
+   * template×WABA depois. `null` = conta com um canal só.
+   */
+  channelId: string | null;
   audience: AudienceConfig;
   onUpdate: (audience: AudienceConfig) => void;
   onBack: () => void;
@@ -84,6 +90,7 @@ function initialSource(audience: AudienceConfig): AudienceSourceId {
 
 export function Step2SelectAudience({
   template,
+  channelId,
   audience,
   onUpdate,
   onBack,
@@ -342,6 +349,7 @@ export function Step2SelectAudience({
           templateName: template.name,
           templateLanguage: template.language ?? 'en_US',
           audience: audienceBody,
+          channelId: channelId ?? undefined,
         }),
       });
 

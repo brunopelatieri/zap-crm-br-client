@@ -68,12 +68,20 @@ interface TestSendDialogProps {
   template: MessageTemplate;
   variables: Record<string, VariableMapping>;
   headerMediaUrl: string;
+  /**
+   * Canal escolhido no passo "Enviar por" (SPEC 065 §2.A A5) — o teste
+   * sai pelo MESMO número da campanha, senão ele deixa de testar a
+   * campanha (o teste "passa" pelo padrão e a campanha falha depois no
+   * número escolhido). `null`/ausente = conta com um canal só.
+   */
+  channelId?: string | null;
 }
 
 export function TestSendDialog({
   template,
   variables,
   headerMediaUrl,
+  channelId,
 }: TestSendDialogProps) {
   const t = useTranslations('Broadcasts.wizard.personalize.testSend');
   const [open, setOpen] = useState(false);
@@ -134,6 +142,7 @@ export function TestSendDialog({
           variables,
           headerMediaUrl,
           contactIds: selectedIds,
+          channelId: channelId ?? undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
