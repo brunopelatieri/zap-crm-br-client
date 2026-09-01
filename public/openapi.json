@@ -898,7 +898,7 @@
       "post": {
         "tags": ["Broadcasts"],
         "summary": "Launch a template broadcast",
-        "description": "Launch a template broadcast to a list of recipients. The broadcast + its recipient rows are persisted immediately and the sends fan out in the background with a soft 60-second budget, so the call returns fast — poll `GET /broadcasts/{id}` for progress. Recipients are capped at **1000 per request**; invalid phone numbers are dropped and counted as `rejected` rather than failing the whole call.\n\nA request near the 1000-recipient cap can exceed the fan-out's 60-second budget — there is no durable retry queue yet, so recipients still `pending` when the budget runs out stay `pending` rather than resuming automatically. Prefer splitting large sends into a few smaller requests.",
+        "description": "Launch a template broadcast to a list of recipients. The broadcast + its recipient rows are persisted immediately and the sends fan out in the background with a soft 60-second budget, so the call returns fast — poll `GET /broadcasts/{id}` for progress. Recipients are capped at **1000 per request**; invalid phone numbers are dropped and counted as `rejected` rather than failing the whole call.\n\nA request near the 1000-recipient cap can exceed the fan-out's 60-second budget — there is no durable retry queue yet, so recipients still `pending` when the budget runs out stay `pending` rather than resuming automatically. Prefer splitting large sends into a few smaller requests.\n\n**Template and channel must belong to the same WhatsApp Business Account.** `template_name` is validated against the WABA of the resolved `channel_id` (SPEC 065 D-3) before any recipient row is created — Meta scopes templates per WABA, so a template approved on one number doesn't exist on another. A mismatch fails the whole request with `400 template_waba_mismatch` (nothing is created).",
         "operationId": "createBroadcast",
         "security": [
           {
@@ -1024,7 +1024,7 @@
       "post": {
         "tags": ["Ingest"],
         "summary": "Create a contact from an inbound webhook (and optionally send a template)",
-        "description": "The inverse of `/webhooks`: a third party (n8n, a landing page, an e-commerce platform) POSTs here to create or match a contact, write tags/notes/custom fields, and — when `template_id` is approved — send a template. Every accepted request also feeds a funnel: a `broadcasts` row scoped by `webhook_id`, reused across every request that carries the same id (SPEC 055).\n\n**Phone validation here is stricter than `POST /contacts`:** Brazilian DDD and mobile/landline shape are enforced — this endpoint is new, so tightening the rule breaks no existing integration.\n\n**Failure asymmetry.** Before the contact is created, a failure is `400` — nothing was written. After the contact exists, a failure is always `202`, with the problem reported in `warnings[]` — never a 4xx/5xx, so a caller retry can never duplicate the contact (notes, in particular, are never deduplicated). A request rejected for a missing/invalid key (`401`/`403`/`429`) logs nothing — there's no account to attach a log row to.",
+        "description": "The inverse of `/webhooks`: a third party (n8n, a landing page, an e-commerce platform) POSTs here to create or match a contact, write tags/notes/custom fields, and — when `template_id` is approved — send a template. Every accepted request also feeds a funnel: a `broadcasts` row scoped by `webhook_id`, reused across every request that carries the same id (SPEC 055).\n\n**Phone validation here is stricter than `POST /contacts`:** Brazilian DDD and mobile/landline shape are enforced — this endpoint is new, so tightening the rule breaks no existing integration.\n\n**Which number sends the template (SPEC 065 D-9).** `channel_id` is optional; omit it and the channel is derived from `template_id`'s WABA when exactly one Cloud channel of that WABA exists, otherwise the account's default Cloud channel is used. A `channel_id` that doesn't belong to this account is rejected with `400 channel_not_in_account` before the contact is created. A template/channel WABA mismatch surfaces as `template_waba_mismatch` in `warnings[]` — it's a post-contact-creation failure, so the request still returns `202`.\n\n**Failure asymmetry.** Before the contact is created, a failure is `400` — nothing was written. After the contact exists, a failure is always `202`, with the problem reported in `warnings[]` — never a 4xx/5xx, so a caller retry can never duplicate the contact (notes, in particular, are never deduplicated). A request rejected for a missing/invalid key (`401`/`403`/`429`) logs nothing — there's no account to attach a log row to.",
         "operationId": "ingestContact",
         "security": [
           {
@@ -1106,7 +1106,7 @@
             }
           },
           "400": {
-            "description": "Rejected before the contact was created (`invalid_webhook_id`, `invalid_webhook_name`, `invalid_phone`, or `bad_request`) — nothing was written.",
+            "description": "Rejected before the contact was created (`invalid_webhook_id`, `invalid_webhook_name`, `invalid_phone`, `channel_not_in_account`, or `bad_request`) — nothing was written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1134,6 +1134,14 @@
                       "error": {
                         "code": "invalid_phone",
                         "message": "Phone number failed Brazilian validation: invalid_ddd"
+                      }
+                    }
+                  },
+                  "channelNotInAccount": {
+                    "value": {
+                      "error": {
+                        "code": "channel_not_in_account",
+                        "message": "channel_id \"8f3c1e2a-0000-4000-8000-000000000099\" does not belong to this account"
                       }
                     }
                   }
@@ -2715,6 +2723,11 @@
               "type": "string"
             },
             "description": "Positional body variables (`{{1}}`, `{{2}}`…) for the template. Non-string entries are coerced to string, never dropped — dropping would shift every later placeholder."
+          },
+          "channel_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Which of the account's official numbers sends `template_id` (SPEC 065 D-9). Only matters together with `template_id`. Omit it and the channel is derived from the template's WABA — if exactly one Cloud channel of that WABA exists, the template goes out on it; otherwise the send falls back to the account's default Cloud channel. `400 channel_not_in_account` if the id doesn't belong to this account (never `404`)."
           }
         }
       },
@@ -2724,7 +2737,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "e.g. `custom_field_not_found`, `custom_field_ambiguous`, `note_empty`, `payload_truncated`, `template_not_found`, `template_not_approved`, `channel_not_capable`, `send_failed`."
+            "description": "e.g. `custom_field_not_found`, `custom_field_ambiguous`, `note_empty`, `payload_truncated`, `template_not_found`, `template_not_approved`, `channel_not_capable`, `template_waba_mismatch`, `send_failed`."
           },
           "message": {
             "type": "string"

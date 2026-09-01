@@ -202,6 +202,8 @@ export interface PlanDashboardBroadcastParams {
 interface SendContext {
   /** Canal que efetivamente envia (SPEC 064 D-3) — vai para `broadcasts.channel_id`. */
   channelId: string;
+  /** De onde veio `channelId` (SPEC 065 §11) — ver `ArmPlan.channelSource`. */
+  channelSource: 'resource' | 'default';
   /** WABA do canal — decide quais templates este número pode usar (D-2). */
   wabaId: string | null;
   phoneNumberId: string;
@@ -229,6 +231,7 @@ async function loadWhatsappConfig(
   channelId?: string | null
 ): Promise<{
   channelId: string;
+  channelSource: 'resource' | 'default';
   wabaId: string | null;
   phoneNumberId: string;
   accessToken: string;
@@ -253,6 +256,9 @@ async function loadWhatsappConfig(
 
   return {
     channelId: channel.id,
+    // SPEC 065 §11 — o parâmetro recebido, não `channel.id` resolvido:
+    // é ele que diz se alguém pediu este canal ou se caiu no padrão.
+    channelSource: channelId ? 'resource' : 'default',
     wabaId: config.waba_id ?? null,
     phoneNumberId: config.phone_number_id,
     accessToken: decrypt(config.access_token),
@@ -705,6 +711,7 @@ async function materializeArm(
     broadcastId,
     accountId,
     channelId: context.channelId,
+    channelSource: context.channelSource,
     templateName,
     templateLanguage,
     phoneNumberId: context.phoneNumberId,
@@ -740,7 +747,7 @@ export async function planDashboardBroadcast(
 ): Promise<DashboardBroadcastPlan> {
   const templateLanguage = input.templateLanguage || 'en_US';
 
-  const { channelId, wabaId, phoneNumberId, accessToken } =
+  const { channelId, channelSource, wabaId, phoneNumberId, accessToken } =
     await loadWhatsappConfig(db, accountId, input.channelId);
   // SPEC 065 D-3 — inclusive na campanha AGENDADA que o cron acorda:
   // aqui o template foi escolhido há dias e pode ter sido recriado em
@@ -761,6 +768,7 @@ export async function planDashboardBroadcast(
   );
   const context: SendContext = {
     channelId,
+    channelSource,
     wabaId,
     phoneNumberId,
     accessToken,
@@ -889,7 +897,7 @@ export async function planAbTestBroadcast(
     );
   }
 
-  const { channelId, wabaId, phoneNumberId, accessToken } =
+  const { channelId, channelSource, wabaId, phoneNumberId, accessToken } =
     await loadWhatsappConfig(db, accountId, input.channelId);
 
   // SPEC 065 D-3 — os DOIS braços do teste A/B. Sem isto, um teste pode
@@ -940,6 +948,7 @@ export async function planAbTestBroadcast(
 
   const contextA: SendContext = {
     channelId,
+    channelSource,
     wabaId,
     phoneNumberId,
     accessToken,
@@ -947,6 +956,7 @@ export async function planAbTestBroadcast(
   };
   const contextB: SendContext = {
     channelId,
+    channelSource,
     wabaId,
     phoneNumberId,
     accessToken,

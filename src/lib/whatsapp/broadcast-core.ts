@@ -173,6 +173,13 @@ export interface BroadcastPlan {
   accountId: string;
   /** Canal que efetivamente envia (SPEC 064 D-3) — gravado em `broadcasts.channel_id`. */
   channelId: string;
+  /**
+   * De onde veio `channelId` (SPEC 065 §11) — `'resource'` quando
+   * `params.channelId` veio explícito no corpo, `'default'` quando caiu
+   * no canal Cloud padrão da conta. Uma campanha nunca é `'conversation'`:
+   * não há conversa a herdar, é sempre disparo em massa.
+   */
+  channelSource: 'resource' | 'default';
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -432,6 +439,7 @@ export async function createBroadcast(
     broadcastId: broadcast.id,
     accountId,
     channelId: channel.id,
+    channelSource: params.channelId ? 'resource' : 'default',
     templateName,
     templateLanguage,
     phoneNumberId: config.phone_number_id,
@@ -518,6 +526,7 @@ export async function deliverBroadcast(
     channelType: 'whatsapp_cloud',
     phoneNumberId: plan.phoneNumberId,
     origin: 'broadcast',
+    channelSource: plan.channelSource,
   });
 
   for (const recipient of plan.planned) {

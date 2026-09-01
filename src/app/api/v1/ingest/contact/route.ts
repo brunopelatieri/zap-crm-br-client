@@ -36,7 +36,10 @@ import { parseIngestPayload, type IngestWarning } from '@/lib/ingest/validate';
 import { insertContactNotes } from '@/lib/ingest/notes';
 import { applyCustomValues } from '@/lib/ingest/custom-values';
 import { upsertFunnel, addFunnelRecipient } from '@/lib/ingest/funnel';
-import { sendIngestTemplate } from '@/lib/ingest/send';
+import {
+  sendIngestTemplate,
+  deriveChannelIdFromTemplateWaba,
+} from '@/lib/ingest/send';
 import { logIngestEvent, PAYLOAD_MAX_BYTES } from '@/lib/ingest/log';
 
 // O envio real (chamada à Meta) roda em after() — a mesma folga de
@@ -174,6 +177,40 @@ export async function POST(request: Request) {
       broadcastId: extra.broadcastId ?? null,
       payload: rawBody,
     });
+
+  // SPEC 065 D-9 — `channel_id` explícito é validado ANTES de criar o
+  // contato: id de OUTRA conta é 400, nunca 404 (o mesmo tratamento de
+  // `resolveConversationByPhone`, resolve-conversation.ts:71-90 — um
+  // 404 confirmaria que o id existe). Falha de forma aqui é a mesma
+  // classe de erro que `invalid_phone`/`invalid_webhook_id`: nada foi
+  // gravado ainda, então 400 é seguro.
+  if (payload.channelId) {
+    const { data: channelRow, error: channelError } = await ctx.supabase
+      .from('channels')
+      .select('id')
+      .eq('id', payload.channelId)
+      .eq('account_id', ctx.accountId)
+      .maybeSingle();
+    if (channelError) {
+      console.error(
+        '[api/v1/ingest/contact] failed to validate channel_id:',
+        channelError
+      );
+      return fail('internal', 'Internal server error', 500);
+    }
+    if (!channelRow) {
+      await log(
+        'error',
+        'channel_not_in_account',
+        `channel_id "${payload.channelId}" does not belong to this account`
+      );
+      return fail(
+        'channel_not_in_account',
+        `channel_id "${payload.channelId}" does not belong to this account`,
+        400
+      );
+    }
+  }
 
   let auditUserId: string;
   let contactId: string;
@@ -314,6 +351,19 @@ export async function POST(request: Request) {
       const { supabase, accountId, keyId } = ctx;
       const { phone, templateParams, webhookId, webhookName } = payload;
 
+      // SPEC 065 D-9: `channel_id` explícito (já validado contra a
+      // conta acima) manda; na ausência dele, deriva do WABA do
+      // template quando exatamente um canal Cloud daquele WABA existe.
+      // Ambíguo/nenhum cai no canal padrão dentro de `sendIngestTemplate`
+      // — `assertTemplateChannelCompatible` decide a compatibilidade.
+      const resolvedChannelId =
+        payload.channelId ??
+        (await deriveChannelIdFromTemplateWaba(
+          supabase,
+          accountId,
+          templateId
+        ));
+
       after(async () => {
         try {
           await sendIngestTemplate(supabase, {
@@ -322,6 +372,7 @@ export async function POST(request: Request) {
             templateId,
             templateParams,
             recipientRowId,
+            channelId: resolvedChannelId,
           });
         } catch (err) {
           await logIngestEvent(supabase, {

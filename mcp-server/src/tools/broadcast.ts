@@ -34,6 +34,12 @@ export function registerBroadcastTools(
         template_language: z
           .string()
           .describe('Template language code, e.g. "en_US".'),
+        channel_id: z
+          .string()
+          .optional()
+          .describe(
+            'Which of the account’s official numbers to send from (SPEC 065). Omit to use the account’s default Cloud channel. Must belong to the same WABA as template_name, or the call fails with template_waba_mismatch — use whoami to see the account’s channels.'
+          ),
         recipients: z
           .array(
             z.object({

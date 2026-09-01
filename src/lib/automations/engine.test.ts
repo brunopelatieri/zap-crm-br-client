@@ -33,6 +33,8 @@ const h = vi.hoisted(() => ({
     templateRows: null as { category: string }[] | null,
     /** Payloads gravados em `automation_pending_executions` (SPEC 062 §4.3 ponto 2). */
     pendingExecutionUpdates: [] as Record<string, unknown>[],
+    /** `steps_executed` de cada `update` em `automation_logs` (SPEC 065 D-8). */
+    logUpdates: [] as Record<string, unknown>[],
   },
 }));
 
@@ -102,7 +104,10 @@ vi.mock('./admin-client', () => {
     }
     if (table === 'automation_logs') {
       if (type === 'insert') return { data: { id: 'log1' }, error: null };
-      if (type === 'update') return { data: null, error: null };
+      if (type === 'update') {
+        state.logUpdates.push((ops.payload ?? {}) as Record<string, unknown>);
+        return { data: null, error: null };
+      }
       return { data: { steps_executed: [], status: 'success' }, error: null };
     }
     if (table === 'automation_steps') {
@@ -180,6 +185,7 @@ import {
   engineSendInteractive,
 } from './meta-send';
 import { ColdSendLimitError } from '@/lib/channels/cold-send-wiring';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import type { Automation } from '@/types';
 
 const ACCOUNT = 'acct-1';
@@ -198,6 +204,7 @@ beforeEach(() => {
   h.state.templateRows = null;
   h.state.accountBlockedAt = null;
   h.state.pendingExecutionUpdates = [];
+  h.state.logUpdates = [];
   vi.mocked(engineSendText).mockClear();
   vi.mocked(engineSendTemplate).mockClear();
   vi.mocked(engineSendInteractive).mockClear();
@@ -770,6 +777,39 @@ describe('session window guard on send_message/send_buttons/send_list (SPEC 045 
       markerStep(),
     ]);
 
+    expect(contactsUpdates()).toHaveLength(0);
+  });
+
+  it('a disabled channel fails the step with a stable channel_unavailable reason (SPEC 065 D-8)', async () => {
+    // O canal ESCOLHIDO (automação ou conversa) foi desativado depois
+    // de escolhido — `resolveCloudConfig` já lança
+    // `ChannelNotConfiguredError` com `reason: 'disabled'` para esse
+    // caso; o que este teste trava é o motor traduzindo isso num
+    // motivo ESTÁVEL e greppável no `automation_logs`, não só a
+    // mensagem crua do erro.
+    h.state.conversationRow = { last_customer_message_at: hoursAgoIso(1) };
+    vi.mocked(engineSendText).mockRejectedValueOnce(
+      new ChannelNotConfiguredError(
+        'channel ch-cloud-1 is disabled — reconnect the number before sending',
+        'disabled'
+      )
+    );
+
+    await runWithConversation([
+      sendMessageStep({ on_window_closed: 'skip' }),
+      markerStep(),
+    ]);
+
+    const failedResult = h.state.logUpdates
+      .flatMap(
+        (u) => (u.steps_executed ?? []) as { step_id: string; detail: string }[]
+      )
+      .find((r) => r.step_id === 's-msg');
+    expect(failedResult?.detail).toBe(
+      'channel_unavailable: channel ch-cloud-1 is disabled — reconnect the number before sending'
+    );
+    // Falha PARA a automação (não é skip) — igual a qualquer outro erro
+    // de envio não tratado.
     expect(contactsUpdates()).toHaveLength(0);
   });
 

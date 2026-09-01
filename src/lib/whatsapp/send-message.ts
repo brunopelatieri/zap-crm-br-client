@@ -42,7 +42,7 @@ import {
   type ColdSendCheck,
 } from '@/lib/channels/cold-send-wiring';
 import { describeDenial } from '@/lib/channels/cold-send-limit';
-import { logOutboundSend } from '@/lib/channels/send-log';
+import { logOutboundSend, type ChannelSource } from '@/lib/channels/send-log';
 import { encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
@@ -315,9 +315,13 @@ export async function sendMessageToConversation(
   // API pública —, então o alcance da consulta e a RLS não mudam.
   let channelCtx;
   let config;
+  let channelSource: ChannelSource;
   try {
-    ({ ctx: channelCtx, configRow: config } =
-      await resolveChannelForConversation(db, accountId, conversationId));
+    ({
+      ctx: channelCtx,
+      configRow: config,
+      source: channelSource,
+    } = await resolveChannelForConversation(db, accountId, conversationId));
   } catch (err) {
     if (err instanceof ChannelNotConfiguredError) {
       throw new SendMessageError(
@@ -556,6 +560,7 @@ export async function sendMessageToConversation(
       channelType: channelCtx.channel.type,
       phoneNumberId: channelCtx.credentials.phoneNumberId ?? null,
       origin: coldSendOrigin === 'api' ? 'api_v1' : 'inbox',
+      channelSource,
     });
   } catch (err) {
     // O canal não sabe fazer o que foi pedido (template ou botão numa

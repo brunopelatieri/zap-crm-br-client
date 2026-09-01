@@ -50,6 +50,16 @@ vi.mock('@/lib/evolution/instances', () => ({
 }));
 
 /**
+ * SPEC 065 §11 — espiona o log estruturado para confirmar que
+ * `sendAndPersistOutbound` repassa o `channelSource` certo, sem
+ * depender do formato exato do `console.log` real.
+ */
+const logOutboundSendSpy = vi.fn();
+vi.mock('./send-log', () => ({
+  logOutboundSend: (...a: unknown[]) => logOutboundSendSpy(...a),
+}));
+
+/**
  * Registro com override por teste.
  *
  * Sem isto, qualquer teste de guard de capacidade passa pelo motivo
@@ -290,7 +300,10 @@ describe('resolveChannelContext', () => {
   it('decripta o token e entrega a linha crua para o auto-reparo', async () => {
     const db = dbWithConfigAndContact();
 
-    const { ctx, configRow } = await resolveChannelContext(db.client, 'acct-1');
+    const { ctx, configRow, source } = await resolveChannelContext(
+      db.client,
+      'acct-1'
+    );
 
     expect(ctx.credentials).toEqual({
       phoneNumberId: 'pnid-1',
@@ -300,6 +313,24 @@ describe('resolveChannelContext', () => {
     // Escopo de conta — não de usuário.
     const read = db.ops.find((o) => o.table === 'whatsapp_config')!;
     expect(read.filters).toContainEqual(['eq', 'account_id', 'acct-1']);
+    // SPEC 065 §11 — sem `channelId`, caiu no padrão da conta.
+    expect(source).toBe('default');
+  });
+
+  it('channelId explícito no Cloud → source "resource" (SPEC 065 §11)', async () => {
+    const db = makeDb({
+      'channels.select': channelsFixture([CLOUD_CHANNEL_ROW]),
+      'whatsapp_config.select': { data: CONFIG_ROW, error: null },
+    });
+
+    const resolved = await resolveChannelContext(
+      db.client,
+      'acct-1',
+      'whatsapp_cloud',
+      CLOUD_CHANNEL_ROW.id
+    );
+
+    expect(resolved.source).toBe('resource');
   });
 
   it('erro tipado quando a conta não tem canal configurado', async () => {
@@ -409,6 +440,9 @@ describe('resolveChannelForConversation', () => {
     });
     // E nunca tocou a `whatsapp_config` do canal oficial.
     expect(db.ops.some((o) => o.table === 'whatsapp_config')).toBe(false);
+    // SPEC 065 §11 — herdado da CONVERSA, nunca `'resource'`: quem
+    // resolveu não foi o chamador, foi `conversations.channel_id`.
+    expect(resolved.source).toBe('conversation');
   });
 
   it('resolve o canal oficial quando a conversa aponta para ele', async () => {
@@ -450,6 +484,8 @@ describe('resolveChannelForConversation', () => {
     );
 
     expect(resolved.ctx.channel.type).toBe('whatsapp_cloud');
+    // SPEC 065 §11 — sem `channel_id` na conversa, caiu no padrão.
+    expect(resolved.source).toBe('default');
   });
 
   it('falha com motivo quando o canal da conversa não existe mais', async () => {
@@ -520,6 +556,9 @@ describe('resolveChannelForConversation', () => {
     // E o identifier do contexto é o TELEFONE do canal B (D-9), não o
     // do padrão nem o `phone_number_id`.
     expect(resolved.ctx.channel.identifier).toBe('5511977776666');
+    // SPEC 065 §11 — herdado da conversa, mesmo havendo um `channelId`
+    // explícito na chamada interna a `resolveChannelContext`.
+    expect(resolved.source).toBe('conversation');
   });
 
   it('escopa a leitura da conversa por conta', async () => {
@@ -1117,6 +1156,13 @@ describe('sendAndPersistOutbound', () => {
       expect(
         db.ops.some((o) => o.table === 'conversations' && o.verb === 'select')
       ).toBe(true);
+
+      // SPEC 065 §11 — `channel` explícito é sempre `'resource'`: é o
+      // desvio ESCOLHENDO ignorar o canal da conversa, não a conversa
+      // decidindo por ele.
+      expect(logOutboundSendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ channelSource: 'resource' })
+      );
     });
 
     it('canal IMPLÍCITO (o da própria conversa): channel_id fica de fora do INSERT', async () => {
@@ -1141,6 +1187,13 @@ describe('sendAndPersistOutbound', () => {
         (o) => o.table === 'messages' && o.verb === 'insert'
       );
       expect(insert?.payload).not.toHaveProperty('channel_id');
+
+      // SPEC 065 §11 — sem `channel` explícito e sem `conversations.
+      // channel_id` na fixture, `resolveChannelForConversation` caiu no
+      // canal Cloud padrão.
+      expect(logOutboundSendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ channelSource: 'default' })
+      );
     });
   });
 });

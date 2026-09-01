@@ -41,6 +41,14 @@ export interface IngestPayload {
   customFields: IngestCustomFieldInput[];
   templateId: string | null;
   templateParams: string[];
+  /**
+   * Número oficial pelo qual enviar (SPEC 065 D-9). Só a FORMA é
+   * validada aqui (string não-vazia) — pertencer à conta exige uma
+   * consulta ao banco, então quem confere é a rota
+   * (`app/api/v1/ingest/contact/route.ts`), com o mesmo tratamento de
+   * `resolveConversationByPhone`: id de outra conta é 400, nunca 404.
+   */
+  channelId: string | null;
 }
 
 export type ParseIngestPayloadResult =
@@ -273,6 +281,11 @@ export function parseIngestPayload(body: unknown): ParseIngestPayloadResult {
       )
     : [];
 
+  const channelId =
+    typeof raw.channel_id === 'string' && raw.channel_id.trim()
+      ? raw.channel_id.trim()
+      : null;
+
   return {
     ok: true,
     warnings,
@@ -297,6 +310,7 @@ export function parseIngestPayload(body: unknown): ParseIngestPayloadResult {
       customFields,
       templateId,
       templateParams,
+      channelId,
     },
   };
 }

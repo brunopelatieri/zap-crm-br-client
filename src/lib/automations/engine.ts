@@ -30,6 +30,7 @@ import { resolveSessionWindow } from '@/lib/channels/session-window';
 import { sendAndPersistOutbound } from '@/lib/channels/send';
 import { findOrCreateConversation } from '@/lib/whatsapp/resolve-conversation';
 import { ColdSendLimitError } from '@/lib/channels/cold-send-wiring';
+import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import type { ChannelType } from '@/lib/channels/types';
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
 import { isAccountBlocked } from '@/lib/platform/blocked';
@@ -446,7 +447,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
         detail: stepResult.detail,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = describeStepFailure(err);
       results.push({
         step_id: step.id,
         step_type: step.step_type,
@@ -476,6 +477,26 @@ function success(detail: string): StepResult {
 }
 function skipped(detail: string): StepResult {
   return { status: 'skipped', detail };
+}
+
+/**
+ * Motivo ESTÁVEL, greppável em `automation_logs`, para o passo ter
+ * falhado por o canal escolhido (o da automação, D-4, ou o do desvio,
+ * `fallback_channel`) estar `disabled` (SPEC 065 D-8/F8).
+ *
+ * Sem isto, `detail` carregava só a mensagem crua de
+ * `ChannelNotConfiguredError` — legível, mas sem um código fixo que uma
+ * consulta de auditoria ou um alerta futuro possam filtrar. `disabled`
+ * é o único motivo tratado aqui: os outros (`no_channel`, `not_found`,
+ * `wrong_type`, `no_credentials`, `read_failed`) já têm mensagens
+ * autoexplicativas e não são o cenário do D-8 (canal que a automação
+ * escolheu e que foi desativado DEPOIS).
+ */
+function describeStepFailure(err: unknown): string {
+  if (err instanceof ChannelNotConfiguredError && err.reason === 'disabled') {
+    return `channel_unavailable: ${err.message}`;
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 async function runStep(
@@ -1166,8 +1187,13 @@ async function sendViaFallbackChannel(
     if (err instanceof ColdSendLimitError) return skipped(err.message);
     // O nome do canal entra no motivo porque a thread onde este log
     // será lido é a do canal oficial: sem ele, "instance unavailable"
-    // aponta para o número errado.
-    const reason = err instanceof Error ? err.message : String(err);
+    // aponta para o número errado. `describeStepFailure` (D-8) garante o
+    // prefixo estável `channel_unavailable:` quando o motivo É o canal
+    // de desvio ter sido desativado — este `throw` embrulha o resultado
+    // numa `Error` genérica, então é aqui, e não no catch externo de
+    // `executeStepsFrom`, que a checagem de `instanceof
+    // ChannelNotConfiguredError` precisa acontecer.
+    const reason = describeStepFailure(err);
     throw new Error(`fallback channel "${guard.channelName}": ${reason}`);
   }
 }

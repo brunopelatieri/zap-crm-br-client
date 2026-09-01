@@ -60,7 +60,7 @@ import {
 import { resolveDefaultChannelId } from './default-channel';
 import { ChannelNotConfiguredError, ChannelCapabilityError } from './errors';
 import { getAdapter } from './registry';
-import { logOutboundSend } from './send-log';
+import { logOutboundSend, type ChannelSource } from './send-log';
 import type {
   Channel,
   ChannelAdapter,
@@ -146,6 +146,15 @@ export interface ResolvedChannel {
    * `whatsapp_config`, o que hoje não acontece.
    */
   configRow: WhatsappConfigRow;
+  /**
+   * De onde veio este canal (SPEC 065 §11) — para `logOutboundSend`.
+   * `resolveChannelContext` decide pelo `channelId` que recebeu:
+   * presente = `'resource'` (alguém escolheu), ausente = `'default'`
+   * (caiu no padrão da conta). `resolveChannelForConversation` PISA
+   * nessa decisão quando o canal veio de `conversations.channel_id` —
+   * ver o comentário lá: herdar da conversa não é o recurso escolhendo.
+   */
+  source: ChannelSource;
 }
 
 /**
@@ -211,6 +220,11 @@ export async function resolveChannelContext(
         credentials: { instanceToken: resolved.token },
       },
       configRow: resolved,
+      // `channelId` é obrigatório neste ramo (ver o throw acima) — QR
+      // não tem "padrão implícito", então chegar até aqui já significa
+      // que alguém (ou `resolveChannelForConversation`, que corrige para
+      // `'conversation'` quando for o caso) escolheu.
+      source: 'resource',
     };
   }
 
@@ -249,6 +263,10 @@ export async function resolveChannelContext(
       connected: channel.status === 'connected',
     }),
     configRow: config,
+    // `channelId` presente = alguém escolheu (`'resource'`); ausente =
+    // caiu no canal Cloud padrão da conta via D-11 (`'default'`). Mesma
+    // ressalva do ramo QR acima sobre `resolveChannelForConversation`.
+    source: channelId ? 'resource' : 'default',
   };
 }
 
@@ -315,7 +333,19 @@ export async function resolveChannelForConversation(
     );
   }
 
-  return resolveChannelContext(db, accountId, channelType, channelId);
+  // SPEC 065 §11 — o canal veio de `conversations.channel_id`, não de
+  // uma escolha do recurso que está enviando: `resolveChannelContext`
+  // devolveria `'resource'` só porque recebeu um `channelId`, mas quem
+  // decidiu foi a CONVERSA (uma resposta numa thread existente), não
+  // quem chamou. Sobrescrever aqui é o único jeito de o log distinguir
+  // "o recurso escolheu o canal B" de "esta conversa já estava no B".
+  const resolved = await resolveChannelContext(
+    db,
+    accountId,
+    channelType,
+    channelId
+  );
+  return { ...resolved, source: 'conversation' };
 }
 
 /**
@@ -656,7 +686,13 @@ export async function sendAndPersistOutbound(input: {
   // O canal vem da CONVERSA, não do padrão da conta (F4.1): uma
   // automação disparada por uma mensagem que entrou pelo QRCode tem de
   // responder pelo QRCode. Ver `resolveChannelForConversation`.
-  const { ctx } = input.channel
+  //
+  // `channelSource` (SPEC 065 §11): `input.channel` explícito É sempre
+  // `'resource'` — é o desvio por canal escolhendo deliberadamente
+  // ignorar o da conversa (ver o comentário do campo `channel` acima) —
+  // em vez de confiar no que `resolveChannelContext` inferiria sozinho
+  // da presença de `id`.
+  const { ctx, source: resolvedSource } = input.channel
     ? await resolveChannelContext(
         db,
         accountId,
@@ -664,6 +700,9 @@ export async function sendAndPersistOutbound(input: {
         input.channel.id
       )
     : await resolveChannelForConversation(db, accountId, conversationId);
+  const channelSource: ChannelSource = input.channel
+    ? 'resource'
+    : resolvedSource;
 
   // Teto de envio frio (SPEC 049 §6.2, D-1): só em canal sem janela da
   // Meta — ela já regula o resto. `sendAndPersistOutbound` é o único
@@ -703,6 +742,7 @@ export async function sendAndPersistOutbound(input: {
     channelType: ctx.channel.type,
     phoneNumberId: ctx.credentials.phoneNumberId ?? null,
     origin: input.origin,
+    channelSource,
   });
 
   if (workingPhone !== contact.sanitizedPhone) {

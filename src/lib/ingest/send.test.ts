@@ -22,7 +22,11 @@ vi.mock('@/lib/channels/registry', async (importOriginal) => {
 });
 
 import { encrypt } from '@/lib/whatsapp/encryption';
-import { sendIngestTemplate, IngestSendError } from './send';
+import {
+  sendIngestTemplate,
+  deriveChannelIdFromTemplateWaba,
+  IngestSendError,
+} from './send';
 
 const APPROVED_TEMPLATE = {
   id: 'tpl-1',
@@ -137,16 +141,22 @@ function fakeDb(opts: FakeDbOptions = {}): {
         );
       }
       if (table === 'message_templates') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: () =>
-                  Promise.resolve({ data: opts.template ?? null, error: null }),
-              }),
-            }),
-          }),
+        // Dois formatos de consulta batem aqui: `sendIngestTemplate`
+        // busca UMA linha por id (`.eq().eq().maybeSingle()`), e
+        // `assertTemplateChannelCompatible` (via `loadTemplateCandidates`,
+        // SPEC 065 D-3) busca uma LISTA por nome+idioma, sem
+        // `.maybeSingle()` — o link precisa responder aos dois.
+        const link: Record<string, unknown> = {
+          eq: () => link,
+          maybeSingle: () =>
+            Promise.resolve({ data: opts.template ?? null, error: null }),
+          then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+            Promise.resolve({
+              data: opts.template ? [opts.template] : [],
+              error: null,
+            }).then(onF, onR),
         };
+        return { select: () => link };
       }
       if (table === 'broadcast_recipients') {
         return {
@@ -340,5 +350,166 @@ describe('sendIngestTemplate — send success/failure', () => {
         error_message: expect.stringContaining('Meta API error'),
       }),
     ]);
+  });
+});
+
+describe('sendIngestTemplate — template×channel compatibility (SPEC 065 D-3)', () => {
+  it('throws template_waba_mismatch when the resolved channel sends through a different WABA, and never calls Meta', async () => {
+    const { db, recipientUpdates } = fakeDb({
+      channelRows: [CLOUD_CHANNEL],
+      template: { ...APPROVED_TEMPLATE, waba_id: 'waba-B' },
+      config: { ...CONFIG_ROW, waba_id: 'waba-A' },
+    });
+
+    await expect(
+      sendIngestTemplate(db, {
+        accountId: 'acc-1',
+        phone: '5519992496598',
+        templateId: 'tpl-1',
+        templateParams: [],
+        recipientRowId: 'rec-1',
+      })
+    ).rejects.toMatchObject({ code: 'template_waba_mismatch' });
+
+    expect(cloudSendTemplate).not.toHaveBeenCalled();
+    // Nada de `broadcast_recipients` foi tocado: o disparo nem chegou a
+    // ser tentado, então a linha permanece `pending` (mesma regra das
+    // falhas de template não encontrado/aprovado).
+    expect(recipientUpdates).toEqual([]);
+  });
+
+  it('sends when the resolved channel and the template share the same WABA', async () => {
+    const { db } = fakeDb({
+      channelRows: [CLOUD_CHANNEL],
+      template: { ...APPROVED_TEMPLATE, waba_id: 'waba-A' },
+      config: { ...CONFIG_ROW, waba_id: 'waba-A' },
+    });
+
+    const result = await sendIngestTemplate(db, {
+      accountId: 'acc-1',
+      phone: '5519992496598',
+      templateId: 'tpl-1',
+      templateParams: [],
+      recipientRowId: 'rec-1',
+    });
+
+    expect(result).toEqual({ messageId: 'wamid.1' });
+  });
+});
+
+describe('deriveChannelIdFromTemplateWaba (SPEC 065 D-9)', () => {
+  function channelsDb(opts: {
+    templateWabaId: string | null;
+    channels: { id: string; waba_id: string | null }[];
+  }): SupabaseClient {
+    const client = {
+      from: (table: string) => {
+        if (table === 'message_templates') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: { waba_id: opts.templateWabaId },
+                      error: null,
+                    }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'channels') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  neq: () =>
+                    Promise.resolve({
+                      data: opts.channels.map((c, i) => ({
+                        id: c.id,
+                        name: `Canal ${i}`,
+                        identifier: null,
+                        status: 'connected',
+                        is_default: i === 0,
+                        created_at: '2026-01-01T00:00:00.000Z',
+                      })),
+                      error: null,
+                    }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'whatsapp_config') {
+          return {
+            select: () => ({
+              eq: () => ({
+                in: () =>
+                  Promise.resolve({
+                    data: opts.channels.map((c) => ({
+                      channel_id: c.id,
+                      waba_id: c.waba_id,
+                    })),
+                    error: null,
+                  }),
+              }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+    return client as unknown as SupabaseClient;
+  }
+
+  it('derives the single Cloud channel of the template WABA', async () => {
+    const db = channelsDb({
+      templateWabaId: 'waba-B',
+      channels: [
+        { id: 'ch-a', waba_id: 'waba-A' },
+        { id: 'ch-b', waba_id: 'waba-B' },
+      ],
+    });
+
+    await expect(
+      deriveChannelIdFromTemplateWaba(db, 'acc-1', 'tpl-1')
+    ).resolves.toBe('ch-b');
+  });
+
+  it('returns null when two channels share the template WABA (ambiguous — falls back to default)', async () => {
+    const db = channelsDb({
+      templateWabaId: 'waba-A',
+      channels: [
+        { id: 'ch-a', waba_id: 'waba-A' },
+        { id: 'ch-b', waba_id: 'waba-A' },
+      ],
+    });
+
+    await expect(
+      deriveChannelIdFromTemplateWaba(db, 'acc-1', 'tpl-1')
+    ).resolves.toBeNull();
+  });
+
+  it('returns null when no channel matches the template WABA', async () => {
+    const db = channelsDb({
+      templateWabaId: 'waba-C',
+      channels: [{ id: 'ch-a', waba_id: 'waba-A' }],
+    });
+
+    await expect(
+      deriveChannelIdFromTemplateWaba(db, 'acc-1', 'tpl-1')
+    ).resolves.toBeNull();
+  });
+
+  it('returns null for a legacy template with no WABA on file', async () => {
+    const db = channelsDb({
+      templateWabaId: null,
+      channels: [{ id: 'ch-a', waba_id: 'waba-A' }],
+    });
+
+    await expect(
+      deriveChannelIdFromTemplateWaba(db, 'acc-1', 'tpl-1')
+    ).resolves.toBeNull();
   });
 });

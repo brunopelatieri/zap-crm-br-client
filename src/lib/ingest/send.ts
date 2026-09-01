@@ -24,17 +24,25 @@ import {
 } from '@/lib/channels/send';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import { logOutboundSend } from '@/lib/channels/send-log';
-import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
+import {
+  listCloudChannels,
+  resolveCloudConfig,
+} from '@/lib/whatsapp/cloud-channels';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { createHeaderMediaResolver } from '@/lib/whatsapp/header-media';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { checkTemplateApproval } from '@/lib/whatsapp/template-approval';
+import {
+  assertTemplateChannelCompatible,
+  TemplateChannelMismatchError,
+} from '@/lib/whatsapp/template-waba';
 import type { MessageTemplate, MessageTemplateStatus } from '@/types';
 
 export type IngestSendErrorCode =
   | 'template_not_found'
   | 'template_not_approved'
   | 'channel_not_capable'
+  | 'template_waba_mismatch'
   | 'send_failed';
 
 export class IngestSendError extends Error {
@@ -61,16 +69,52 @@ export interface SendIngestTemplateParams {
   /** Linha de `broadcast_recipients` já criada por `addFunnelRecipient`. */
   recipientRowId: string;
   /**
-   * Por qual número oficial disparar (SPEC 064 D-7). Ausente = canal
-   * Cloud padrão da conta.
+   * Por qual número oficial disparar (SPEC 064 D-7 / SPEC 065 D-9).
+   * Ausente = canal Cloud padrão da conta.
    *
-   * O webhook de entrada da SPEC 055 ainda não guarda canal — o
-   * `webhook_id` é só um rótulo no corpo do POST —, então hoje todo
-   * chamador cai no padrão. O parâmetro existe para que escolher o
-   * número, quando a origem passar a saber qual é, não exija reabrir
-   * esta assinatura.
+   * A rota já resolveu isto antes de chamar: `channel_id` explícito no
+   * corpo (validado contra a conta), ou — na ausência dele — o canal
+   * derivado do WABA do template por `deriveChannelIdFromTemplateWaba`
+   * abaixo. Em qualquer caso, `assertTemplateChannelCompatible` decide
+   * se o par (template, canal resolvido) pode sair.
    */
   channelId?: string | null;
+}
+
+/**
+ * SPEC 065 D-9 — `channel_id` ausente no POST, mas há `template_id`:
+ * deriva o canal do WABA do template, SE exatamente um canal Cloud
+ * daquele WABA existir na conta. Ambíguo (mais de um) ou nenhum → `null`,
+ * e quem chama cai no canal padrão — `assertTemplateChannelCompatible`
+ * decide a compatibilidade a partir daí, do mesmo jeito que decidiria
+ * para qualquer outro canal.
+ *
+ * Nunca lança: uma falha de leitura aqui não pode derrubar o envio
+ * best-effort do POST de ingestão (D-14) — só perde a derivação.
+ */
+export async function deriveChannelIdFromTemplateWaba(
+  db: SupabaseClient,
+  accountId: string,
+  templateId: string
+): Promise<string | null> {
+  const { data: template, error } = await db
+    .from('message_templates')
+    .select('waba_id')
+    .eq('id', templateId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  if (error || !template?.waba_id) return null;
+
+  let channels;
+  try {
+    channels = await listCloudChannels(db, accountId);
+  } catch {
+    return null;
+  }
+
+  const matches = channels.filter((c) => c.wabaId === template.waba_id);
+  return matches.length === 1 ? matches[0].channelId : null;
 }
 
 /**
@@ -145,6 +189,23 @@ export async function sendIngestTemplate(
     throw new IngestSendError('channel_not_capable', err.message);
   }
 
+  // SPEC 065 D-3/D-9 — recusa ANTES da Meta o par (template, canal) que
+  // ela rejeitaria com `(#132001)`. Precisa vir DEPOIS de resolver o
+  // canal: sem `channelId` explícito, `resolveCloudConfig` já caiu no
+  // padrão da conta, e é ESSE canal — não o parâmetro ausente — que
+  // precisa bater com o WABA do template.
+  try {
+    await assertTemplateChannelCompatible(db, {
+      accountId,
+      channelId: channel.id,
+      templateName: template.name,
+      templateLanguage: template.language || 'en_US',
+    });
+  } catch (err) {
+    if (!(err instanceof TemplateChannelMismatchError)) throw err;
+    throw new IngestSendError('template_waba_mismatch', err.message);
+  }
+
   const channelCtx = cloudChannelContext({
     accountId,
     phoneNumberId: config.phone_number_id,
@@ -183,6 +244,11 @@ export async function sendIngestTemplate(
       channelType: channel.type,
       phoneNumberId: config.phone_number_id ?? null,
       origin: 'ingest',
+      // SPEC 065 §11 — `channelId` presente = explícito no POST ou
+      // derivado do WABA do template (D-9); ausente = caiu no canal
+      // Cloud padrão dentro de `resolveCloudConfig`. Nunca
+      // `'conversation'`: a ingestão não parte de uma conversa existente.
+      channelSource: channelId ? 'resource' : 'default',
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

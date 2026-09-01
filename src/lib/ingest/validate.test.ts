@@ -377,3 +377,28 @@ describe('parseIngestPayload — optional fields', () => {
     });
   });
 });
+
+describe('parseIngestPayload — channel_id (SPEC 065 D-9)', () => {
+  it('accepts a channel_id string, trimmed', () => {
+    const result = parseIngestPayload({
+      ...BASE,
+      channel_id: '  8f3c1e2a-0000-4000-8000-000000000003  ',
+    });
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) {
+      expect(result.value.channelId).toBe(
+        '8f3c1e2a-0000-4000-8000-000000000003'
+      );
+    }
+  });
+
+  it('missing channel_id yields null (falls back to default/derived channel)', () => {
+    const result = parseIngestPayload(BASE);
+    expect(result).toMatchObject({ ok: true, value: { channelId: null } });
+  });
+
+  it('an empty or whitespace-only channel_id yields null rather than an empty string', () => {
+    const result = parseIngestPayload({ ...BASE, channel_id: '   ' });
+    expect(result).toMatchObject({ ok: true, value: { channelId: null } });
+  });
+});
