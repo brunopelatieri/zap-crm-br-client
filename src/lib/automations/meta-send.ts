@@ -7,6 +7,7 @@ import {
   findTemplateRowForWaba,
 } from '@/lib/whatsapp/template-waba';
 import { renderTemplateText } from '@/lib/whatsapp/template-send-builder';
+import { resolveOutboundContact } from '@/lib/channels/send';
 import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
@@ -207,6 +208,21 @@ async function sendViaMeta(
     // (ver o cabeçalho da função), então um canal não resolvido aqui —
     // `resolvedChannelId` nulo — não vira recusa.
     if (mayHaveTemplate && resolvedChannelId) {
+      // O contato é validado ANTES (achado de code review): a regra de
+      // ordem documentada no topo desta função diz que nenhum erro pode
+      // furar a fila na frente da validação do CONTATO, que
+      // `sendAndPersistOutbound` sempre roda primeiro. Sem esta linha,
+      // um passo com contato apagado E template de outro WABA passava a
+      // registrar `template_waba_mismatch` no `automation_logs` em vez
+      // de "contact not found" — o operador consertava o template e o
+      // passo falhava de novo, agora pelo motivo verdadeiro.
+      //
+      // Custa um SELECT indexado a mais, repetido dentro de
+      // `sendAndPersistOutbound`. É a mesma troca que o comentário do
+      // canal acima já aceita: uma segunda leitura, não uma segunda
+      // fonte de verdade.
+      await resolveOutboundContact(db, input.accountId, input.contactId);
+
       await assertTemplateChannelCompatible(db, {
         accountId: input.accountId,
         channelId: resolvedChannelId,

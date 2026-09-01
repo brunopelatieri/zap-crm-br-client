@@ -57,7 +57,17 @@ vi.mock('./admin-client', () => {
 
     if (table === 'conversations') {
       state.conversationFilters = ops.filters;
-      return { data: state.conversations, error: null };
+      // Aplica o `eq('channel_id', …)` de verdade (SPEC 065, achado de
+      // code review): o escopo de canal desceu para o BANCO, então um
+      // mock que devolve tudo testaria uma consulta que não existe mais.
+      const wantedChannel = ops.filters.find(
+        (f) => f[0] === 'eq' && f[1] === 'channel_id'
+      )?.[2];
+      const rows =
+        wantedChannel === undefined
+          ? state.conversations
+          : state.conversations.filter((c) => c.channel_id === wantedChannel);
+      return { data: rows, error: null };
     }
 
     if (table === 'contacts') {

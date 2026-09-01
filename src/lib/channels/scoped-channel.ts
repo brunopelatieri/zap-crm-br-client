@@ -19,9 +19,10 @@
  * outra conta"). Com ele, o id de outra conta simplesmente não devolve
  * linha, e o chamador responde 400 sem confirmar que o id existe.
  *
- * `null` significa as duas coisas de propósito: id inexistente e id de
- * outra conta. Quem chama não deve distinguir — distinguir É o
- * vazamento.
+ * "Não existe" e "é de outra conta" continuam sendo a MESMA resposta, de
+ * propósito: distinguir os dois é o vazamento. O que passou a ser
+ * distinguido é a TERCEIRA possibilidade — a consulta falhar (achado de
+ * code review). Ver `ScopedChannelLookup`.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -39,12 +40,36 @@ export interface ScopedChannel {
   status: string;
 }
 
+/**
+ * Resultado da busca. Três estados, e o terceiro é o motivo desta forma
+ * existir.
+ *
+ *   `{ ok: true, channel }`        o canal é desta conta (ou nenhum
+ *                                   canal foi pedido → `channel: null`);
+ *   `{ ok: false, 'not_found' }`   id inexistente OU de outra conta —
+ *                                   indistinguíveis de propósito;
+ *   `{ ok: false, 'read_failed' }` a consulta falhou.
+ *
+ * Antes os dois últimos eram o mesmo `null`, e as quatro rotas
+ * respondiam 400 "channel not found in this account" também para um
+ * soluço do Supabase — dizendo ao operador que o número dele não existe
+ * e não lhe dando motivo para tentar de novo. Continua falhando FECHADO
+ * (nada é gravado sem verificação), mas agora com o motivo certo. É a
+ * mesma distinção que `ChannelNotConfiguredReason` já faz em
+ * `errors.ts` com `read_failed`.
+ */
+export type ScopedChannelLookup =
+  | { ok: true; channel: ScopedChannel | null }
+  | { ok: false; reason: 'not_found' | 'read_failed' };
+
 export async function loadScopedChannel(
   db: SupabaseClient,
   accountId: string,
   channelId: string | null | undefined
-): Promise<ScopedChannel | null> {
-  if (!channelId) return null;
+): Promise<ScopedChannelLookup> {
+  // Nenhum canal pedido = "vale para todos os canais", que é sucesso,
+  // não ausência.
+  if (!channelId) return { ok: true, channel: null };
 
   const { data, error } = await db
     .from('channels')
@@ -54,15 +79,49 @@ export async function loadScopedChannel(
     .maybeSingle();
 
   if (error) {
-    // Falha FECHADA: "a consulta falhou" e "o canal não é seu" levam ao
-    // mesmo 400 aqui de propósito. Tratar um erro transitório como
-    // "canal válido" gravaria um escopo que ninguém verificou.
     console.error(
       `[scoped-channel] failed to read channel ${channelId}:`,
       error
     );
-    return null;
+    return { ok: false, reason: 'read_failed' };
   }
 
-  return (data as ScopedChannel | null) ?? null;
+  const row = (data as ScopedChannel | null) ?? null;
+  if (!row) return { ok: false, reason: 'not_found' };
+
+  return { ok: true, channel: row };
+}
+
+/**
+ * A resposta HTTP de cada motivo, numa forma que as rotas convertem em
+ * `NextResponse.json(body, { status })`.
+ *
+ * Puro de propósito — sem importar `next/server` num módulo de
+ * `lib/channels/`. As quatro rotas precisam do MESMO par
+ * (status, código), e escrevê-lo à mão em cada uma é como o
+ * `channel_not_in_account` acabaria divergindo.
+ */
+export function scopedChannelError(reason: 'not_found' | 'read_failed'): {
+  status: number;
+  body: { error: string; code: string };
+} {
+  if (reason === 'read_failed') {
+    // 503, e não 400: não é o pedido que está errado — é a leitura que
+    // não aconteceu. O operador deve tentar de novo, e um 400 diria o
+    // contrário.
+    return {
+      status: 503,
+      body: {
+        error: 'could not verify the selected channel — try again',
+        code: 'channel_lookup_failed',
+      },
+    };
+  }
+  return {
+    status: 400,
+    body: {
+      error: 'channel not found in this account',
+      code: 'channel_not_in_account',
+    },
+  };
 }

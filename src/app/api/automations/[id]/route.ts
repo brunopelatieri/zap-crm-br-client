@@ -15,7 +15,10 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate';
-import { loadScopedChannel } from '@/lib/channels/scoped-channel';
+import {
+  loadScopedChannel,
+  scopedChannelError,
+} from '@/lib/channels/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 
 export async function GET(
@@ -94,12 +97,15 @@ export async function PATCH(
     'trigger_type',
     'trigger_config',
     'is_active',
-    // SPEC 065 D-4. `null` explícito é um valor válido: volta a valer
-    // para todos os canais.
-    'channel_id',
   ] as const) {
     if (k in body) update[k] = body[k];
   }
+  // `channel_id` fica FORA do laço acima de propósito (achado de code
+  // review): ele copiava o valor do corpo cru, e uma string vazia — o
+  // que um `<select value="">` manda para "Todos os números" — ia
+  // direto para o Postgres como uuid inválido (22P02, 500), enquanto a
+  // validação logo abaixo já a tinha normalizado para `null` e deixado
+  // passar. Agora as duas pontas leem a MESMA variável normalizada.
 
   // Escopo de canal (SPEC 065 D-4/§6). O id efetivo depois deste PATCH
   // — o do corpo quando ele veio, senão o que já estava gravado.
@@ -108,23 +114,16 @@ export async function PATCH(
       ? (body.channel_id as string | null | undefined) || null
       : ((existing.channel_id as string | null | undefined) ?? null)
   ) as string | null;
-  const scopedChannel = await loadScopedChannel(
-    admin,
-    accountId,
-    mergedChannelId
-  );
-  // Conferida SEMPRE, inclusive em rascunho: gravar canal de outra conta
+  // Conferido SEMPRE, inclusive em rascunho: gravar canal de outra conta
   // é vazamento de tenancy, não problema de ativação. O `admin` aqui é
   // service-role e não passa por RLS — a consulta é que escopa.
-  if (mergedChannelId && !scopedChannel) {
-    return NextResponse.json(
-      {
-        error: 'channel not found in this account',
-        code: 'channel_not_in_account',
-      },
-      { status: 400 }
-    );
+  const lookup = await loadScopedChannel(admin, accountId, mergedChannelId);
+  if (!lookup.ok) {
+    const e = scopedChannelError(lookup.reason);
+    return NextResponse.json(e.body, { status: e.status });
   }
+  const scopedChannel = lookup.channel;
+  if ('channel_id' in body) update.channel_id = mergedChannelId;
 
   // If this PATCH leaves the automation active (either explicitly
   // activating it OR editing an already-active one), validate the
@@ -172,6 +171,23 @@ export async function PATCH(
     }
   }
 
+  // O gatilho `deactivate_automation_on_channel_loss_trg` (migração 075,
+  // D-8) desativa QUALQUER automação cujo `channel_id` vá de preenchido
+  // para NULL. Ele não distingue — e não tem como distinguir — "o canal
+  // foi apagado" de "o operador voltou para Todos os números", e a
+  // própria migração deixou essa decisão para esta rota.
+  //
+  // Aqui é o segundo caso, e ele é uma escolha deliberada de AMPLIAR o
+  // escopo: desativar seria o oposto do que foi pedido. Sem esta
+  // reativação, a rota validava a automação como ativa, respondia
+  // `{ ok: true }` e o banco a desligava em silêncio — ela parava de
+  // disparar sem nada em lugar nenhum dizendo por quê.
+  const clearedChannelWhileActive =
+    willBeActive &&
+    mergedChannelId === null &&
+    ((existing.channel_id as string | null | undefined) ?? null) !== null &&
+    'channel_id' in body;
+
   if (Object.keys(update).length > 0) {
     const { error: updErr } = await admin
       .from('automations')
@@ -179,6 +195,27 @@ export async function PATCH(
       .eq('id', id);
     if (updErr)
       return NextResponse.json({ error: updErr.message }, { status: 500 });
+  }
+
+  if (clearedChannelWhileActive) {
+    // Segundo UPDATE, e não `is_active: true` junto do primeiro: o
+    // gatilho é BEFORE e sobrescreveria `NEW.is_active` na mesma
+    // instrução. Este não toca em `channel_id`, então
+    // `BEFORE UPDATE OF channel_id` nem dispara.
+    const { error: reErr } = await admin
+      .from('automations')
+      .update({ is_active: true })
+      .eq('id', id)
+      .eq('account_id', accountId);
+    if (reErr) {
+      return NextResponse.json(
+        {
+          error: `channel scope cleared but the automation could not be kept active: ${reErr.message}`,
+          code: 'reactivate_failed',
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (Array.isArray(body.steps)) {

@@ -844,7 +844,17 @@ export async function resolveConversationForAutomation(params: {
 
   const { data, error } = await (resourceChannelId
     ? base.eq('channel_id', resourceChannelId).limit(1)
-    : base.order('last_message_at', { ascending: false }).limit(1));
+    : base
+        // `nullsFirst: false` NÃO é decoração (achado de code review):
+        // `ORDER BY x DESC` no Postgres é NULLS FIRST por padrão, e uma
+        // conversa recém-aberta — por transferência, por envio frio, ou
+        // pela própria criação do D-5 logo abaixo — nasce com
+        // `last_message_at` NULL. Sem isto, a conversa VAZIA ganharia da
+        // conversa viva do contato, e a automação responderia pelo
+        // número errado: exatamente a falha muda que esta SPEC existe
+        // para eliminar.
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(1));
 
   if (error) throw new Error(`conversation lookup failed: ${error.message}`);
 

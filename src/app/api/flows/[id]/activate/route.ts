@@ -6,7 +6,10 @@ import {
   validateFlowChannel,
   validateFlowForActivation,
 } from '@/lib/flows/validate';
-import { loadScopedChannel } from '@/lib/channels/scoped-channel';
+import {
+  loadScopedChannel,
+  scopedChannelError,
+} from '@/lib/channels/scoped-channel';
 
 /**
  * POST /api/flows/[id]/activate
@@ -94,11 +97,12 @@ export async function POST(
     // responde.
     const scopedChannelId =
       ((flow as { channel_id?: string | null }).channel_id ?? null) || null;
-    const scopedChannel = await loadScopedChannel(
-      admin,
-      accountId,
-      scopedChannelId
-    );
+    const lookup = await loadScopedChannel(admin, accountId, scopedChannelId);
+    if (!lookup.ok) {
+      const e = scopedChannelError(lookup.reason);
+      return NextResponse.json(e.body, { status: e.status });
+    }
+    const scopedChannel = lookup.channel;
 
     const issues = [
       ...validateFlowForActivation(

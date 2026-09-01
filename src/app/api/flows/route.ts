@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
-import { loadScopedChannel } from '@/lib/channels/scoped-channel';
+import {
+  loadScopedChannel,
+  scopedChannelError,
+} from '@/lib/channels/scoped-channel';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { getFlowTemplate } from '@/lib/flows/templates';
 
@@ -108,21 +111,10 @@ export async function POST(request: Request) {
   // linha é vazamento de tenancy, não problema de ativação, e estas
   // rotas escrevem com `service_role`, que ignora RLS.
   const scopedChannelId = body.channel_id || null;
-  if (scopedChannelId) {
-    const scopedChannel = await loadScopedChannel(
-      admin,
-      accountId,
-      scopedChannelId
-    );
-    if (!scopedChannel) {
-      return NextResponse.json(
-        {
-          error: 'channel not found in this account',
-          code: 'channel_not_in_account',
-        },
-        { status: 400 }
-      );
-    }
+  const lookup = await loadScopedChannel(admin, accountId, scopedChannelId);
+  if (!lookup.ok) {
+    const e = scopedChannelError(lookup.reason);
+    return NextResponse.json(e.body, { status: e.status });
   }
 
   // -------- Template clone path --------

@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
-import { loadScopedChannel } from '@/lib/channels/scoped-channel';
+import {
+  loadScopedChannel,
+  scopedChannelError,
+} from '@/lib/channels/scoped-channel';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 
 /**
@@ -144,25 +147,33 @@ export async function PUT(
   // Escopo de canal (SPEC 065 D-6). A posse é conferida SEMPRE, mesmo
   // com o fluxo em rascunho: gravar canal de outra conta é vazamento de
   // tenancy, e `admin` é service-role — a consulta é que escopa.
+  //
+  // O gatilho `deactivate_flow_on_channel_loss_trg` (migração 075, D-8)
+  // rebaixa para `draft` QUALQUER fluxo cujo `channel_id` vá de
+  // preenchido para NULL — e não distingue "o canal foi apagado" de "o
+  // operador voltou para Todos os números". Aqui é o segundo caso, uma
+  // escolha deliberada de AMPLIAR o escopo, então o status é restaurado
+  // logo após o UPDATE. Sem isso, um fluxo ativo parava de responder em
+  // silêncio ao ser desescopado.
+  let clearedChannelWhileActive = false;
   if (body.channel_id !== undefined) {
     const scopedChannelId = body.channel_id || null;
-    if (scopedChannelId) {
-      const scopedChannel = await loadScopedChannel(
-        admin,
-        accountId,
-        scopedChannelId
-      );
-      if (!scopedChannel) {
-        return NextResponse.json(
-          {
-            error: 'channel not found in this account',
-            code: 'channel_not_in_account',
-          },
-          { status: 400 }
-        );
-      }
+    const lookup = await loadScopedChannel(admin, accountId, scopedChannelId);
+    if (!lookup.ok) {
+      const e = scopedChannelError(lookup.reason);
+      return NextResponse.json(e.body, { status: e.status });
     }
     flowPatch.channel_id = scopedChannelId;
+
+    if (scopedChannelId === null) {
+      const { data: before } = await admin
+        .from('flows')
+        .select('status, channel_id')
+        .eq('id', id)
+        .maybeSingle();
+      clearedChannelWhileActive =
+        before?.status === 'active' && before?.channel_id != null;
+    }
   }
 
   const { error: updErr } = await admin
@@ -171,6 +182,26 @@ export async function PUT(
     .eq('id', id);
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 });
+  }
+
+  if (clearedChannelWhileActive) {
+    // Segundo UPDATE, e não `status: 'active'` junto do primeiro: o
+    // gatilho é BEFORE e sobrescreveria `NEW.status` na mesma
+    // instrução. Este não toca em `channel_id`, então
+    // `BEFORE UPDATE OF channel_id` nem dispara.
+    const { error: reErr } = await admin
+      .from('flows')
+      .update({ status: 'active' })
+      .eq('id', id);
+    if (reErr) {
+      return NextResponse.json(
+        {
+          error: `channel scope cleared but the flow could not be kept active: ${reErr.message}`,
+          code: 'reactivate_failed',
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (body.nodes !== undefined) {

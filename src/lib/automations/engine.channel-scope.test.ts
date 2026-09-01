@@ -49,6 +49,7 @@ vi.mock('./admin-client', () => {
     filters: [string, string, unknown][];
     single: boolean;
     descBy: string | null;
+    nullsFirst: boolean;
   }) {
     const { table, type, filters } = ops;
     if (table === 'accounts')
@@ -60,13 +61,14 @@ vi.mock('./admin-client', () => {
     if (table === 'conversations') {
       let rows = applyFilters(state.conversations, filters);
       if (ops.descBy) {
-        rows = rows
-          .slice()
-          .sort((a, b) =>
-            String(b[ops.descBy as string]).localeCompare(
-              String(a[ops.descBy as string])
-            )
-          );
+        const col = ops.descBy;
+        const rank = (r: Record<string, unknown>) =>
+          r[col] == null ? (ops.nullsFirst ? 1 : -1) : 0;
+        rows = rows.slice().sort((a, b) => {
+          const byNull = rank(b) - rank(a);
+          if (byNull !== 0) return byNull;
+          return String(b[col] ?? '').localeCompare(String(a[col] ?? ''));
+        });
       }
       return { data: ops.single ? (rows[0] ?? null) : rows, error: null };
     }
@@ -90,6 +92,7 @@ vi.mock('./admin-client', () => {
       filters: [] as [string, string, unknown][],
       single: false,
       descBy: null as string | null,
+      nullsFirst: true,
     };
     const b: Record<string, unknown> = {
       select: () => b,
@@ -98,8 +101,18 @@ vi.mock('./admin-client', () => {
       eq: (k: string, v: unknown) => (ops.filters.push(['eq', k, v]), b),
       is: (k: string, v: unknown) => (ops.filters.push(['is', k, v]), b),
       or: (expr: string) => (ops.filters.push(['or', expr, null]), b),
-      order: (col: string, opt?: { ascending?: boolean }) => {
-        if (opt?.ascending === false) ops.descBy = col;
+      order: (
+        col: string,
+        opt?: { ascending?: boolean; nullsFirst?: boolean }
+      ) => {
+        if (opt?.ascending === false) {
+          ops.descBy = col;
+          // Espelha o Postgres: `ORDER BY x DESC` é NULLS FIRST por
+          // padrão. Sem isto o mock ordena NULL por último e concorda
+          // com a suposição de quem escreve o teste, em vez de com o
+          // banco.
+          ops.nullsFirst = opt?.nullsFirst ?? true;
+        }
         return b;
       },
       limit: () => b,
@@ -306,5 +319,68 @@ describe('resolveConversationId — canal da automação (SPEC 065 D-5)', () => 
       })
     ).rejects.toThrow('no conversation for contact');
     expect(findOrCreateConversation).not.toHaveBeenCalled();
+  });
+});
+
+// ------------------------------------------------------------
+// Achado de code review — NULL em ORDER BY DESC
+// ------------------------------------------------------------
+
+describe('resolveConversationForAutomation — conversa sem mensagens', () => {
+  // `ORDER BY x DESC` no Postgres é NULLS FIRST por padrão. Uma conversa
+  // recém-aberta (transferência, envio frio, ou a própria que o D-5
+  // acabou de criar) nasce com `last_message_at` NULL — e sem
+  // `nullsFirst: false` ela ganharia da conversa VIVA do contato, que é
+  // a mensagem saindo pelo número errado que esta SPEC existe para
+  // impedir.
+  it('ignora a conversa vazia e escolhe a que tem mensagem de verdade', async () => {
+    h.state.conversations = [
+      {
+        id: 'conv-vazia',
+        account_id: ACCOUNT,
+        contact_id: 'contact-1',
+        channel_id: 'ch-b',
+        last_message_at: null,
+      },
+      {
+        id: 'conv-viva',
+        account_id: ACCOUNT,
+        contact_id: 'contact-1',
+        channel_id: 'ch-a',
+        last_message_at: '2026-08-31T10:00:00Z',
+      },
+    ];
+
+    const id = await resolveConversationForAutomation({
+      accountId: ACCOUNT,
+      contactId: 'contact-1',
+      resourceChannelId: null,
+      ownerUserId: 'user-1',
+    });
+
+    expect(id).toBe('conv-viva');
+  });
+
+  // Só conversas vazias: não há "mais recente" a escolher, mas também
+  // não pode falhar — a conversa existe.
+  it('com só conversas vazias, ainda devolve uma em vez de falhar', async () => {
+    h.state.conversations = [
+      {
+        id: 'conv-vazia',
+        account_id: ACCOUNT,
+        contact_id: 'contact-1',
+        channel_id: 'ch-a',
+        last_message_at: null,
+      },
+    ];
+
+    await expect(
+      resolveConversationForAutomation({
+        accountId: ACCOUNT,
+        contactId: 'contact-1',
+        resourceChannelId: null,
+        ownerUserId: 'user-1',
+      })
+    ).resolves.toBe('conv-vazia');
   });
 });

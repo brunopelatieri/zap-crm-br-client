@@ -54,14 +54,21 @@ export function useChannelTemplates(
   useEffect(() => {
     let cancelled = false;
 
+    // Zera ANTES de buscar (achado de code review). Sem isto, trocar de
+    // canal deixava a lista do canal ANTERIOR na tela com
+    // `loading: false` — ou seja, apresentada como uma seleção válida e
+    // pronta. Um clique rápido escolhia um template do WABA errado
+    // enquanto `channel_id` já era o do novo canal, que é exatamente a
+    // combinação que este hook existe para tornar impossível. O
+    // servidor recusa depois (D-3), mas o operador merece uma lista que
+    // nunca ofereceu o template errado, não uma campanha rejeitada.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTemplates(null);
+
     (async () => {
       // Sem conta resolvida não dá para saber o WABA do canal, e listar
-      // sem filtrar aqui mostraria templates de outro número por um
-      // instante — piscada que o operador leria como lista válida.
-      if (!accountId) {
-        if (!cancelled) setTemplates(null);
-        return;
-      }
+      // sem filtrar mostraria templates de outro número.
+      if (!accountId) return;
 
       const supabase = createClient();
 

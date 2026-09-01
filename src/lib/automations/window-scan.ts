@@ -220,7 +220,19 @@ async function scanForAutomation(
   //
   // Ordena pela âncora mais antiga: quando o LIMIT trunca, quem está
   // mais perto de fechar é quem passa.
-  const { data: rows, error } = await db
+  // ── Escopo de canal da automação (SPEC 065 D-4) ──────────────────
+  //
+  // No BANCO, e não em JS depois (achado de code review): o `.limit()`
+  // abaixo trunca ANTES de qualquer filtro em memória, então uma
+  // automação escopada ao número A cujas 50 conversas mais próximas do
+  // fechamento fossem todas do número B receberia zero — e o tick
+  // seguinte leria as mesmas 50, porque o claim não move a âncora. O
+  // reengajamento do número A só voltaria quando aquelas linhas
+  // saíssem da faixa. `conversations.channel_id` está na tabela, então
+  // o filtro é de graça aqui.
+  const scopeChannelId = automation.channel_id ?? null;
+
+  const scopedQuery = db
     .from('conversations')
     // `channel_id` entra no SELECT (SPEC 065): o guardrail de canal
     // abaixo já o lia, mas a coluna nunca vinha na resposta — `c.channel_id`
@@ -236,6 +248,13 @@ async function scanForAutomation(
     .lte('last_customer_message_at', closesWithinMargin.toISOString())
     .order('last_customer_message_at', { ascending: true })
     .limit(MAX_CONVERSATIONS_PER_AUTOMATION);
+
+  // Conversa com `channel_id` nulo (linha anterior à migração 059) NÃO
+  // entra numa automação escopada: "não sei de qual canal é esta
+  // conversa" não é motivo para tratá-la como sendo do canal escolhido.
+  const { data: rows, error } = await (scopeChannelId
+    ? scopedQuery.eq('channel_id', scopeChannelId)
+    : scopedQuery);
 
   if (error) {
     console.error('[window-scan] phase B failed:', error.message);
@@ -260,23 +279,7 @@ async function scanForAutomation(
       )
     : (rows as ConversationRow[]);
 
-  // ── Escopo de canal da automação (SPEC 065 D-4) ──────────────────
-  //
-  // Escopada a um número, ela vale para as conversas DAQUELE número —
-  // "para quais conversas este recurso vale" é a pergunta que o D-4
-  // responde. Sem este filtro, uma automação de reengajamento criada
-  // para o número de Vendas reengajaria também quem falou com Suporte.
-  //
-  // `channel_id` nulo na conversa (linha anterior à migração 059) entra
-  // apenas quando a automação NÃO tem escopo: numa automação escopada,
-  // "não sei de qual canal é esta conversa" não é motivo para tratá-la
-  // como sendo do canal escolhido.
-  const scoped =
-    (automation.channel_id ?? null)
-      ? (
-          withWindow as (ConversationRow & { channel_id?: string | null })[]
-        ).filter((c) => c.channel_id === automation.channel_id)
-      : withWindow;
+  const scoped = withWindow;
   if (scoped.length === 0) return;
 
   // ── Guardrail 6: não reengajar com a bola do NOSSO lado ──────────

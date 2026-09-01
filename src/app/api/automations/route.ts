@@ -12,7 +12,10 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate';
-import { loadScopedChannel } from '@/lib/channels/scoped-channel';
+import {
+  loadScopedChannel,
+  scopedChannelError,
+} from '@/lib/channels/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 
 export async function GET() {
@@ -109,24 +112,16 @@ export async function POST(request: Request) {
   // um id de OUTRA conta chega aqui como "não existe" — 400 com código
   // estável, nunca 404, que confirmaria o id.
   const scopedChannelId = (channel_id as string | null | undefined) || null;
-  const scopedChannel = await loadScopedChannel(
-    supabase,
-    accountId,
-    scopedChannelId
-  );
   // A posse é conferida SEMPRE, inclusive em rascunho: gravar o canal de
   // outra conta na linha é vazamento de tenancy, e não um problema de
   // ativação. As demais regras (desativado, capacidade) continuam sendo
   // gate de ativação, como todo o resto deste arquivo.
-  if (scopedChannelId && !scopedChannel) {
-    return NextResponse.json(
-      {
-        error: 'channel not found in this account',
-        code: 'channel_not_in_account',
-      },
-      { status: 400 }
-    );
+  const lookup = await loadScopedChannel(supabase, accountId, scopedChannelId);
+  if (!lookup.ok) {
+    const e = scopedChannelError(lookup.reason);
+    return NextResponse.json(e.body, { status: e.status });
   }
+  const scopedChannel = lookup.channel;
 
   // Block activation of a clearly broken automation up-front instead of
   // letting every trigger silently produce a failed log row. Drafts
