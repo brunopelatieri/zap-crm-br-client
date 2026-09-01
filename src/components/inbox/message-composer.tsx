@@ -726,7 +726,11 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
+        // Abaixo de 1280px (xl) os botões de ação ficam numa linha no topo
+        // e o textarea desce para uma linha própria em largura cheia — o
+        // `basis-full` força a quebra antes dele, `order-*` reordena os
+        // irmãos sem duplicar o JSX para os dois layouts.
+        <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap xl:items-end">
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -738,7 +742,7 @@ export function MessageComposer({
                     ? undefined
                     : t('attachMedia')
               }
-              className="text-muted-foreground hover:text-foreground inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50"
+              className="text-muted-foreground hover:text-foreground order-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50 xl:order-none"
             >
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -783,7 +787,7 @@ export function MessageComposer({
                     ? undefined
                     : t('moreActions')
               }
-              className="text-muted-foreground hover:text-foreground inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50"
+              className="text-muted-foreground hover:text-foreground order-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50 xl:order-none"
             >
               <Plus className="h-4 w-4" />
             </DropdownMenuTrigger>
@@ -810,36 +814,43 @@ export function MessageComposer({
 
           {/* Template é conceito da Meta — some inteira fora da Cloud
               (SPEC 049 §4.3), pelo mesmo motivo do item interativo acima. */}
+          {/* GatedButton renderiza um <span> externo sem className próprio
+              (mostra o tooltip "Read-only" em Safari) — quem precisa de
+              `order`/margem no flex é esse wrapper, não o <Button> interno. */}
           {canTemplates && (
+            <div className="order-3 xl:order-none">
+              <GatedButton
+                variant="ghost"
+                size="sm"
+                canAct={!readOnly}
+                gateReason="send messages"
+                title={readOnly ? undefined : t('sendTemplate')}
+                className="text-muted-foreground hover:text-foreground h-9 w-9 shrink-0 p-0"
+                onClick={onOpenTemplates}
+              >
+                <LayoutTemplate className="h-4 w-4" />
+              </GatedButton>
+            </div>
+          )}
+
+          <div className="order-4 xl:order-none">
             <GatedButton
               variant="ghost"
               size="sm"
               canAct={!readOnly}
               gateReason="send messages"
-              title={readOnly ? undefined : t('sendTemplate')}
-              className="text-muted-foreground hover:text-foreground h-9 w-9 shrink-0 p-0"
-              onClick={onOpenTemplates}
+              disabled={drafting}
+              title={readOnly ? undefined : t('draftWithAI')}
+              className="text-muted-foreground hover:text-primary h-9 w-9 shrink-0 p-0"
+              onClick={handleDraft}
             >
-              <LayoutTemplate className="h-4 w-4" />
+              {drafting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
             </GatedButton>
-          )}
-
-          <GatedButton
-            variant="ghost"
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            disabled={drafting}
-            title={readOnly ? undefined : t('draftWithAI')}
-            className="text-muted-foreground hover:text-primary h-9 w-9 shrink-0 p-0"
-            onClick={handleDraft}
-          >
-            {drafting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-          </GatedButton>
+          </div>
 
           <textarea
             ref={textareaRef}
@@ -860,21 +871,26 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? t('readOnlyTitle') : undefined}
             className={cn(
-              'border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 flex-1 resize-none rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none',
+              // `min-h` (não `rows`) dá a altura inicial maior abaixo de xl
+              // sem depender de JS/resize listener — `rows` fixo em 1 porque
+              // o HTML attribute não é responsivo por breakpoint via classe.
+              'border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 order-6 min-h-[84px] basis-full resize-none rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none xl:order-none xl:min-h-0 xl:basis-auto xl:flex-1',
               (sessionExpired || readOnly) && 'cursor-not-allowed opacity-50'
             )}
           />
 
-          <GatedButton
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
-            onClick={handleSend}
-            className="bg-primary hover:bg-primary/90 h-9 w-9 shrink-0 p-0 disabled:opacity-40"
-          >
-            <Send className="h-4 w-4" />
-          </GatedButton>
+          <div className="order-5 ml-auto xl:order-none xl:ml-0">
+            <GatedButton
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              disabled={!text.trim() || sessionExpired || sending}
+              onClick={handleSend}
+              className="bg-primary hover:bg-primary/90 h-9 w-9 shrink-0 p-0 disabled:opacity-40"
+            >
+              <Send className="h-4 w-4" />
+            </GatedButton>
+          </div>
         </div>
       )}
 
