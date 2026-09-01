@@ -224,12 +224,23 @@ interface QueuedResult {
  */
 function makeDb(results: Record<string, QueuedResult>) {
   const inserts: Array<{ table: string; payload: unknown }> = [];
+  // Filtros de cada cadeia, para assertar POR ONDE uma escrita foi
+  // escopada (SPEC 065 D-7 — o pause-on-agent-send tem de casar a
+  // CONVERSA, não o contato).
+  const filters: Array<{
+    table: string;
+    verb: string;
+    args: [string, unknown];
+  }> = [];
 
   function chain(table: string) {
     let verb: 'select' | 'insert' | 'update' = 'select';
     const c: Record<string, unknown> = {
       select: () => c,
-      eq: () => c,
+      eq: (k: string, v: unknown) => {
+        filters.push({ table, verb, args: [k, v] });
+        return c;
+      },
       gte: () => c,
       order: () => c,
       limit: () => c,
@@ -264,6 +275,7 @@ function makeDb(results: Record<string, QueuedResult>) {
   return {
     client: { from: (t: string) => chain(t) } as unknown as SupabaseClient,
     inserts,
+    filters,
   };
 }
 
@@ -433,5 +445,31 @@ describe('sendMessageToConversation — conta bloqueada (SPEC 062 §4.3)', () =>
     });
 
     expect(qrSendText).not.toHaveBeenCalled();
+  });
+});
+
+// SPEC 065 D-7 — desde a migração 075 o mesmo cliente mantém uma
+// execução de fluxo ativa em CADA conversa. Pausar por `contact_id`
+// mataria também o fluxo da OUTRA thread, e de forma muda: o cliente
+// do outro número simplesmente pararia de receber resposta.
+describe('pause-on-agent-send é por conversa (SPEC 065 D-7)', () => {
+  it('escopa o UPDATE de flow_runs pela conversa, nunca pelo contato', async () => {
+    const db = dbForQr();
+
+    await sendMessageToConversation(db.client, 'acct-1', {
+      conversationId: 'conv-1',
+      messageType: 'text',
+      contentText: 'oi',
+    });
+
+    const pause = adminDb.filters.filter(
+      (f) => f.table === 'flow_runs' && f.verb === 'update'
+    );
+    const keys = pause.map((f) => f.args[0]);
+    expect(keys).toContain('conversation_id');
+    expect(keys).not.toContain('contact_id');
+    expect(pause.find((f) => f.args[0] === 'conversation_id')?.args[1]).toBe(
+      'conv-1'
+    );
   });
 });

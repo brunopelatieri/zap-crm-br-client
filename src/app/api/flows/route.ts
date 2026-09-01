@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { loadScopedChannel } from '@/lib/channels/scoped-channel';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { getFlowTemplate } from '@/lib/flows/templates';
 
@@ -93,12 +94,36 @@ export async function POST(request: Request) {
      * provided.
      */
     template_slug?: string;
+    /** SPEC 065 D-6 — `null`/ausente = vale para todos os canais. */
+    channel_id?: string | null;
   } | null;
   if (!body) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const admin = supabaseAdmin();
+
+  // Escopo de canal (SPEC 065 D-6). A posse é conferida SEMPRE — o
+  // fluxo nasce como rascunho, mas gravar o canal de OUTRA conta na
+  // linha é vazamento de tenancy, não problema de ativação, e estas
+  // rotas escrevem com `service_role`, que ignora RLS.
+  const scopedChannelId = body.channel_id || null;
+  if (scopedChannelId) {
+    const scopedChannel = await loadScopedChannel(
+      admin,
+      accountId,
+      scopedChannelId
+    );
+    if (!scopedChannel) {
+      return NextResponse.json(
+        {
+          error: 'channel not found in this account',
+          code: 'channel_not_in_account',
+        },
+        { status: 400 }
+      );
+    }
+  }
 
   // -------- Template clone path --------
   if (body.template_slug) {
@@ -120,6 +145,7 @@ export async function POST(request: Request) {
         trigger_type: template.trigger_type,
         trigger_config: template.trigger_config,
         entry_node_id: template.entry_node_id,
+        channel_id: scopedChannelId,
       })
       .select()
       .single();
@@ -165,6 +191,7 @@ export async function POST(request: Request) {
       status: 'draft',
       trigger_type,
       trigger_config: body.trigger_config ?? {},
+      channel_id: scopedChannelId,
     })
     .select()
     .single();

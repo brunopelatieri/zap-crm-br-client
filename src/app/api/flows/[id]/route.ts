@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { loadScopedChannel } from '@/lib/channels/scoped-channel';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 
 /**
@@ -76,6 +77,8 @@ interface PutBody {
   trigger_config?: Record<string, unknown>;
   entry_node_id?: string | null;
   fallback_policy?: Record<string, unknown>;
+  /** SPEC 065 D-6 — `null` explícito volta a valer para todos os canais. */
+  channel_id?: string | null;
   nodes?: Array<{
     node_key: string;
     node_type: string;
@@ -94,8 +97,13 @@ export async function PUT(
   // Writes require at least `agent` — the RLS flows_update policy demands
   // it, but this route mutates via the service-role client which bypasses
   // RLS, so the role must be enforced here (a viewer passes ownership).
+  //
+  // `accountId` sai daqui (SPEC 065 D-6): `requireOwnership` confere a
+  // posse do FLUXO via RLS, mas o canal escolhido precisa ser conferido
+  // contra a conta, e a escrita abaixo é service-role.
+  let accountId: string;
   try {
-    await requireRole('agent');
+    ({ accountId } = await requireRole('agent'));
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -132,6 +140,30 @@ export async function PUT(
     flowPatch.entry_node_id = body.entry_node_id;
   if (body.fallback_policy !== undefined)
     flowPatch.fallback_policy = body.fallback_policy;
+
+  // Escopo de canal (SPEC 065 D-6). A posse é conferida SEMPRE, mesmo
+  // com o fluxo em rascunho: gravar canal de outra conta é vazamento de
+  // tenancy, e `admin` é service-role — a consulta é que escopa.
+  if (body.channel_id !== undefined) {
+    const scopedChannelId = body.channel_id || null;
+    if (scopedChannelId) {
+      const scopedChannel = await loadScopedChannel(
+        admin,
+        accountId,
+        scopedChannelId
+      );
+      if (!scopedChannel) {
+        return NextResponse.json(
+          {
+            error: 'channel not found in this account',
+            code: 'channel_not_in_account',
+          },
+          { status: 400 }
+        );
+      }
+    }
+    flowPatch.channel_id = scopedChannelId;
+  }
 
   const { error: updErr } = await admin
     .from('flows')

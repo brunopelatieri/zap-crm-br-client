@@ -696,8 +696,15 @@ export async function sendMessageToConversation(
     );
   }
 
-  // Pause any active Flow run for this contact — the agent stepping in
-  // is the strongest "yield, human is here" signal. Best-effort.
+  // Pause any active Flow run for THIS CONVERSATION — the agent stepping
+  // in is the strongest "yield, human is here" signal. Best-effort.
+  //
+  // Por conversa, e não por contato (SPEC 065 D-7): desde a migração
+  // 075 o mesmo cliente mantém uma execução ativa em CADA número, e
+  // `contact_id` aqui pausaria também o fluxo da OUTRA thread. O agente
+  // que respondeu em Vendas não pediu silêncio ao menu de Suporte — e o
+  // efeito seria mudo: o cliente do outro número simplesmente pararia de
+  // receber resposta, sem nada registrando o motivo.
   try {
     const { error: pauseErr } = await supabaseAdmin()
       .from('flow_runs')
@@ -707,7 +714,7 @@ export async function sendMessageToConversation(
         end_reason: 'agent_replied',
       })
       .eq('account_id', accountId)
-      .eq('contact_id', contact.id)
+      .eq('conversation_id', conversationId)
       .eq('status', 'active');
     if (pauseErr) {
       console.error('[flows] pause-on-agent-send failed:', pauseErr.message);

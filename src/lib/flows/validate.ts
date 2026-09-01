@@ -805,3 +805,75 @@ function outgoingEdges(node: NodeInput): string[] {
       return [];
   }
 }
+
+// ------------------------------------------------------------
+// SPEC 065 §5.5 — canal escolhido para o fluxo (D-6 / D-8)
+// ------------------------------------------------------------
+
+/**
+ * O mínimo de `channels` que a validação precisa. Quem chama já leu a
+ * linha com `.eq('account_id', …)` — este módulo continua puro.
+ */
+export interface ScopedFlowChannel {
+  id: string;
+  status: string;
+}
+
+/**
+ * O canal escolhido para o fluxo serve? (SPEC 065 §5.5)
+ *
+ * Gêmeo de `validateChannelForActivation` das automações, com o formato
+ * de `ValidationIssue` deste módulo (`severity` obrigatório). `channel`
+ * nulo com `channelId` preenchido cobre id inexistente E id de outra
+ * conta — indistinguíveis de propósito, porque distinguir confirmaria
+ * que o id existe em algum lugar.
+ *
+ * Só `disabled` bloqueia: `error`/`disconnected` não, pelo mesmo motivo
+ * de `selectableChannels` (§5.1) — um número com problema continua
+ * utilizável para poder ser trocado, e no `whatsapp_cloud` o status só
+ * é reconciliado quando alguém passa pela rota de configuração
+ * (`lib/channels/status.ts`).
+ *
+ * ⚠️ **Capacidade do canal NÃO é checada aqui**, ao contrário do lado
+ * das automações — onde `validateStepsForActivation` já recebia os
+ * tipos de canal da conta e bastou restringi-los ao canal escolhido.
+ * Este módulo nunca teve matriz de capacidade, e um fluxo escopado a
+ * uma instância QRCode com nó de botões/lista continua ativável mesmo
+ * sabendo que o WhatsApp recusa aqueles envios (405, medido —
+ * `channels/capabilities.ts`). Fica registrado: é dívida da SPEC 065,
+ * não descuido deste arquivo.
+ */
+export function validateFlowChannel(
+  channelId: string | null | undefined,
+  channel: ScopedFlowChannel | null | undefined
+): ValidationIssue[] {
+  if (!channelId) return [];
+
+  if (!channel) {
+    return [
+      {
+        severity: 'error',
+        scope: 'flow',
+        field: 'channel_id',
+        message:
+          'The selected channel does not exist in this account — pick another number.',
+      },
+    ];
+  }
+
+  // SPEC 064 D-12: "remover número" preserva o canal como `disabled`.
+  // Um fluxo escopado nele nunca dispararia.
+  if (channel.status === 'disabled') {
+    return [
+      {
+        severity: 'error',
+        scope: 'flow',
+        field: 'channel_id',
+        message:
+          'The selected channel is disabled — reconnect the number or pick another one.',
+      },
+    ];
+  }
+
+  return [];
+}

@@ -2,10 +2,14 @@
  * Carrega o canal escolhido para um recurso, escopado à conta
  * (SPEC 065 §5.4 / §6).
  *
- * Duas rotas de automação — `POST /api/automations` e
- * `PATCH /api/automations/[id]` — precisam da mesma linha, com o mesmo
+ * Quatro rotas — `POST`/`PATCH` de automações e `POST`/`PUT` de fluxos,
+ * mais a ativação de fluxo — precisam da mesma linha, com o mesmo
  * cuidado de tenancy, antes de gravar `channel_id`. Uma função só para
- * que a segunda não nasça com um `.eq()` a menos.
+ * que a próxima não nasça com um `.eq()` a menos.
+ *
+ * Mora em `lib/channels/` (e não junto de um dos motores) porque a
+ * pergunta — "este canal é desta conta?" — é da camada de canais, e os
+ * dois motores são apenas os primeiros a fazê-la.
  *
  * **O `account_id` na consulta não é decoração.** As rotas escrevem com
  * o cliente `service_role`, que ignora RLS: sem ele, um `channel_id` de
@@ -22,7 +26,18 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { ScopedChannel } from './validate';
+import type { ChannelType } from './types';
+
+/**
+ * O mínimo de `channels` que as validações precisam. Definido aqui, do
+ * lado de quem lê a linha; `lib/automations/validate.ts` o reexporta
+ * para não quebrar quem já importava de lá.
+ */
+export interface ScopedChannel {
+  id: string;
+  type: ChannelType;
+  status: string;
+}
 
 export async function loadScopedChannel(
   db: SupabaseClient,

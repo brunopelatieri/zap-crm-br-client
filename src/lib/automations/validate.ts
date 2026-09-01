@@ -12,6 +12,7 @@ import {
   type ChannelCapabilityKey,
 } from '@/lib/channels/capabilities';
 import type { ChannelType } from '@/lib/channels/types';
+import type { ScopedChannel as ScopedChannelRow } from '@/lib/channels/scoped-channel';
 
 // ------------------------------------------------------------
 // Pre-flight config validation for automations about to be activated.
@@ -467,14 +468,12 @@ function validateWindowGuard(
 // ------------------------------------------------------------
 
 /**
- * O mínimo de `channels` que a validação precisa. Quem chama já leu a
- * linha com `.eq('account_id', …)` — este módulo continua puro.
+ * O mínimo de `channels` que a validação precisa. Definido em
+ * `lib/channels/scoped-channel.ts`, ao lado de quem lê a linha —
+ * reexportado aqui porque é onde esta validação o usa, e este módulo
+ * continua puro (só o TIPO atravessa).
  */
-export interface ScopedChannel {
-  id: string;
-  type: ChannelType;
-  status: string;
-}
+export type { ScopedChannel } from '@/lib/channels/scoped-channel';
 
 /**
  * O canal escolhido para a automação serve? (SPEC 065 §5.4)
@@ -499,7 +498,7 @@ export interface ScopedChannel {
  */
 export function validateChannelForActivation(
   channelId: string | null | undefined,
-  channel: ScopedChannel | null | undefined
+  channel: ScopedChannelRow | null | undefined
 ): ValidationIssue[] {
   if (!channelId) return [];
 

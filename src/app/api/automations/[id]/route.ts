@@ -15,7 +15,7 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate';
-import { loadScopedChannel } from '@/lib/automations/scoped-channel';
+import { loadScopedChannel } from '@/lib/channels/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 
 export async function GET(

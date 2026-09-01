@@ -27,9 +27,11 @@
  *   - Optimistic UPDATE with `current_node_key` precondition: two
  *     simultaneous taps for the same run collide at the DB layer; the
  *     second is a no-op.
- *   - Partial unique index `idx_one_active_run_per_contact`: two
- *     simultaneous starts for the same contact collide; the second
- *     INSERT raises 23505 and the runner catches & exits.
+ *   - Partial unique index `idx_one_active_run_per_conversation`
+ *     (migração 075): two simultaneous starts for the same CONVERSATION
+ *     collide; the second INSERT raises 23505 and the runner catches &
+ *     exits. Era por contato até a SPEC 065 D-7 — ver
+ *     `loadActiveRunForConversation`.
  */
 
 import { supabaseAdmin } from './admin-client';
@@ -178,29 +180,58 @@ export function evaluateConditionPredicate(args: {
 
 type AdminClient = ReturnType<typeof supabaseAdmin>;
 
-async function loadActiveRunForContact(
+/**
+ * Caracteres que um id pode ter para entrar numa expressão `.or()` do
+ * PostgREST sem poder reescrevê-la — gêmeo do de
+ * `lib/automations/engine.ts`. Vírgula, ponto, parêntese e aspas são a
+ * sintaxe do filtro; nenhum deles passa.
+ */
+const SAFE_FILTER_ID = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A execução ativa DESTA CONVERSA (SPEC 065 D-7).
+ *
+ * Era por contato, e isso falhava em silêncio (C2 do inventário): o
+ * índice `idx_one_active_run_per_contact` garantia UMA execução ativa
+ * por contato em toda a conta, então o cliente que já estava num menu
+ * pelo número A escrevia para o número B e o motor achava a execução de
+ * A — tratando a mensagem como resposta dela — ou colidia com 23505 no
+ * INSERT e devolvia `duplicate_inbound_ignored`. Dos dois jeitos, o
+ * fluxo do segundo número simplesmente não respondia, sem erro nenhum
+ * em lugar nenhum.
+ *
+ * A migração 075 troca aquele índice por
+ * `idx_one_active_run_per_conversation`, sobre
+ * `(account_id, conversation_id) WHERE status='active' AND
+ * conversation_id IS NOT NULL`. Esta função é o lado de leitura da
+ * mesma decisão: sem ela, o índice novo permitiria as duas execuções e
+ * o código continuaria enxergando uma só.
+ *
+ * `.limit(1)` em vez de `.maybeSingle()` pelo motivo de sempre: o
+ * índice torna ">1 linha" impossível por construção, mas um glitch de
+ * migração ou SQL manual criaria uma segunda, e `.maybeSingle()`
+ * derrubaria o despacho inteiro daquela conversa. Pega a mais recente e
+ * deixa a varredura do cron limpar a antiga.
+ *
+ * Execução com `conversation_id` nulo (conversa apagada, `ON DELETE SET
+ * NULL`) fica órfã e invisível aqui — é o que o predicado do índice já
+ * diz, e o cron a encerra por tempo.
+ */
+async function loadActiveRunForConversation(
   db: AdminClient,
   accountId: string,
-  contactId: string
+  conversationId: string
 ): Promise<FlowRunRow | null> {
-  // The partial unique index `idx_one_active_run_per_contact` was
-  // rebuilt in migration 017 over `(account_id, contact_id)` — so
-  // "two active runs for one contact in one account" is impossible
-  // by design. But a future migration glitch or manual SQL could
-  // create one, and .maybeSingle() throws on >1 row — which would
-  // kill dispatch for that contact's webhook entirely. .limit(1) is
-  // forgiving: pick the newest, let the cron sweep clean up the
-  // stale one.
   const { data, error } = await db
     .from('flow_runs')
     .select('*')
     .eq('account_id', accountId)
-    .eq('contact_id', contactId)
+    .eq('conversation_id', conversationId)
     .eq('status', 'active')
     .order('started_at', { ascending: false })
     .limit(1);
   if (error) {
-    console.error('[flows] loadActiveRunForContact error:', error.message);
+    console.error('[flows] loadActiveRunForConversation error:', error.message);
     return null;
   }
   const rows = (data as FlowRunRow[] | null) ?? [];
@@ -281,28 +312,34 @@ async function logEvent(
 
 /**
  * Idempotency check — has a `reply_received` event with this Meta
- * message_id already been recorded for any of the contact's flow
+ * message_id already been recorded for any of THIS CONVERSATION's flow
  * runs? If yes, the inbound is a duplicate (Meta retry) and we
  * exit without re-advancing.
  *
- * Implementation note: scoped to runs belonging to this user/contact
+ * Chaveado pela conversa, e não pelo contato (SPEC 065 D-7): anda junto
+ * com `loadActiveRunForConversation`. Com o contato como chave, as
+ * execuções dos DOIS números entravam no mesmo conjunto — e o escopo
+ * mais largo custa mais consulta sem responder melhor, porque a
+ * pergunta é sobre a thread onde a mensagem chegou.
+ *
+ * Implementation note: scoped to runs belonging to this conversation
  * so the lookup is cheap (the index on flow_run_events(flow_run_id,
- * event_type) plus the small set of runs per contact).
+ * event_type) plus the small set of runs per conversation).
  */
 async function isDuplicateInbound(
   db: AdminClient,
   accountId: string,
-  contactId: string,
+  conversationId: string,
   metaMessageId: string
 ): Promise<boolean> {
-  // Fetch ALL run ids for this contact in this account (active +
+  // Fetch ALL run ids for this conversation in this account (active +
   // historical). Bounded by how many flows the customer has been
-  // through — small.
+  // through on this thread — small.
   const { data: runs } = await db
     .from('flow_runs')
     .select('id')
     .eq('account_id', accountId)
-    .eq('contact_id', contactId);
+    .eq('conversation_id', conversationId);
   if (!runs?.length) return false;
   const runIds = runs.map((r) => (r as { id: string }).id);
 
@@ -319,7 +356,8 @@ async function findEntryFlow(
   db: AdminClient,
   accountId: string,
   message: ParsedInbound,
-  isFirstInbound: boolean
+  isFirstInbound: boolean,
+  channelId: string | null
 ): Promise<FlowRow | null> {
   // Only text messages can match an entry trigger. Interactive replies
   // are responses to existing prompts; they never start a new flow.
@@ -328,15 +366,38 @@ async function findEntryFlow(
   // Pull all active flows for this account. Active set is bounded
   // (the builder discourages double-trigger overlap; partial index
   // makes the lookup index-supported).
-  const { data: flows, error } = await db
+  const base = db
     .from('flows')
     .select('*')
     .eq('account_id', accountId)
     .eq('status', 'active')
     .order('created_at', { ascending: true });
+
+  // SPEC 065 D-6. `idx_flows_active_trigger_channel` (migração 075)
+  // cobre este filtro. Sem canal conhecido, só os fluxos SEM escopo
+  // entram — nunca "todos", pelo mesmo motivo do despacho de automações
+  // (D-4): um fluxo criado para o número de Suporte não pode responder
+  // a um evento cuja origem ninguém sabe.
+  //
+  // `.or()` monta o filtro por STRING: o id passa pelo mesmo allowlist
+  // de caracteres do motor de automações antes de entrar nela.
+  const scopedChannelId =
+    channelId && SAFE_FILTER_ID.test(channelId) ? channelId : null;
+  const { data: flows, error } = await (scopedChannelId
+    ? base.or(`channel_id.is.null,channel_id.eq.${scopedChannelId}`)
+    : base.is('channel_id', null));
   if (error || !flows) return null;
 
-  const typed = flows as FlowRow[];
+  // D-6, precedência: **o escopado ganha do genérico**. Um fluxo criado
+  // para o número de Suporte não pode perder para o menu geral só por
+  // ter sido criado depois — o `created_at ASC` acima decidiria isso
+  // por acidente. Ordenação estável, então o desempate DENTRO de cada
+  // grupo continua sendo o mais antigo, o critério de sempre.
+  const typed = (flows as FlowRow[])
+    .slice()
+    .sort(
+      (a, b) => Number(Boolean(b.channel_id)) - Number(Boolean(a.channel_id))
+    );
   for (const flow of typed) {
     if (flow.trigger_type === 'keyword') {
       if (
@@ -968,20 +1029,22 @@ export async function dispatchInboundToFlows(
       return { consumed: false, outcome: 'account_blocked' };
     }
 
-    const activeRun = await loadActiveRunForContact(
+    // SPEC 065 D-7: por CONVERSA. Ver o cabeçalho da função para o
+    // porquê — é o C2 do inventário, e ele falha calado.
+    const activeRun = await loadActiveRunForConversation(
       db,
       input.accountId,
-      input.contactId
+      input.conversationId
     );
 
     // Idempotency — only matters if there's already a run for this
-    // contact. For new runs, the partial unique index catches duplicate
-    // starts at INSERT time.
+    // conversation. For new runs, the partial unique index catches
+    // duplicate starts at INSERT time.
     if (activeRun) {
       const dupe = await isDuplicateInbound(
         db,
         input.accountId,
-        input.contactId,
+        input.conversationId,
         input.message.meta_message_id
       );
       if (dupe) {
@@ -1002,7 +1065,8 @@ export async function dispatchInboundToFlows(
       db,
       input.accountId,
       input.message,
-      input.isFirstInboundMessage
+      input.isFirstInboundMessage,
+      input.channelId ?? null
     );
     if (!flow || !flow.entry_node_id) {
       return { consumed: false, outcome: 'no_match' };
@@ -1208,17 +1272,25 @@ async function startNewRun(
   input: DispatchInboundInput,
   nodes: Map<string, FlowNodeRow>
 ): Promise<DispatchInboundResult> {
-  // INSERT — partial unique index `idx_one_active_run_per_contact`
-  // catches concurrent inserts with 23505. We catch and return as
-  // consumed:true (the parallel webhook handles it).
+  // INSERT — partial unique index `idx_one_active_run_per_conversation`
+  // (migração 075) catches concurrent inserts with 23505. We catch and
+  // return as consumed:true (the parallel webhook handles it).
+  //
+  // SPEC 065 D-7: a chave é a CONVERSA. Enquanto era o contato, o mesmo
+  // cliente conversando nos dois números só conseguia uma execução —
+  // a segunda colidia aqui e virava `duplicate_inbound_ignored`, ou
+  // seja, o fluxo do segundo número não respondia e nada registrava o
+  // motivo.
   const { data: inserted, error: insErr } = await db
     .from('flow_runs')
     .insert({
       flow_id: flow.id,
       // Tenancy: NOT NULL post-017. The partial unique index
-      // `idx_one_active_run_per_contact` is over (account_id,
-      // contact_id) WHERE status='active', so two accounts sharing
-      // a contact phone number each run their own flows independently.
+      // `idx_one_active_run_per_conversation` is over (account_id,
+      // conversation_id) WHERE status='active' AND conversation_id IS
+      // NOT NULL, so two accounts sharing a contact phone number each
+      // run their own flows independently — e o mesmo contato mantém
+      // uma execução ativa POR CONVERSA (SPEC 065 D-7).
       account_id: flow.account_id,
       // Audit: preserves the flow's author on the run row for log
       // attribution.

@@ -234,6 +234,14 @@ export interface FlowRow {
   trigger_config:
     KeywordTriggerConfig | FirstInboundTriggerConfig | Record<string, unknown>;
   entry_node_id: string | null;
+  /**
+   * Canal a que este fluxo esta escopado (SPEC 065 D-6, migracao 075).
+   * `null` = vale para todos os canais.
+   *
+   * Escopo do GATILHO apenas: fluxo e 100% reativo, e a resposta sempre
+   * sai pelo canal da conversa. Nao existe "enviar por" aqui.
+   */
+  channel_id?: string | null;
   fallback_policy: FlowFallbackPolicy;
   execution_count: number;
   last_executed_at: string | null;
@@ -335,6 +343,15 @@ export interface DispatchInboundInput {
   userId: string;
   contactId: string;
   conversationId: string;
+  /**
+   * `channels.id` de onde a mensagem chegou (SPEC 065 D-6). Decide
+   * quais fluxos sao candidatos: os sem escopo mais os escopados NESTE
+   * canal, com o escopado ganhando do generico.
+   *
+   * Ausente = nenhum escopo conhecido; so os fluxos sem escopo entram,
+   * pelo mesmo motivo do despacho de automacoes (D-4).
+   */
+  channelId?: string | null;
   message: ParsedInbound;
 }
 

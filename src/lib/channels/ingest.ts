@@ -468,6 +468,9 @@ export async function ingestInbound(
     userId: ctx.ownerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
+    // SPEC 065 D-6: quais fluxos são candidatos — os sem escopo mais os
+    // escopados NESTE número, com o escopado ganhando do genérico.
+    channelId: ctx.channelId,
     message: event.interactiveReplyId
       ? {
           kind: 'interactive_reply',

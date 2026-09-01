@@ -2,7 +2,11 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
-import { validateFlowForActivation } from '@/lib/flows/validate';
+import {
+  validateFlowChannel,
+  validateFlowForActivation,
+} from '@/lib/flows/validate';
+import { loadScopedChannel } from '@/lib/channels/scoped-channel';
 
 /**
  * POST /api/flows/[id]/activate
@@ -28,8 +32,11 @@ export async function POST(
   // flows_update policy requires `agent`, but the service-role client
   // below bypasses RLS, so enforce the role here (a viewer passes the
   // membership-only ownership check).
+  // `accountId` sai daqui (SPEC 065 D-6): o canal escolhido é conferido
+  // contra a conta, e a leitura abaixo usa o cliente service-role.
+  let accountId: string;
   try {
-    await requireRole('agent');
+    ({ accountId } = await requireRole('agent'));
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -70,7 +77,7 @@ export async function POST(
     const [{ data: flow }, { data: nodes }] = await Promise.all([
       admin
         .from('flows')
-        .select('name, trigger_type, trigger_config, entry_node_id')
+        .select('name, trigger_type, trigger_config, entry_node_id, channel_id')
         .eq('id', id)
         .maybeSingle(),
       admin
@@ -81,19 +88,34 @@ export async function POST(
     if (!flow) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
-    const issues = validateFlowForActivation(
-      flow as {
-        name: string;
-        trigger_type: 'keyword' | 'first_inbound_message' | 'manual';
-        trigger_config: Record<string, unknown>;
-        entry_node_id: string | null;
-      },
-      (nodes ?? []) as Array<{
-        node_key: string;
-        node_type: string;
-        config: Record<string, unknown>;
-      }>
+    // SPEC 065 D-6/D-8 — um fluxo escopado num canal apagado, de outra
+    // conta ou desativado nunca dispararia. Ativá-lo assim é a falha
+    // silenciosa que o AGENTS.md nomeia: nada quebra, o fluxo só nunca
+    // responde.
+    const scopedChannelId =
+      ((flow as { channel_id?: string | null }).channel_id ?? null) || null;
+    const scopedChannel = await loadScopedChannel(
+      admin,
+      accountId,
+      scopedChannelId
     );
+
+    const issues = [
+      ...validateFlowForActivation(
+        flow as {
+          name: string;
+          trigger_type: 'keyword' | 'first_inbound_message' | 'manual';
+          trigger_config: Record<string, unknown>;
+          entry_node_id: string | null;
+        },
+        (nodes ?? []) as Array<{
+          node_key: string;
+          node_type: string;
+          config: Record<string, unknown>;
+        }>
+      ),
+      ...validateFlowChannel(scopedChannelId, scopedChannel),
+    ];
     const blockers = issues.filter((i) => i.severity === 'error');
     if (blockers.length > 0) {
       return NextResponse.json(

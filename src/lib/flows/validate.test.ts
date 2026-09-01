@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { validateFlowForActivation, reachableFromEntry } from './validate';
+import {
+  validateFlowChannel,
+  validateFlowForActivation,
+  reachableFromEntry,
+} from './validate';
 
 const validFlow = {
   name: 'Welcome',
@@ -533,5 +537,50 @@ describe('reachableFromEntry', () => {
     ];
     const set = reachableFromEntry('a', nodes);
     expect(set).toEqual(new Set(['a', 'b']));
+  });
+});
+
+// ------------------------------------------------------------
+// SPEC 065 §5.5 — canal escolhido para o fluxo (D-6 / D-8)
+// ------------------------------------------------------------
+
+describe('validateFlowChannel (SPEC 065 §5.5)', () => {
+  const ok = {
+    id: 'ch-a',
+    type: 'whatsapp_cloud' as const,
+    status: 'connected',
+  };
+
+  it('sem canal escolhido não gera problema — NULL vale para todos', () => {
+    expect(validateFlowChannel(null, null)).toEqual([]);
+  });
+
+  it('canal válido não gera problema', () => {
+    expect(validateFlowChannel('ch-a', ok)).toEqual([]);
+  });
+
+  // Canal de outra conta e canal inexistente chegam aqui iguais: a
+  // consulta casa `account_id` junto do id, e a mensagem não confirma
+  // se ele existe em algum lugar.
+  it('canal inexistente (ou de outra conta) bloqueia a ativação', () => {
+    const issues = validateFlowChannel('ch-de-outra-conta', null);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('error');
+    expect(issues[0].scope).toBe('flow');
+    expect(issues[0].field).toBe('channel_id');
+  });
+
+  it('canal desativado bloqueia a ativação', () => {
+    const issues = validateFlowChannel('ch-a', { ...ok, status: 'disabled' });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('error');
+  });
+
+  // Mesmo critério de `selectableChannels` (§5.1): um número com
+  // problema continua utilizável para poder ser trocado.
+  it('canal em `error` não bloqueia — só `disabled` bloqueia', () => {
+    expect(validateFlowChannel('ch-a', { ...ok, status: 'error' })).toEqual([]);
   });
 });
