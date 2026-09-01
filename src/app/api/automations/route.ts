@@ -8,9 +8,11 @@ import {
   type BuilderStepInput,
 } from '@/lib/automations/steps-tree';
 import {
+  validateChannelForActivation,
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate';
+import { loadScopedChannel } from '@/lib/automations/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 
 export async function GET() {
@@ -75,6 +77,8 @@ export async function POST(request: Request) {
     is_active,
     steps,
     template,
+    // SPEC 065 D-4 — `null`/ausente = vale para todos os canais.
+    channel_id,
   } = body;
 
   let effectiveSteps: BuilderStepInput[] | undefined = steps;
@@ -101,16 +105,43 @@ export async function POST(request: Request) {
     );
   }
 
+  // Escopo de canal (SPEC 065 D-4). A leitura casa `account_id`, então
+  // um id de OUTRA conta chega aqui como "não existe" — 400 com código
+  // estável, nunca 404, que confirmaria o id.
+  const scopedChannelId = (channel_id as string | null | undefined) || null;
+  const scopedChannel = await loadScopedChannel(
+    supabase,
+    accountId,
+    scopedChannelId
+  );
+  // A posse é conferida SEMPRE, inclusive em rascunho: gravar o canal de
+  // outra conta na linha é vazamento de tenancy, e não um problema de
+  // ativação. As demais regras (desativado, capacidade) continuam sendo
+  // gate de ativação, como todo o resto deste arquivo.
+  if (scopedChannelId && !scopedChannel) {
+    return NextResponse.json(
+      {
+        error: 'channel not found in this account',
+        code: 'channel_not_in_account',
+      },
+      { status: 400 }
+    );
+  }
+
   // Block activation of a clearly broken automation up-front instead of
   // letting every trigger silently produce a failed log row. Drafts
   // (is_active=false) are allowed to be incomplete so users can save
   // progress mid-build.
   if (is_active) {
-    const accountChannelTypes = await loadAccountChannelTypes(
-      supabase,
-      accountId
-    );
+    // Escopada a um canal, a automação só roda NAQUELE canal — então a
+    // cobertura de capacidade é a dele, não a da conta inteira. É o que
+    // transforma "aviso: pode falhar em algum canal" em "bloqueio: este
+    // passo nunca vai rodar".
+    const accountChannelTypes = scopedChannel
+      ? [scopedChannel.type]
+      : await loadAccountChannelTypes(supabase, accountId);
     const issues = [
+      ...validateChannelForActivation(scopedChannelId, scopedChannel),
       ...validateTriggerForActivation(
         effectiveTriggerType,
         effectiveTriggerConfig ?? {},
@@ -150,6 +181,7 @@ export async function POST(request: Request) {
       description: effectiveDescription ?? null,
       trigger_type: effectiveTriggerType,
       trigger_config: effectiveTriggerConfig ?? {},
+      channel_id: scopedChannelId,
       is_active: !!is_active,
     })
     .select()

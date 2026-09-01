@@ -343,3 +343,54 @@ describe('sendBroadcastTest', () => {
     ).rejects.toThrow(/Template not found/);
   });
 });
+
+// SPEC 065 D-3 — a guarda que roda ANTES de qualquer envio, nos três
+// caminhos de campanha. Aqui pelo teste de envio, que é o menor deles.
+describe('compatibilidade template×canal (SPEC 065 D-3)', () => {
+  it('recusa template de outro WABA com código estável, sem chamar a Meta', async () => {
+    const { db } = makeDb({
+      contacts: [CONTACT_A],
+      config: { ...CONFIG, waba_id: 'waba-a' },
+      template: { ...TEMPLATE, waba_id: 'waba-b' },
+    });
+
+    const err = await sendBroadcastTest(db, {
+      accountId: ACCOUNT,
+      input: {
+        templateName: 'promo',
+        templateLanguage: 'en_US',
+        variables: {},
+        contactIds: ['c-a'],
+      },
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BroadcastError);
+    expect((err as BroadcastError).code).toBe('template_waba_mismatch');
+    expect((err as BroadcastError).status).toBe(400);
+    // A Meta nunca é chamada: hoje ela aceitaria o payload e devolveria
+    // `(#132001) Template name does not exist in the translation`,
+    // cobrando a tentativa.
+    expect(sendTemplateMessage).not.toHaveBeenCalled();
+  });
+
+  it('template legado (waba_id NULL) continua passando em qualquer canal', async () => {
+    sendTemplateMessage.mockResolvedValue({ messageId: 'wamid.1' });
+    const { db } = makeDb({
+      contacts: [CONTACT_A],
+      config: { ...CONFIG, waba_id: 'waba-a' },
+      template: { ...TEMPLATE, waba_id: null },
+    });
+
+    const results = await sendBroadcastTest(db, {
+      accountId: ACCOUNT,
+      input: {
+        templateName: 'promo',
+        templateLanguage: 'en_US',
+        variables: {},
+        contactIds: ['c-a'],
+      },
+    });
+
+    expect(results[0].status).toBe('sent');
+  });
+});

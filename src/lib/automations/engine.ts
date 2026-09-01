@@ -28,6 +28,7 @@ import {
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive';
 import { resolveSessionWindow } from '@/lib/channels/session-window';
 import { sendAndPersistOutbound } from '@/lib/channels/send';
+import { findOrCreateConversation } from '@/lib/whatsapp/resolve-conversation';
 import { ColdSendLimitError } from '@/lib/channels/cold-send-wiring';
 import type { ChannelType } from '@/lib/channels/types';
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
@@ -39,6 +40,14 @@ import { excludesOptedOut, isOptedOut } from '@/lib/contacts/consent';
 // ------------------------------------------------------------
 // Public API
 // ------------------------------------------------------------
+
+/**
+ * Caracteres que um id pode ter para entrar numa expressão `.or()` do
+ * PostgREST sem poder reescrevê-la. Vírgula, ponto, parêntese e aspas
+ * são a sintaxe do filtro — nenhum deles passa. Ver o uso em
+ * `runAutomationsForTrigger`.
+ */
+const SAFE_FILTER_ID = /^[A-Za-z0-9_-]+$/;
 
 export interface AutomationContext {
   /** Raw message text, for keyword_match + message_content conditions. */
@@ -64,6 +73,17 @@ export interface DispatchInput {
   accountId: string;
   triggerType: AutomationTriggerType;
   contactId?: string | null;
+  /**
+   * `channels.id` de onde o evento veio (SPEC 065 D-4). Preenchido por
+   * `lib/channels/ingest.ts`, que já o tem em mãos.
+   *
+   * Decide QUAIS automações são candidatas: com canal, rodam as sem
+   * escopo mais as escopadas nele; **sem** canal (o POST manual de
+   * `/api/automations/engine`, que não sabe de onde veio), rodam só as
+   * sem escopo — nunca "todas". Uma automação criada para o número de
+   * Suporte não pode disparar por um evento cuja origem ninguém sabe.
+   */
+  channelId?: string | null;
   context?: AutomationContext;
 }
 
@@ -117,12 +137,30 @@ export async function runAutomationsForTrigger(
       }
     }
 
-    const { data: automations, error } = await db
+    const base = db
       .from('automations')
       .select('*')
       .eq('account_id', input.accountId)
       .eq('trigger_type', input.triggerType)
       .eq('is_active', true);
+
+    // SPEC 065 D-4. `idx_automations_active_trigger_channel` (migração
+    // 075) cobre exatamente este filtro. Ver `DispatchInput.channelId`
+    // para por que a ausência de canal restringe em vez de liberar.
+    //
+    // `.or()` monta um filtro por STRING, então o id é conferido contra
+    // o formato de UUID antes de entrar nela. Hoje ele só vem de
+    // `ingest.ts` (um uuid lido do nosso próprio banco), mas um valor
+    // com vírgula ou parêntese reescreveria a expressão inteira — e o
+    // dia em que alguém repassar `body.channel_id` para cá, isto já
+    // está no lugar. Formato inválido cai no ramo restritivo.
+    const scopedChannelId =
+      input.channelId && SAFE_FILTER_ID.test(input.channelId)
+        ? input.channelId
+        : null;
+    const { data: automations, error } = await (scopedChannelId
+      ? base.or(`channel_id.is.null,channel_id.eq.${scopedChannelId}`)
+      : base.is('channel_id', null));
 
     if (error) {
       console.error('[automations] fetch failed:', error);
@@ -753,26 +791,94 @@ async function runStep(
 // ------------------------------------------------------------
 
 /**
- * Pick the conversation a send-type step should use. Prefer the id the
- * webhook handed us (it's the one that just got the inbound message);
- * fall back to the contact's conversation for resumed/wait paths and
- * manual engine POSTs. Throws if none exists — send steps have
- * no meaningful target without a conversation.
+ * A conversa que um passo de envio deve usar, dado o canal ESCOLHIDO
+ * para a automação (SPEC 065 D-5 / §5.4).
+ *
+ * Exportada, e não privada, porque é a resposta a uma pergunta que o
+ * motor faz em quatro pontos (três passos de envio e a condição
+ * `session_window`) e que precisa ser testável sem montar um
+ * `ExecuteArgs` inteiro.
+ *
+ * Três caminhos, e a diferença entre eles é o ponto da SPEC:
+ *
+ *   - **com canal, conversa existe** → é ela, escopada por
+ *     `channel_id`. Desde a migração 059 o índice único é
+ *     `(account_id, contact_id, channel_id)`, então um contato que fala
+ *     com dois números da conta tem DUAS conversas;
+ *
+ *   - **com canal, conversa não existe** → abre nele
+ *     (`findOrCreateConversation`, que já trata a corrida do índice
+ *     único). É o fim do B3: hoje um gatilho "Baseado em horário" ou
+ *     "Contato criado" morre em `no conversation for contact` porque o
+ *     motor não tem como saber por qual número abrir;
+ *
+ *   - **sem canal** → a conversa mais recente do contato. É o fim do
+ *     B2: o `.maybeSingle()` anterior estourava "multiple rows" assim
+ *     que o contato tinha conversa em dois números, e o motor
+ *     registrava isso como `conversation lookup failed` — falha alta,
+ *     motivo obscuro. A mais recente é a resposta menos surpreendente,
+ *     e nunca um erro.
+ *
+ * **Sem conversa e sem canal, continua falhando com o mesmo motivo.**
+ * Abrir no canal padrão "porque sim" é exatamente o comportamento
+ * implícito que a SPEC 065 existe para eliminar — e, num contato frio,
+ * significaria iniciar diálogo por um número que ninguém escolheu.
+ */
+export async function resolveConversationForAutomation(params: {
+  accountId: string;
+  contactId: string | null;
+  /** `automations.channel_id` — o canal escolhido para o RECURSO. */
+  resourceChannelId: string | null;
+  /** Autor da automação; vira `user_id` da conversa criada (auditoria). */
+  ownerUserId: string;
+}): Promise<string> {
+  const { accountId, contactId, resourceChannelId, ownerUserId } = params;
+  if (!contactId) throw new Error('cannot resolve conversation: no contact');
+
+  const db = supabaseAdmin();
+  const base = db
+    .from('conversations')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId);
+
+  const { data, error } = await (resourceChannelId
+    ? base.eq('channel_id', resourceChannelId).limit(1)
+    : base.order('last_message_at', { ascending: false }).limit(1));
+
+  if (error) throw new Error(`conversation lookup failed: ${error.message}`);
+
+  const found = (data as { id: string }[] | null)?.[0]?.id;
+  if (found) return found;
+
+  // D-5: só com canal escolhido. Ver o cabeçalho.
+  if (resourceChannelId) {
+    return findOrCreateConversation(
+      db,
+      accountId,
+      contactId,
+      resourceChannelId,
+      ownerUserId
+    );
+  }
+
+  throw new Error('no conversation for contact');
+}
+
+/**
+ * Adaptador para os pontos internos que já carregam um `ExecuteArgs`.
+ * Prefere o id que o webhook entregou (é o da conversa que acabou de
+ * receber a mensagem) e só então consulta.
  */
 async function resolveConversationId(args: ExecuteArgs): Promise<string> {
   const fromCtx = args.context.conversation_id;
   if (fromCtx) return fromCtx;
-  if (!args.contactId)
-    throw new Error('cannot resolve conversation: no contact');
-  const { data, error } = await supabaseAdmin()
-    .from('conversations')
-    .select('id')
-    .eq('account_id', args.automation.account_id)
-    .eq('contact_id', args.contactId)
-    .maybeSingle();
-  if (error) throw new Error(`conversation lookup failed: ${error.message}`);
-  if (!data?.id) throw new Error('no conversation for contact');
-  return data.id as string;
+  return resolveConversationForAutomation({
+    accountId: args.automation.account_id,
+    contactId: args.contactId,
+    resourceChannelId: args.automation.channel_id ?? null,
+    ownerUserId: args.automation.user_id,
+  });
 }
 
 type WindowGuardOutcome =

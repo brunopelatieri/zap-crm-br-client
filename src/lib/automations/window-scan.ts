@@ -222,7 +222,14 @@ async function scanForAutomation(
   // mais perto de fechar é quem passa.
   const { data: rows, error } = await db
     .from('conversations')
-    .select('id, contact_id, last_customer_message_at, last_message_at')
+    // `channel_id` entra no SELECT (SPEC 065): o guardrail de canal
+    // abaixo já o lia, mas a coluna nunca vinha na resposta — `c.channel_id`
+    // era `undefined`, `!c.channel_id` era sempre verdadeiro e o filtro
+    // não excluía nada. Ele volta a valer, e o escopo por
+    // `automations.channel_id` (D-4) passa a ter em que se apoiar.
+    .select(
+      'id, contact_id, channel_id, last_customer_message_at, last_message_at'
+    )
     .eq('account_id', automation.account_id)
     .eq('status', 'open')
     .gt('last_customer_message_at', closesNow.toISOString())
@@ -247,11 +254,29 @@ async function scanForAutomation(
   const eligibleChannelIds = await channelsWithSessionWindow(
     automation.account_id
   );
-  const scoped = eligibleChannelIds
+  const withWindow = eligibleChannelIds
     ? (rows as (ConversationRow & { channel_id?: string | null })[]).filter(
         (c) => !c.channel_id || eligibleChannelIds.has(c.channel_id)
       )
     : (rows as ConversationRow[]);
+
+  // ── Escopo de canal da automação (SPEC 065 D-4) ──────────────────
+  //
+  // Escopada a um número, ela vale para as conversas DAQUELE número —
+  // "para quais conversas este recurso vale" é a pergunta que o D-4
+  // responde. Sem este filtro, uma automação de reengajamento criada
+  // para o número de Vendas reengajaria também quem falou com Suporte.
+  //
+  // `channel_id` nulo na conversa (linha anterior à migração 059) entra
+  // apenas quando a automação NÃO tem escopo: numa automação escopada,
+  // "não sei de qual canal é esta conversa" não é motivo para tratá-la
+  // como sendo do canal escolhido.
+  const scoped =
+    (automation.channel_id ?? null)
+      ? (
+          withWindow as (ConversationRow & { channel_id?: string | null })[]
+        ).filter((c) => c.channel_id === automation.channel_id)
+      : withWindow;
   if (scoped.length === 0) return;
 
   // ── Guardrail 6: não reengajar com a bola do NOSSO lado ──────────

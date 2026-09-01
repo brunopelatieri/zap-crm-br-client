@@ -11,9 +11,11 @@ import {
   type BuilderStepInput,
 } from '@/lib/automations/steps-tree';
 import {
+  validateChannelForActivation,
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate';
+import { loadScopedChannel } from '@/lib/automations/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
 
 export async function GET(
@@ -76,7 +78,9 @@ export async function PATCH(
   // the fields we need to compute the post-patch "effective" state too.
   const { data: existing } = await admin
     .from('automations')
-    .select('id, user_id, account_id, is_active, trigger_type, trigger_config')
+    .select(
+      'id, user_id, account_id, is_active, trigger_type, trigger_config, channel_id'
+    )
     .eq('id', id)
     .maybeSingle();
   if (!existing || existing.account_id !== accountId) {
@@ -90,8 +94,36 @@ export async function PATCH(
     'trigger_type',
     'trigger_config',
     'is_active',
+    // SPEC 065 D-4. `null` explícito é um valor válido: volta a valer
+    // para todos os canais.
+    'channel_id',
   ] as const) {
     if (k in body) update[k] = body[k];
+  }
+
+  // Escopo de canal (SPEC 065 D-4/§6). O id efetivo depois deste PATCH
+  // — o do corpo quando ele veio, senão o que já estava gravado.
+  const mergedChannelId = (
+    'channel_id' in body
+      ? (body.channel_id as string | null | undefined) || null
+      : ((existing.channel_id as string | null | undefined) ?? null)
+  ) as string | null;
+  const scopedChannel = await loadScopedChannel(
+    admin,
+    accountId,
+    mergedChannelId
+  );
+  // Conferida SEMPRE, inclusive em rascunho: gravar canal de outra conta
+  // é vazamento de tenancy, não problema de ativação. O `admin` aqui é
+  // service-role e não passa por RLS — a consulta é que escopa.
+  if (mergedChannelId && !scopedChannel) {
+    return NextResponse.json(
+      {
+        error: 'channel not found in this account',
+        code: 'channel_not_in_account',
+      },
+      { status: 400 }
+    );
   }
 
   // If this PATCH leaves the automation active (either explicitly
@@ -113,11 +145,13 @@ export async function PATCH(
           step_config: Record<string, unknown>;
         }[])
       : await loadStepsTree(id);
-    const accountChannelTypes = await loadAccountChannelTypes(
-      admin,
-      existing.account_id as string
-    );
+    // Escopada a um canal, a cobertura de capacidade é a DELE — ver o
+    // mesmo trecho em `POST /api/automations`.
+    const accountChannelTypes = scopedChannel
+      ? [scopedChannel.type]
+      : await loadAccountChannelTypes(admin, existing.account_id as string);
     const issues = [
+      ...validateChannelForActivation(mergedChannelId, scopedChannel),
       ...validateTriggerForActivation(
         mergedTriggerType,
         mergedTriggerConfig,

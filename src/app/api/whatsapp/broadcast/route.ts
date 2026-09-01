@@ -6,7 +6,11 @@ import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { createHeaderMediaResolver } from '@/lib/whatsapp/header-media';
 import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
-import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
+import {
+  assertTemplateChannelCompatible,
+  findTemplateRowForWaba,
+  TemplateChannelMismatchError,
+} from '@/lib/whatsapp/template-waba';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
   sanitizePhoneForMeta,
@@ -139,9 +143,10 @@ export async function POST(request: Request) {
       );
     }
 
+    let channel: Awaited<ReturnType<typeof resolveCloudConfig>>['channel'];
     let config: Awaited<ReturnType<typeof resolveCloudConfig>>['config'];
     try {
-      ({ config } = await resolveCloudConfig(
+      ({ channel, config } = await resolveCloudConfig(
         supabase,
         accountId,
         typeof channel_id === 'string' ? channel_id : null
@@ -160,6 +165,27 @@ export async function POST(request: Request) {
     }
 
     const accessToken = decrypt(config.access_token);
+
+    // SPEC 065 D-3 — recusa antes de planejar. `channel.id` (o canal
+    // RESOLVIDO), nunca `channel_id` do corpo: sem escolha explícita o
+    // disparo sai pelo padrão da conta, e validar contra "nenhum canal"
+    // calaria a guarda no caso mais comum.
+    try {
+      await assertTemplateChannelCompatible(supabase, {
+        accountId,
+        channelId: channel.id,
+        templateName: template_name,
+        templateLanguage: template_language || 'en_US',
+      });
+    } catch (e) {
+      if (e instanceof TemplateChannelMismatchError) {
+        return NextResponse.json(
+          { error: e.message, code: e.code },
+          { status: e.status }
+        );
+      }
+      throw e;
+    }
 
     // Load the template row once so sendTemplateMessage can build
     // header + button components on each iteration. Loading inside

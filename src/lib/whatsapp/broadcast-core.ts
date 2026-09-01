@@ -29,7 +29,11 @@ import { isAccountBlocked } from '@/lib/platform/blocked';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import { logOutboundSend } from '@/lib/channels/send-log';
-import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
+import {
+  assertTemplateChannelCompatible,
+  findTemplateRowForWaba,
+  TemplateChannelMismatchError,
+} from '@/lib/whatsapp/template-waba';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -92,6 +96,41 @@ export class BroadcastError extends Error {
     this.name = 'BroadcastError';
     this.code = code;
     this.status = status;
+  }
+}
+
+/**
+ * A guarda do D-3 (SPEC 065), na forma de erro que o disparo já fala.
+ *
+ * Os três caminhos de campanha — planejamento (`broadcast-core`),
+ * disparo (`broadcast-dispatch`, inclusive o agendado que o cron
+ * acorda) e teste de envio (`broadcast-test-send`) — precisam da mesma
+ * recusa com o mesmo código. Filtrar a lista de templates na tela
+ * resolve só o caminho feliz: o rascunho de três dias atrás, a chamada
+ * de API e a campanha agendada cujo template foi recriado em outro WABA
+ * passam por aqui, e não pela tela.
+ *
+ * Converte para `BroadcastError` porque é o que as rotas de campanha já
+ * mapeiam para HTTP — o código (`template_waba_mismatch`) e o status
+ * (400) são os mesmos, então a UI vê um código estável venha de onde
+ * vier.
+ */
+export async function assertBroadcastTemplateChannel(
+  db: SupabaseClient,
+  params: {
+    accountId: string;
+    channelId: string | null | undefined;
+    templateName: string;
+    templateLanguage: string;
+  }
+): Promise<void> {
+  try {
+    await assertTemplateChannelCompatible(db, params);
+  } catch (e) {
+    if (e instanceof TemplateChannelMismatchError) {
+      throw new BroadcastError(e.code, e.message, e.status);
+    }
+    throw e;
   }
 }
 
@@ -254,6 +293,18 @@ export async function createBroadcast(
     throw e;
   }
   const accessToken = decrypt(config.access_token);
+
+  // SPEC 065 D-3 — antes de planejar qualquer destinatário. O canal já
+  // está resolvido acima, então esta é a última chance de recusar em
+  // NOSSO idioma o par que a Meta devolveria como
+  // `(#132001) Template name does not exist in the translation`, uma
+  // mensagem por destinatário.
+  await assertBroadcastTemplateChannel(db, {
+    accountId,
+    channelId: channel.id,
+    templateName,
+    templateLanguage,
+  });
 
   // Template row (once) for header/button components; guard a
   // malformed local row rather than N identical opaque failures. Scoped

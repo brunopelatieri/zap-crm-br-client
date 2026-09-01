@@ -294,6 +294,52 @@ describe('dispatch is per automation, not per trigger (SPEC 045 §5.5.3)', () =>
 });
 
 // ============================================================
+// Escopo de canal (SPEC 065 D-4)
+// ============================================================
+
+describe('escopo de canal da automação (SPEC 065 D-4)', () => {
+  it('automação escopada só reengaja as conversas DAQUELE canal', async () => {
+    h.state.automations = [{ ...automation('a1'), channel_id: 'ch-a' }];
+    h.state.conversations = [
+      conversation('conv-a', 'c1', { channel_id: 'ch-a' }),
+      conversation('conv-b', 'c2', { channel_id: 'ch-b' }),
+    ];
+
+    const result = await scanSessionWindows(NOW);
+
+    expect(result.dispatched).toBe(1);
+    expect(
+      vi.mocked(runSingleAutomation).mock.calls.map((c) => c[1].contactId)
+    ).toEqual(['c1']);
+  });
+
+  // Numa automação escopada, "não sei de qual canal é esta conversa"
+  // (linha anterior à migração 059) não é motivo para tratá-la como
+  // sendo do canal escolhido.
+  it('conversa sem canal não entra numa automação escopada', async () => {
+    h.state.automations = [{ ...automation('a1'), channel_id: 'ch-a' }];
+    h.state.conversations = [conversation('conv-legada', 'c1')];
+
+    const result = await scanSessionWindows(NOW);
+
+    expect(result.dispatched).toBe(0);
+    expect(runSingleAutomation).not.toHaveBeenCalled();
+  });
+
+  it('automação sem escopo continua reengajando os dois canais', async () => {
+    h.state.automations = [automation('a1')];
+    h.state.conversations = [
+      conversation('conv-a', 'c1', { channel_id: 'ch-a' }),
+      conversation('conv-b', 'c2', { channel_id: 'ch-b' }),
+    ];
+
+    const result = await scanSessionWindows(NOW);
+
+    expect(result.dispatched).toBe(2);
+  });
+});
+
+// ============================================================
 // Claim / idempotência (§5.5.2) e ciclo de vida (§5.5.5)
 // ============================================================
 

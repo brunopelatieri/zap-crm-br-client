@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  validateChannelForActivation,
   validateStepsForActivation,
   validateTriggerForActivation,
 } from './validate';
@@ -504,5 +505,84 @@ describe('validateTriggerForActivation', () => {
       expect(issues.filter((i) => i.severity === 'warning')).toHaveLength(1);
       expect(issues.filter((i) => i.severity === undefined)).toHaveLength(1);
     });
+  });
+});
+
+// ------------------------------------------------------------
+// SPEC 065 §5.4 — canal escolhido para a automação
+// ------------------------------------------------------------
+
+describe('validateChannelForActivation (SPEC 065 §5.4)', () => {
+  const ok = {
+    id: 'ch-a',
+    type: 'whatsapp_cloud' as const,
+    status: 'connected' as const,
+  };
+
+  it('sem canal escolhido não gera problema — NULL vale para todos', () => {
+    expect(validateChannelForActivation(null, null)).toEqual([]);
+  });
+
+  it('canal válido não gera problema', () => {
+    expect(validateChannelForActivation('ch-a', ok)).toEqual([]);
+  });
+
+  // A linha não é carregada porque a consulta casa `account_id` junto do
+  // id: canal de OUTRA conta e canal inexistente chegam aqui do mesmo
+  // jeito, e é assim que deve ser — a mensagem não confirma se o id
+  // existe em algum lugar.
+  it('canal inexistente (ou de outra conta) bloqueia a ativação', () => {
+    const issues = validateChannelForActivation('ch-de-outra-conta', null);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBeUndefined();
+    expect(issues[0].path).toBe('channel_id');
+  });
+
+  // SPEC 064 D-12: "remover número" preserva o canal como `disabled`.
+  // Uma automação escopada num canal desativado nunca dispararia — e
+  // deixá-la ativa é a falha silenciosa que o AGENTS.md nomeia.
+  it('canal desativado bloqueia a ativação', () => {
+    const issues = validateChannelForActivation('ch-a', {
+      ...ok,
+      status: 'disabled',
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBeUndefined();
+  });
+
+  // `error`/`disconnected` NÃO bloqueiam: é o mesmo critério de
+  // `selectableChannels` (§5.1) — um número com problema precisa
+  // continuar escolhível para poder ser trocado, e o status do Cloud
+  // pode estar apenas desatualizado.
+  it('canal em `error` não bloqueia — só `disabled` bloqueia', () => {
+    expect(
+      validateChannelForActivation('ch-a', { ...ok, status: 'error' })
+    ).toEqual([]);
+  });
+});
+
+describe('capacidade restrita ao canal escolhido (SPEC 065 §5.4)', () => {
+  const templateStep = [
+    {
+      step_type: 'send_template',
+      step_config: { template_name: 'promo', language: 'pt_BR' },
+    },
+  ];
+
+  // Numa conta com Cloud + QRCode, um passo de template hoje é AVISO
+  // (`some` coverage) — ele funciona no Cloud. Escopada ao QRCode, a
+  // automação nunca roda no Cloud, então o mesmo passo passa a ser
+  // impossível: vira bloqueio.
+  it('automação escopada a um canal QRCode transforma o aviso de template em bloqueio', () => {
+    const semEscopo = validateStepsForActivation(templateStep, [
+      'whatsapp_cloud',
+      'whatsapp_qr',
+    ]);
+    expect(semEscopo.every((i) => i.severity === 'warning')).toBe(true);
+
+    const escopado = validateStepsForActivation(templateStep, ['whatsapp_qr']);
+    expect(escopado.some((i) => i.severity !== 'warning')).toBe(true);
   });
 });

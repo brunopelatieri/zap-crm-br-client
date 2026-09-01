@@ -523,6 +523,10 @@ export async function ingestInbound(
       accountId,
       triggerType,
       contactId: contactRecord.id,
+      // SPEC 065 D-4: decide quais automações são candidatas — as sem
+      // escopo mais as escopadas NESTE número. Sem isto, uma automação
+      // de "Suporte" responderia também às conversas de "Vendas".
+      channelId: ctx.channelId,
       context: {
         message_text: inboundText,
         conversation_id: conversation.id,

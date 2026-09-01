@@ -461,3 +461,70 @@ function validateWindowGuard(
     });
   }
 }
+
+// ------------------------------------------------------------
+// SPEC 065 §5.4 — canal escolhido para a automação (D-4 / D-8)
+// ------------------------------------------------------------
+
+/**
+ * O mínimo de `channels` que a validação precisa. Quem chama já leu a
+ * linha com `.eq('account_id', …)` — este módulo continua puro.
+ */
+export interface ScopedChannel {
+  id: string;
+  type: ChannelType;
+  status: string;
+}
+
+/**
+ * O canal escolhido para a automação serve? (SPEC 065 §5.4)
+ *
+ * `channel` é a linha carregada pela rota, **sempre** com o filtro de
+ * conta na consulta. `null` com `channelId` preenchido cobre os dois
+ * casos que devem ser indistinguíveis daqui: id inexistente e id de
+ * OUTRA conta. A mensagem não confirma se ele existe em algum lugar.
+ *
+ * Só `disabled` bloqueia — `error`/`disconnected` não. É o mesmo
+ * critério de `selectableChannels` (§5.1), pelo mesmo motivo: um número
+ * com problema precisa continuar utilizável para poder ser trocado, e
+ * para `whatsapp_cloud` o status é um valor reconciliado só quando
+ * alguém passa pela rota de configuração (`lib/channels/status.ts`).
+ *
+ * A capacidade do canal para os passos configurados NÃO é decidida
+ * aqui: quem chama restringe `accountChannelTypes` a `[channel.type]` e
+ * deixa `validateStepsForActivation` responder — assim a regra de
+ * capacidade continua num lugar só, e um passo de template numa
+ * automação escopada a uma instância QRCode vira bloqueio em vez de
+ * aviso, porque ali ele nunca rodaria no Cloud.
+ */
+export function validateChannelForActivation(
+  channelId: string | null | undefined,
+  channel: ScopedChannel | null | undefined
+): ValidationIssue[] {
+  if (!channelId) return [];
+
+  if (!channel) {
+    return [
+      {
+        path: 'channel_id',
+        message:
+          'the selected channel does not exist in this account — pick another number',
+      },
+    ];
+  }
+
+  // SPEC 064 D-12: "remover número" preserva o canal como `disabled`.
+  // Uma automação escopada nele nunca dispararia — deixá-la ativa é a
+  // falha silenciosa que o AGENTS.md nomeia.
+  if (channel.status === 'disabled') {
+    return [
+      {
+        path: 'channel_id',
+        message:
+          'the selected channel is disabled — reconnect the number or pick another one',
+      },
+    ];
+  }
+
+  return [];
+}

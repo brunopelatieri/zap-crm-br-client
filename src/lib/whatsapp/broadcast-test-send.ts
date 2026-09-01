@@ -31,6 +31,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
+  assertBroadcastTemplateChannel,
   BroadcastError,
   toBroadcastChannelError,
 } from '@/lib/whatsapp/broadcast-core';
@@ -125,15 +126,37 @@ export async function sendBroadcastTest(
     );
   }
 
+  let channel: Awaited<ReturnType<typeof resolveCloudConfig>>['channel'];
   let config: Awaited<ReturnType<typeof resolveCloudConfig>>['config'];
   try {
-    ({ config } = await resolveCloudConfig(db, accountId, input.channelId));
+    ({ channel, config } = await resolveCloudConfig(
+      db,
+      accountId,
+      input.channelId
+    ));
   } catch (e) {
     if (e instanceof ChannelNotConfiguredError)
       throw toBroadcastChannelError(e);
     throw e;
   }
   const accessToken = decrypt(config.access_token);
+
+  // SPEC 065 D-3 — o teste de envio sai pelo MESMO número da campanha
+  // (§2.A A5), então tem de recusar o mesmo par que a campanha
+  // recusaria. Sem isto, o teste "passa" pelo padrão da conta e a
+  // campanha falha depois no número escolhido.
+  //
+  // `channel.id` — o canal RESOLVIDO —, nunca `input.channelId`: sem
+  // escolha explícita o teste sai pelo padrão da conta, e validar
+  // contra "nenhum canal" faria a guarda se calar exatamente no caso
+  // mais comum. É a invariante do §2.E: a variável que decide o
+  // template e a que envia são a mesma.
+  await assertBroadcastTemplateChannel(db, {
+    accountId,
+    channelId: channel.id,
+    templateName: input.templateName,
+    templateLanguage,
+  });
 
   const rawTemplateRow = await findTemplateRowForWaba(db, {
     accountId,

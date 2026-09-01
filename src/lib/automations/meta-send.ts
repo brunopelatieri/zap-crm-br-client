@@ -2,7 +2,10 @@ import { withSignedHeaderMedia } from '@/lib/whatsapp/header-media';
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive';
 import type { MessageTemplate, TemplatePreviewPayload } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
-import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
+import {
+  assertTemplateChannelCompatible,
+  findTemplateRowForWaba,
+} from '@/lib/whatsapp/template-waba';
 import { renderTemplateText } from '@/lib/whatsapp/template-send-builder';
 import {
   engineSendInteractiveButtons,
@@ -164,6 +167,10 @@ async function sendViaMeta(
     // do canal — tentar a consulta best-effort com `wabaId: null` é
     // inofensivo e mantém o comportamento anterior a este ajuste.
     let mayHaveTemplate = true;
+    // Guardado fora do `try` para o assert do D-3 poder rodar DEPOIS
+    // dele: dentro, o catch degradaria justamente o erro que se quer
+    // ver.
+    let resolvedChannelId: string | null = null;
     try {
       // Escopado por WABA (SPEC 064 D-2): com dois números na mesma
       // conta, name+language pode bater em DUAS linhas (uma por WABA) —
@@ -178,6 +185,7 @@ async function sendViaMeta(
           input.accountId,
           input.conversationId
         );
+      resolvedChannelId = channelCtx.channel.id;
       const isCloud = channelCtx.channel.type === 'whatsapp_cloud';
       wabaId = isCloud
         ? ((configRow?.waba_id as string | null | undefined) ?? null)
@@ -185,6 +193,26 @@ async function sendViaMeta(
       mayHaveTemplate = isCloud;
     } catch {
       // Ver o comentário acima da função: degrada, não propaga.
+    }
+    // SPEC 065 D-3 — recusa aqui, com motivo legível no
+    // `automation_logs`, o par (template, canal) que a Meta rejeitaria
+    // com `(#132001) Template name does not exist in the translation`
+    // depois de aceitar o payload. Acontece quando o canal da automação
+    // foi trocado depois de o passo ser montado, ou quando o template
+    // foi recriado em outro WABA.
+    //
+    // Fora do `try` acima de propósito: `TemplateChannelMismatchError`
+    // é o erro que se QUER propagar, e o catch dali existe para degradar
+    // falhas de infraestrutura. Ele só lança sobre o que consegue provar
+    // (ver o cabeçalho da função), então um canal não resolvido aqui —
+    // `resolvedChannelId` nulo — não vira recusa.
+    if (mayHaveTemplate && resolvedChannelId) {
+      await assertTemplateChannelCompatible(db, {
+        accountId: input.accountId,
+        channelId: resolvedChannelId,
+        templateName: input.templateName,
+        templateLanguage: input.language || 'en_US',
+      });
     }
     if (mayHaveTemplate) {
       const data = await findTemplateRowForWaba(db, {

@@ -75,6 +75,7 @@ import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
+  assertBroadcastTemplateChannel,
   BroadcastError,
   assertAccountCanBroadcast,
   toBroadcastChannelError,
@@ -741,6 +742,15 @@ export async function planDashboardBroadcast(
 
   const { channelId, wabaId, phoneNumberId, accessToken } =
     await loadWhatsappConfig(db, accountId, input.channelId);
+  // SPEC 065 D-3 — inclusive na campanha AGENDADA que o cron acorda:
+  // aqui o template foi escolhido há dias e pode ter sido recriado em
+  // outro WABA desde então.
+  await assertBroadcastTemplateChannel(db, {
+    accountId,
+    channelId,
+    templateName: input.templateName,
+    templateLanguage,
+  });
   const template = await loadTemplateForSend(
     db,
     accountId,
@@ -881,6 +891,21 @@ export async function planAbTestBroadcast(
 
   const { channelId, wabaId, phoneNumberId, accessToken } =
     await loadWhatsappConfig(db, accountId, input.channelId);
+
+  // SPEC 065 D-3 — os DOIS braços do teste A/B. Sem isto, um teste pode
+  // nascer com a variante B de outro WABA (§2.A A3) e só a metade das
+  // mensagens falha, o que estraga a comparação em vez de recusá-la.
+  for (const [name, language] of [
+    [input.templateName, languageA],
+    [variant.templateName, languageB],
+  ] as const) {
+    await assertBroadcastTemplateChannel(db, {
+      accountId,
+      channelId,
+      templateName: name,
+      templateLanguage: language,
+    });
+  }
 
   const templateA = await loadTemplateForSend(
     db,

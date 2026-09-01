@@ -883,6 +883,19 @@ export interface Automation {
   description?: string;
   trigger_type: AutomationTriggerType;
   trigger_config: AutomationTriggerConfig;
+  /**
+   * Canal a que esta automacao esta escopada (SPEC 065 D-4, migracao
+   * 075). `null` = vale para TODOS os canais, que e o comportamento
+   * anterior a esta coluna e o de toda automacao existente.
+   *
+   * Preenchido, tem duas funcoes e SO estas duas: (1) o gatilho so
+   * dispara em eventos deste canal; (2) um passo de envio sem conversa
+   * abre a conversa NELE (D-5). Nunca redireciona a resposta de uma
+   * conversa existente — essa sai sempre pelo canal da conversa, e
+   * trocar de canal no meio do dialogo continua sendo so o desvio
+   * explicito (`fallback_channel`) ou a transferencia da SPEC 056.
+   */
+  channel_id?: string | null;
   is_active: boolean;
   execution_count: number;
   last_executed_at?: string | null;
