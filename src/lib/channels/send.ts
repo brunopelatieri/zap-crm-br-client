@@ -60,7 +60,11 @@ import {
 import { resolveDefaultChannelId } from './default-channel';
 import { ChannelNotConfiguredError, ChannelCapabilityError } from './errors';
 import { getAdapter } from './registry';
-import { logOutboundSend, type ChannelSource } from './send-log';
+import {
+  channelSourceFromId,
+  logOutboundSend,
+  type ChannelSource,
+} from './send-log';
 import type {
   Channel,
   ChannelAdapter,
@@ -266,7 +270,7 @@ export async function resolveChannelContext(
     // `channelId` presente = alguém escolheu (`'resource'`); ausente =
     // caiu no canal Cloud padrão da conta via D-11 (`'default'`). Mesma
     // ressalva do ramo QR acima sobre `resolveChannelForConversation`.
-    source: channelId ? 'resource' : 'default',
+    source: channelSourceFromId(channelId),
   };
 }
 

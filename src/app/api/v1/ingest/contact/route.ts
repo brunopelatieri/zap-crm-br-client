@@ -41,6 +41,10 @@ import {
   deriveChannelIdFromTemplateWaba,
 } from '@/lib/ingest/send';
 import { logIngestEvent, PAYLOAD_MAX_BYTES } from '@/lib/ingest/log';
+import {
+  loadScopedChannel,
+  scopedChannelError,
+} from '@/lib/channels/scoped-channel';
 
 // O envio real (chamada à Meta) roda em after() — a mesma folga de
 // duração que POST /api/v1/broadcasts documenta, embora aqui seja
@@ -184,32 +188,22 @@ export async function POST(request: Request) {
   // 404 confirmaria que o id existe). Falha de forma aqui é a mesma
   // classe de erro que `invalid_phone`/`invalid_webhook_id`: nada foi
   // gravado ainda, então 400 é seguro.
-  if (payload.channelId) {
-    const { data: channelRow, error: channelError } = await ctx.supabase
-      .from('channels')
-      .select('id')
-      .eq('id', payload.channelId)
-      .eq('account_id', ctx.accountId)
-      .maybeSingle();
-    if (channelError) {
-      console.error(
-        '[api/v1/ingest/contact] failed to validate channel_id:',
-        channelError
-      );
-      return fail('internal', 'Internal server error', 500);
-    }
-    if (!channelRow) {
-      await log(
-        'error',
-        'channel_not_in_account',
-        `channel_id "${payload.channelId}" does not belong to this account`
-      );
-      return fail(
-        'channel_not_in_account',
-        `channel_id "${payload.channelId}" does not belong to this account`,
-        400
-      );
-    }
+  //
+  // Reusa `loadScopedChannel`/`scopedChannelError` — a MESMA checagem
+  // "este canal é desta conta?" que automações e fluxos já usam
+  // (achado de code review: uma cópia à mão aqui tinha perdido o 503
+  // `channel_lookup_failed` de uma falha de leitura — que não é culpa
+  // do pedido e merece retry — e não gravava linha em
+  // `webhook_ingest_logs` nesse caso, contrariando o D-11 acima).
+  const channelLookup = await loadScopedChannel(
+    ctx.supabase,
+    ctx.accountId,
+    payload.channelId
+  );
+  if (!channelLookup.ok) {
+    const { status, body } = scopedChannelError(channelLookup.reason);
+    await log('error', body.code, body.error);
+    return fail(body.code, body.error, status);
   }
 
   let auditUserId: string;
@@ -351,21 +345,28 @@ export async function POST(request: Request) {
       const { supabase, accountId, keyId } = ctx;
       const { phone, templateParams, webhookId, webhookName } = payload;
 
-      // SPEC 065 D-9: `channel_id` explícito (já validado contra a
-      // conta acima) manda; na ausência dele, deriva do WABA do
-      // template quando exatamente um canal Cloud daquele WABA existe.
-      // Ambíguo/nenhum cai no canal padrão dentro de `sendIngestTemplate`
-      // — `assertTemplateChannelCompatible` decide a compatibilidade.
-      const resolvedChannelId =
-        payload.channelId ??
-        (await deriveChannelIdFromTemplateWaba(
-          supabase,
-          accountId,
-          templateId
-        ));
-
       after(async () => {
         try {
+          // SPEC 065 D-9: `channel_id` explícito (já validado contra a
+          // conta acima) manda; na ausência dele, deriva do WABA do
+          // template quando exatamente um canal Cloud daquele WABA
+          // existe. Ambíguo/nenhum cai no canal padrão dentro de
+          // `sendIngestTemplate` — `assertTemplateChannelCompatible`
+          // decide a compatibilidade.
+          //
+          // Mora AQUI DENTRO de `after()`, não antes (achado de code
+          // review): a derivação faz até 3 leituras sequenciais
+          // (template → canais → configs), e rodar antes bloqueava a
+          // resposta que o cabeçalho deste arquivo promete não esperar
+          // a Meta — no caso comum, justamente, de `channel_id` ausente.
+          const resolvedChannelId =
+            payload.channelId ??
+            (await deriveChannelIdFromTemplateWaba(
+              supabase,
+              accountId,
+              templateId
+            ));
+
           await sendIngestTemplate(supabase, {
             accountId,
             phone,

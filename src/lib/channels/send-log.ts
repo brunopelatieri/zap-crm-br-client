@@ -35,6 +35,34 @@ export type SendOrigin =
  */
 export type ChannelSource = 'resource' | 'conversation' | 'default';
 
+/**
+ * `ChannelSource` sem `'conversation'` — o subconjunto que resolvedores
+ * que NUNCA herdam de uma conversa (campanha, ingest, API pública)
+ * podem produzir. Usar este alias em vez de retipar `'resource' |
+ * 'default'` à mão mantém esses locais estruturalmente amarrados a
+ * `ChannelSource` — um quarto valor adicionado lá se propaga aqui sem
+ * precisar caçar declarações duplicadas (achado de code review:
+ * `broadcast-core.ts`/`broadcast-dispatch.ts` retipavam isto à mão).
+ */
+export type NonConversationChannelSource = Exclude<
+  ChannelSource,
+  'conversation'
+>;
+
+/**
+ * A regra "id explícito ⇒ o recurso escolheu; ausente ⇒ caiu no padrão"
+ * (SPEC 065 §11), numa função só. Estava reimplementada à mão como
+ * `channelId ? 'resource' : 'default'` em `broadcast-core.ts`,
+ * `broadcast-dispatch.ts`, `lib/ingest/send.ts` e `lib/channels/send.ts`
+ * (achado de code review) — um bug fix numa cópia não chegava às
+ * outras três.
+ */
+export function channelSourceFromId(
+  channelId: string | null | undefined
+): NonConversationChannelSource {
+  return channelId ? 'resource' : 'default';
+}
+
 export interface OutboundSendLogEntry {
   accountId: string;
   /** `null` quando a origem não opera sobre uma conversa (disparo em massa). */

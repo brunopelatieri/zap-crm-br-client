@@ -595,6 +595,13 @@ export interface Broadcast {
    * padrão da conta no momento do disparo.
    */
   channel_id?: string | null;
+  /**
+   * De onde veio `channel_id` (SPEC 065 §11, migração 076). `'resource'`
+   * = escolhido explicitamente; `'default'` = herdou o padrão da conta
+   * no momento do disparo/agendamento. `null` numa linha anterior a
+   * esta coluna.
+   */
+  channel_source?: 'resource' | 'default' | null;
   status: BroadcastStatus;
   total_recipients: number;
   sent_count: number;

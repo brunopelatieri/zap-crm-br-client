@@ -57,6 +57,10 @@ vi.mock('@/lib/evolution/instances', () => ({
 const logOutboundSendSpy = vi.fn();
 vi.mock('./send-log', () => ({
   logOutboundSend: (...a: unknown[]) => logOutboundSendSpy(...a),
+  // Mesma regra da implementação real (send-log.ts) — mockada aqui só
+  // porque o módulo inteiro é mockado; não há comportamento a espionar.
+  channelSourceFromId: (channelId: string | null | undefined) =>
+    channelId ? 'resource' : 'default',
 }));
 
 /**

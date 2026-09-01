@@ -28,7 +28,11 @@ import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import { isAccountBlocked } from '@/lib/platform/blocked';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
-import { logOutboundSend } from '@/lib/channels/send-log';
+import {
+  channelSourceFromId,
+  logOutboundSend,
+  type NonConversationChannelSource,
+} from '@/lib/channels/send-log';
 import {
   assertTemplateChannelCompatible,
   findTemplateRowForWaba,
@@ -179,7 +183,7 @@ export interface BroadcastPlan {
    * no canal Cloud padrão da conta. Uma campanha nunca é `'conversation'`:
    * não há conversa a herdar, é sempre disparo em massa.
    */
-  channelSource: 'resource' | 'default';
+  channelSource: NonConversationChannelSource;
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -397,6 +401,10 @@ export async function createBroadcast(
       // SPEC 064 D-3: gravado NA CRIAÇÃO, inclusive para a API pública
       // sem `channel_id` explícito (que grava o padrão resolvido acima).
       channel_id: channel.id,
+      // SPEC 065 §11 — mesma coluna que o agendamento (migração 076)
+      // grava, aqui calculada a partir do parâmetro ORIGINAL do pedido
+      // (`params.channelId`), não do `channel.id` já resolvido.
+      channel_source: channelSourceFromId(params.channelId),
       status: 'sending',
       total_recipients: deduped.length,
     })
@@ -439,7 +447,7 @@ export async function createBroadcast(
     broadcastId: broadcast.id,
     accountId,
     channelId: channel.id,
-    channelSource: params.channelId ? 'resource' : 'default',
+    channelSource: channelSourceFromId(params.channelId),
     templateName,
     templateLanguage,
     phoneNumberId: config.phone_number_id,

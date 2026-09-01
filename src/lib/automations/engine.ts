@@ -480,21 +480,34 @@ function skipped(detail: string): StepResult {
 }
 
 /**
- * Motivo ESTÁVEL, greppável em `automation_logs`, para o passo ter
- * falhado por o canal escolhido (o da automação, D-4, ou o do desvio,
- * `fallback_channel`) estar `disabled` (SPEC 065 D-8/F8).
+ * Motivo ESTÁVEL, greppável em `automation_logs`, para todo passo que
+ * falha por causa do canal escolhido (o da automação, D-4, ou o do
+ * desvio, `fallback_channel`) — SPEC 065 D-8/F8, estendido por um
+ * achado de code review.
  *
  * Sem isto, `detail` carregava só a mensagem crua de
  * `ChannelNotConfiguredError` — legível, mas sem um código fixo que uma
- * consulta de auditoria ou um alerta futuro possam filtrar. `disabled`
- * é o único motivo tratado aqui: os outros (`no_channel`, `not_found`,
- * `wrong_type`, `no_credentials`, `read_failed`) já têm mensagens
- * autoexplicativas e não são o cenário do D-8 (canal que a automação
- * escolheu e que foi desativado DEPOIS).
+ * consulta de auditoria ou um alerta futuro possam filtrar. A versão
+ * original só tratava `disabled` (o cenário do D-8: canal que a
+ * automação escolheu e que foi desativado DEPOIS) e deixava as outras
+ * cinco razões de `ChannelNotConfiguredReason` (`no_channel`,
+ * `not_found`, `wrong_type`, `no_credentials`, `read_failed`) sem
+ * prefixo nenhum — a próxima que precisasse de um código estável
+ * dependeria de alguém lembrar de adicionar mais um `if` aqui.
+ *
+ * `disabled` continua usando `channel_unavailable` — o MESMO código
+ * estável que a campanha já usa desde a SPEC 064 D-3 para o mesmo
+ * cenário — em vez de `channel_disabled`, para as duas superfícies
+ * (automação e campanha) ficarem grepáveis pelo mesmo termo. As outras
+ * cinco usam o próprio `reason` como código.
  */
 function describeStepFailure(err: unknown): string {
-  if (err instanceof ChannelNotConfiguredError && err.reason === 'disabled') {
-    return `channel_unavailable: ${err.message}`;
+  if (err instanceof ChannelNotConfiguredError) {
+    const code =
+      err.reason === 'disabled'
+        ? 'channel_unavailable'
+        : `channel_${err.reason}`;
+    return `${code}: ${err.message}`;
   }
   return err instanceof Error ? err.message : String(err);
 }

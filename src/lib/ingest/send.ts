@@ -23,7 +23,7 @@ import {
   sendWithPhoneVariants,
 } from '@/lib/channels/send';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
-import { logOutboundSend } from '@/lib/channels/send-log';
+import { channelSourceFromId, logOutboundSend } from '@/lib/channels/send-log';
 import {
   listCloudChannels,
   resolveCloudConfig,
@@ -248,7 +248,7 @@ export async function sendIngestTemplate(
       // derivado do WABA do template (D-9); ausente = caiu no canal
       // Cloud padrão dentro de `resolveCloudConfig`. Nunca
       // `'conversation'`: a ingestão não parte de uma conversa existente.
-      channelSource: channelId ? 'resource' : 'default',
+      channelSource: channelSourceFromId(channelId),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

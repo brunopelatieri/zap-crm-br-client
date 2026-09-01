@@ -105,6 +105,13 @@ interface DueBroadcast {
   header_media_url: string | null;
   /** Número gravado no agendamento (SPEC 064 D-3). `null` = campanha legada. */
   channel_id: string | null;
+  /**
+   * SPEC 065 §11 (migração 076, achado de code review) — de onde veio
+   * `channel_id` no momento do agendamento. `null` numa linha anterior
+   * a esta coluna: o motor recai no cálculo antigo a partir só de
+   * `channel_id`, mesmo comportamento de antes desta migração.
+   */
+  channel_source: 'resource' | 'default' | null;
   scheduled_at: string;
   scheduled_timezone: string | null;
   window_override: boolean;
@@ -145,7 +152,7 @@ export async function GET(request: Request) {
   const { data: due, error } = await admin
     .from('broadcasts')
     .select(
-      'id, account_id, user_id, name, template_name, template_language, template_variables, audience_filter, header_media_url, channel_id, scheduled_at, scheduled_timezone, window_override, ab_split_percent'
+      'id, account_id, user_id, name, template_name, template_language, template_variables, audience_filter, header_media_url, channel_id, channel_source, scheduled_at, scheduled_timezone, window_override, ab_split_percent'
     )
     .eq('status', 'scheduled')
     // Decisão 4 do cabeçalho: variante B não é campanha por si só.
@@ -342,6 +349,7 @@ export async function GET(request: Request) {
             variables,
             headerMediaUrl: row.header_media_url ?? undefined,
             channelId: row.channel_id,
+            channelSource: row.channel_source,
           },
           variant: {
             templateName: abVariant.template_name,
@@ -413,6 +421,7 @@ export async function GET(request: Request) {
           variables,
           headerMediaUrl: row.header_media_url ?? undefined,
           channelId: row.channel_id,
+          channelSource: row.channel_source,
         },
         canCreateTags,
       });

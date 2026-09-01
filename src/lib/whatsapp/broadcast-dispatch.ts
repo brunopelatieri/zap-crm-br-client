@@ -75,6 +75,10 @@ import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import { findTemplateRowForWaba } from '@/lib/whatsapp/template-waba';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import {
+  channelSourceFromId,
+  type NonConversationChannelSource,
+} from '@/lib/channels/send-log';
+import {
   assertBroadcastTemplateChannel,
   BroadcastError,
   assertAccountCanBroadcast,
@@ -133,6 +137,14 @@ export interface DashboardBroadcastInput {
    * campanha já criada.
    */
   channelId?: string | null;
+  /**
+   * SPEC 065 §11 (achado de code review) — `broadcasts.channel_source`
+   * gravado NO AGENDAMENTO (migração 076). Só o cron, ao re-despachar
+   * uma campanha `scheduled`, tem este valor para passar; o disparo
+   * imediato deixa ausente e `loadWhatsappConfig` calcula na hora, a
+   * partir de `channelId`.
+   */
+  channelSource?: NonConversationChannelSource | null;
 }
 
 /**
@@ -203,7 +215,7 @@ interface SendContext {
   /** Canal que efetivamente envia (SPEC 064 D-3) — vai para `broadcasts.channel_id`. */
   channelId: string;
   /** De onde veio `channelId` (SPEC 065 §11) — ver `ArmPlan.channelSource`. */
-  channelSource: 'resource' | 'default';
+  channelSource: NonConversationChannelSource;
   /** WABA do canal — decide quais templates este número pode usar (D-2). */
   wabaId: string | null;
   phoneNumberId: string;
@@ -224,14 +236,27 @@ interface SendContext {
  * agendamento (cron re-resolvendo). Nos dois casos `resolveCloudConfig`
  * recusa canal `disabled`/removido — é o que dá ao cron o
  * `channel_unavailable` do D-3 em vez de cair de volta no padrão sozinho.
+ *
+ * `channelSourceOverride` (SPEC 065 §11, achado de code review) — o
+ * cron passa aqui o `broadcasts.channel_source` que foi gravado NO
+ * AGENDAMENTO (migração 076), porque `channelId` sozinho não distingue
+ * "alguém escolheu" de "herdou o padrão da conta que era vigente
+ * naquele momento" — os dois chegam aqui como o MESMO `channelId`
+ * preenchido. Sem o override, a ausência/presença de `channelId` NESTA
+ * chamada seria o único sinal, e para uma campanha agendada isso é
+ * sempre "presente" — sempre `'resource'`, mesmo quando o agendamento
+ * usou o padrão. `undefined`/`null` = "não sei, calcule como sempre" —
+ * o caminho do disparo imediato e do PRÓPRIO agendamento (que ainda
+ * não tem nada gravado) continuam intactos.
  */
 async function loadWhatsappConfig(
   db: SupabaseClient,
   accountId: string,
-  channelId?: string | null
+  channelId?: string | null,
+  channelSourceOverride?: NonConversationChannelSource | null
 ): Promise<{
   channelId: string;
-  channelSource: 'resource' | 'default';
+  channelSource: NonConversationChannelSource;
   wabaId: string | null;
   phoneNumberId: string;
   accessToken: string;
@@ -256,9 +281,12 @@ async function loadWhatsappConfig(
 
   return {
     channelId: channel.id,
-    // SPEC 065 §11 — o parâmetro recebido, não `channel.id` resolvido:
-    // é ele que diz se alguém pediu este canal ou se caiu no padrão.
-    channelSource: channelId ? 'resource' : 'default',
+    // SPEC 065 §11 — o override (channel_source gravado no
+    // agendamento) manda quando presente; na ausência dele, o
+    // parâmetro `channelId` RECEBIDO NESTA CHAMADA é o único sinal
+    // disponível (correto para disparo imediato e para o próprio
+    // agendamento, que ainda não gravou nada).
+    channelSource: channelSourceOverride ?? channelSourceFromId(channelId),
     wabaId: config.waba_id ?? null,
     phoneNumberId: config.phone_number_id,
     accessToken: decrypt(config.access_token),
@@ -541,6 +569,11 @@ async function materializeArm(
     // triagem cria o rascunho antes do passo "Enviar por" decidir o
     // canal, então esta é a primeira vez que ele existe para a linha.
     channel_id: context.channelId,
+    // SPEC 065 §11 (migração 076) — mesmo valor que alimentou
+    // `context` (calculado fresco no disparo imediato, ou lido de volta
+    // de `broadcasts.channel_source` quando o cron está adotando um
+    // agendamento via `adoptBroadcastId`).
+    channel_source: context.channelSource,
     status: 'sending' as const,
     total_recipients: contacts.length,
   };
@@ -748,7 +781,12 @@ export async function planDashboardBroadcast(
   const templateLanguage = input.templateLanguage || 'en_US';
 
   const { channelId, channelSource, wabaId, phoneNumberId, accessToken } =
-    await loadWhatsappConfig(db, accountId, input.channelId);
+    await loadWhatsappConfig(
+      db,
+      accountId,
+      input.channelId,
+      input.channelSource
+    );
   // SPEC 065 D-3 — inclusive na campanha AGENDADA que o cron acorda:
   // aqui o template foi escolhido há dias e pode ter sido recriado em
   // outro WABA desde então.
@@ -898,7 +936,12 @@ export async function planAbTestBroadcast(
   }
 
   const { channelId, channelSource, wabaId, phoneNumberId, accessToken } =
-    await loadWhatsappConfig(db, accountId, input.channelId);
+    await loadWhatsappConfig(
+      db,
+      accountId,
+      input.channelId,
+      input.channelSource
+    );
 
   // SPEC 065 D-3 — os DOIS braços do teste A/B. Sem isto, um teste pode
   // nascer com a variante B de outro WABA (§2.A A3) e só a metade das
@@ -1123,7 +1166,15 @@ export async function scheduleDashboardBroadcast(
   // number NOW, at scheduling, not at the hour it actually fires. That's
   // what stops "someone changed the default number" from silently
   // redirecting a campaign that was already scheduled.
-  const { channelId, wabaId } = await loadWhatsappConfig(
+  //
+  // `channelSource` (SPEC 065 §11, achado de code review): calculado
+  // AQUI — quando `input.channelId` ainda é o parâmetro original do
+  // pedido, não o `channelId` já resolvido — e gravado junto de
+  // `channel_id` na linha abaixo, para o cron poder ler os dois de
+  // volta em vez de recalcular a partir de um `channel_id` que, uma
+  // vez congelado, não distingue mais "escolhido" de "herdado do
+  // padrão".
+  const { channelId, channelSource, wabaId } = await loadWhatsappConfig(
     db,
     accountId,
     input.channelId
@@ -1182,6 +1233,10 @@ export async function scheduleDashboardBroadcast(
     // SPEC 064 D-3: gravado no AGENDAMENTO, não recalculado quando o
     // cron efetivamente dispara — ver o comentário acima de `loadWhatsappConfig`.
     channel_id: channelId,
+    // SPEC 065 §11 (achado de code review) — migração 076. Sem isto o
+    // cron não tem como saber, na hora de entregar, se `channel_id`
+    // veio de uma escolha explícita ou do padrão da conta.
+    channel_source: channelSource,
     scheduled_at: scheduledAt.toISOString(),
     scheduled_timezone: timeZone,
     window_override: windowOverride,
@@ -1258,6 +1313,7 @@ export async function scheduleDashboardBroadcast(
       header_media_url: variant.headerMediaUrl?.trim() || null,
       // Mesmo número da variante A — é uma campanha só, com dois textos.
       channel_id: channelId,
+      channel_source: channelSource,
       scheduled_at: scheduledAt.toISOString(),
       scheduled_timezone: timeZone,
       window_override: windowOverride,
