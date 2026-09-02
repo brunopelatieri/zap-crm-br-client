@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, KeyboardEvent } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Send,
   LayoutTemplate,
@@ -17,6 +18,7 @@ import {
   MessageSquareDashed,
   Zap,
   ArrowRightLeft,
+  Smile,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -52,6 +54,9 @@ import {
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive';
 import type { InteractiveMessagePayload, QuickReply } from '@/types';
 import { QuickReplyPicker } from './quick-reply-picker';
+import { EmojiPickerPopover } from '@/components/ui/emoji-picker';
+import { insertAtCursor } from '@/lib/emoji/insert-at-cursor';
+import type { Emoji } from 'frimousse';
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = 'image' | 'video' | 'document' | 'audio';
@@ -170,6 +175,9 @@ export function MessageComposer({
   onClearReply,
 }: MessageComposerProps) {
   const t = useTranslations('Inbox.composer');
+  // Nome próprio — não reaproveita `t`: o composer já teve histórico
+  // de shadowing de `useTranslations` (AGENTS.md § armadilhas).
+  const tEmoji = useTranslations('EmojiPicker');
 
   // Matriz de capacidades (SPEC 049 §4.3) — fonte única, lida aqui e
   // repassada ao picker de respostas rápidas. Nunca `if (channelType ===
@@ -422,6 +430,41 @@ export function MessageComposer({
       });
     },
     [openInteractiveBuilder, adjustHeight]
+  );
+
+  // Insere na POSIÇÃO DO CURSOR — diferente de `handlePickQuickReply`
+  // acima, que anexa ao fim com quebra de linha. Emoji é pontuação de
+  // frase; snippet é parágrafo. Contratos diferentes de propósito.
+  const handleInsertEmoji = useCallback(
+    (picked: Emoji) => {
+      const el = textareaRef.current;
+      const next = insertAtCursor(
+        {
+          value: text,
+          selectionStart: el?.selectionStart ?? null,
+          selectionEnd: el?.selectionEnd ?? null,
+        },
+        picked.emoji
+      );
+      // `flushSync`, não `requestAnimationFrame`: o textarea é
+      // controlado, então trocar `value` joga a seleção nativa para o
+      // fim — restaurá-la só funciona DEPOIS do React aplicar o valor
+      // novo no DOM. Um `rAF` resolve isso mas só no próximo paint (até
+      // ~16ms depois), e o popover fica aberto de propósito para
+      // inserção múltipla: um segundo emoji escolhido dentro dessa
+      // janela leria `selectionStart/End` ainda resetados no fim do
+      // texto anterior. `flushSync` força o commit no mesmo tick, então
+      // ao sair desta função o DOM já reflete o valor novo — sem janela
+      // nenhuma para o próximo clique observar um estado intermediário.
+      //
+      // Sem `.focus()` de propósito: devolver o foco aqui fecharia o
+      // popover. `setSelectionRange` funciona em elemento sem foco; o
+      // foco volta uma vez no fechamento, via `finalFocus` do popover.
+      flushSync(() => setText(next.value));
+      adjustHeight();
+      el?.setSelectionRange(next.caret, next.caret);
+    },
+    [text, adjustHeight]
   );
 
   // Upload a captured file to chat-media and stage it as a draft.
@@ -812,13 +855,36 @@ export function MessageComposer({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Emoji (SPEC 066). Sem gate de canal: emoji é texto Unicode,
+              todo canal aceita — Cloud API e Evolution/QR Code. Desabilitado
+              com `inputsDisabled` pelo mesmo motivo dos menus vizinhos:
+              inserir num campo que não envia é UI que erra ao clicar. */}
+          <EmojiPickerPopover
+            onSelect={handleInsertEmoji}
+            finalFocus={textareaRef}
+            side="top"
+            align="start"
+            disabled={inputsDisabled}
+            aria-label={tEmoji('trigger')}
+            title={
+              readOnly
+                ? t('readOnlyTitle')
+                : inputsDisabled
+                  ? undefined
+                  : tEmoji('trigger')
+            }
+            className="text-muted-foreground hover:text-foreground order-3 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 disabled:cursor-not-allowed disabled:opacity-50 xl:order-none"
+          >
+            <Smile className="h-4 w-4" />
+          </EmojiPickerPopover>
+
           {/* Template é conceito da Meta — some inteira fora da Cloud
               (SPEC 049 §4.3), pelo mesmo motivo do item interativo acima. */}
           {/* GatedButton renderiza um <span> externo sem className próprio
               (mostra o tooltip "Read-only" em Safari) — quem precisa de
               `order`/margem no flex é esse wrapper, não o <Button> interno. */}
           {canTemplates && (
-            <div className="order-3 xl:order-none">
+            <div className="order-4 xl:order-none">
               <GatedButton
                 variant="ghost"
                 size="sm"
@@ -833,7 +899,7 @@ export function MessageComposer({
             </div>
           )}
 
-          <div className="order-4 xl:order-none">
+          <div className="order-5 xl:order-none">
             <GatedButton
               variant="ghost"
               size="sm"
@@ -874,12 +940,12 @@ export function MessageComposer({
               // `min-h` (não `rows`) dá a altura inicial maior abaixo de xl
               // sem depender de JS/resize listener — `rows` fixo em 1 porque
               // o HTML attribute não é responsivo por breakpoint via classe.
-              'border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 order-6 min-h-[84px] basis-full resize-none rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none xl:order-none xl:min-h-0 xl:basis-auto xl:flex-1',
+              'border-border bg-muted text-foreground placeholder-muted-foreground focus:border-primary/50 order-7 min-h-[84px] basis-full resize-none rounded-xl border px-4 py-2.5 text-sm transition-colors outline-none xl:order-none xl:min-h-0 xl:flex-1 xl:basis-auto',
               (sessionExpired || readOnly) && 'cursor-not-allowed opacity-50'
             )}
           />
 
-          <div className="order-5 ml-auto xl:order-none xl:ml-0">
+          <div className="order-6 ml-auto xl:order-none xl:ml-0">
             <GatedButton
               size="sm"
               canAct={!readOnly}
