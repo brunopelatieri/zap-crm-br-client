@@ -32,6 +32,7 @@ import {
   AlertTriangle,
   QrCode,
   BadgeCheck,
+  Download,
 } from 'lucide-react';
 import { format, isToday, isYesterday, type Locale } from 'date-fns';
 import { useTranslations, useLocale } from 'next-intl';
@@ -62,6 +63,7 @@ import { resolveSessionWindow } from '@/lib/channels/session-window';
 import { deleteAccountMedia } from '@/lib/storage/upload-media';
 import { TemplatePicker } from './template-picker';
 import { TransferChannelDialog } from './transfer-channel-dialog';
+import { ExportConversationDialog } from './export-conversation-dialog';
 import { useTransferChannels } from '@/hooks/use-transfer-channels';
 import { AiThreadBanner } from './ai-thread-banner';
 import { buildReplyPreview } from './reply-quote';
@@ -203,6 +205,7 @@ export function MessageThread({
   const tTimer = useTranslations('Inbox.sessionTimer');
   const tQuote = useTranslations('Inbox.replyQuote');
   const tBubble = useTranslations('Inbox.bubble');
+  const tExport = useTranslations('Inbox.exportConversation');
   const dateFnsLocale = getDateFnsLocale(useLocale());
 
   const { user } = useAuth();
@@ -778,6 +781,10 @@ export function MessageThread({
     setTransferDialogOpen(true);
   }, []);
 
+  // ---- SPEC 067 — exportar conversa em PDF / ZIP -----------------------
+
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+
   const handleTransferred = useCallback(
     (newConversationId: string) => {
       onOpenConversation?.(newConversationId);
@@ -1307,6 +1314,20 @@ export function MessageThread({
             </button>
           )}
 
+          {/* Exportar conversa (SPEC 067, D-1: papel >= agent, mesmo
+              gate que a rota checa com requireRole('agent')). */}
+          {canSend && conversation && (
+            <button
+              type="button"
+              onClick={() => setExportDialogOpen(true)}
+              aria-label={tExport('menuItem')}
+              title={tExport('menuItem')}
+              className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+          )}
+
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -1593,6 +1614,15 @@ export function MessageThread({
           contactId={contact.id}
           currentChannelId={conversation.channel_id}
           onTransferred={handleTransferred}
+        />
+      )}
+
+      {conversation && (
+        <ExportConversationDialog
+          open={exportDialogOpen}
+          onOpenChange={setExportDialogOpen}
+          conversationId={conversation.id}
+          messages={messages}
         />
       )}
 

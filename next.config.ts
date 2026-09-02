@@ -71,6 +71,20 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   /**
+   * Fontes da exportação de conversa (SPEC 067 §6).
+   *
+   * A rota lê os `.ttf` do disco com `fs` em tempo de execução. O file
+   * tracing do Next só copia para o pacote de deploy o que ele consegue
+   * enxergar estaticamente — e um `path.join(process.cwd(), ...)` é
+   * opaco para ele. Sem esta declaração o `build` PASSA e a rota estoura
+   * `ENOENT` **só em produção**, que é exatamente a armadilha "build
+   * passa em dev e falha no host" catalogada no AGENTS.md.
+   */
+  outputFileTracingIncludes: {
+    '/api/inbox/conversations/[id]/export': ['./src/lib/inbox/export/fonts/**'],
+  },
+
+  /**
    * Política de Cache-Control.
    *
    * Por que isso existe:
