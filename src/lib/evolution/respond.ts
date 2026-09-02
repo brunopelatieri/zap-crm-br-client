@@ -40,7 +40,8 @@ export function toEvolutionErrorResponse(err: unknown): NextResponse {
   }
 
   if (err instanceof EvolutionNotConfiguredError) {
-    return NextResponse.json({ error: err.message }, { status: 503 });
+    // 422, not 503 — see the EvolutionApiError branch below for why.
+    return NextResponse.json({ error: err.message }, { status: 422 });
   }
 
   if (err instanceof InstanceLimitReachedError) {
@@ -58,15 +59,21 @@ export function toEvolutionErrorResponse(err: unknown): NextResponse {
     // bad_request/not_found refletem o que FOI PEDIDO (ex.: telefone
     // inválido no pareamento) — repassados como estão. auth_failed e
     // channel_unavailable são falhas do LADO SERVIDOR (token rotacionado
-    // na VPS, VPS fora do ar) — 502/503, nunca 4xx do nosso lado.
+    // na VPS, VPS fora do ar) — não é o pedido que está errado, mas
+    // continuam sendo 422 (e não 502/503): esta é a resposta JSON do
+    // NOSSO app, same-origin, e um 502/503 literal aqui é interceptado
+    // por proxies reversos na frente de instalações self-hosted
+    // (nginx/Traefik/Coolify trocam por página de erro genérica própria
+    // nesses códigos), engolindo esta mensagem antes de chegar ao
+    // browser — mesmo bug confirmado nas rotas de template WhatsApp.
+    // `kind` no corpo continua distinguindo "erro do servidor" de
+    // "erro do pedido" para quem precisar dessa granularidade.
     const status =
       err.kind === 'bad_request'
         ? 400
         : err.kind === 'not_found'
           ? 404
-          : err.kind === 'channel_auth_failed'
-            ? 502
-            : 503;
+          : 422;
     return NextResponse.json(
       { error: `Evolution API error: ${err.message}`, kind: err.kind },
       { status }

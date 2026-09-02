@@ -157,9 +157,13 @@ export async function POST(request: Request) {
       const message =
         err instanceof Error ? err.message : 'Unknown provider error';
       console.error('[whatsapp/react] provider send failed:', message);
+      // 422, not 502 — see the WhatsApp templates submit route for why:
+      // this is our own JSON response, not a real gateway failure, and a
+      // literal 502 gets swallowed by reverse proxies in front of
+      // self-hosted deployments.
       return NextResponse.json(
         { error: `Provider error: ${message}` },
-        { status: 502 }
+        { status: 422 }
       );
     }
 

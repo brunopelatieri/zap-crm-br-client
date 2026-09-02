@@ -317,13 +317,24 @@ export async function POST(request: Request) {
           })
         );
         const isRateLimit = /\b429\b/.test(message);
+        // 422, not 502: this IS the app's own response (valid JSON,
+        // same-origin) reporting that Meta rejected the template — not a
+        // real gateway failure. A literal 502 here gets intercepted by
+        // reverse proxies in front of self-hosted deployments (nginx/
+        // Traefik/Coolify default to swapping their own generic error
+        // page for any 502/503/504), which silently replaces this JSON
+        // body with an opaque "Unexpected response (HTTP 502)" on the
+        // client — confirmed in production against the rs project,
+        // where the real Meta error (#100 subcode 2388023) was
+        // correctly persisted to submission_error but never reached
+        // the browser.
         return NextResponse.json(
           {
             error: isRateLimit
               ? 'Meta rate limit hit (100 template creates per hour). Try again later.'
               : message,
           },
-          { status: isRateLimit ? 429 : 502 }
+          { status: isRateLimit ? 429 : 422 }
         );
       }
     }

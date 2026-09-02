@@ -219,7 +219,8 @@ export async function POST(request: Request) {
         } catch {
           // response wasn't JSON — keep the fallback
         }
-        return NextResponse.json({ error: metaErr }, { status: 502 });
+        // 422, not 502 — see the submit route for why.
+        return NextResponse.json({ error: metaErr }, { status: 422 });
       }
 
       const metaBody: {

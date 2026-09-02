@@ -236,7 +236,11 @@ export async function PATCH(
             last_submitted_at: new Date().toISOString(),
           })
           .eq('id', id);
-        return NextResponse.json({ error: message }, { status: 502 });
+        // 422, not 502 — see the submit route for why: this is our own
+        // JSON response, not a real gateway failure, and a literal 502
+        // gets swallowed by reverse proxies in front of self-hosted
+        // deployments.
+        return NextResponse.json({ error: message }, { status: 422 });
       }
     }
 
@@ -403,7 +407,8 @@ export async function DELETE(
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Meta delete failed.';
-        return NextResponse.json({ error: message }, { status: 502 });
+        // 422, not 502 — see the submit route for why.
+        return NextResponse.json({ error: message }, { status: 422 });
       }
     }
 
