@@ -65,7 +65,7 @@ export async function GET(
     // de casar.
     const { data: owningMessage, error: ownershipError } = await supabase
       .from('messages')
-      .select('id, channel_id')
+      .select('id, channel_id, conversation:conversations(channel_id)')
       .eq('media_id', mediaId)
       .limit(1)
       .maybeSingle();
@@ -108,14 +108,26 @@ export async function GET(
     // A mídia da Meta só é baixável com o token do número dono dela: o
     // handle vive no WABA daquele `phone_number_id`, e usar o token do
     // outro número devolveria 404 da Graph API numa conta com dois
-    // oficiais. `channel_id` nulo é mensagem anterior à 063 e cai no
-    // canal Cloud padrão, que é como sempre funcionou.
+    // oficiais. `messages.channel_id` só é gravado no desvio de canal de
+    // SAÍDA (migração 063) — `ingest.ts` NUNCA o grava em mídia
+    // RECEBIDA — então para ela quem carrega o canal é a CONVERSA
+    // (mesma ordem que `src/lib/inbox/export/model.ts` aplica).
+    const conversationEmbed = owningMessage.conversation as
+      { channel_id: string | null } | { channel_id: string | null }[] | null;
+    const conversationChannelId = Array.isArray(conversationEmbed)
+      ? (conversationEmbed[0]?.channel_id ?? null)
+      : (conversationEmbed?.channel_id ?? null);
+    const mediaChannelId =
+      (owningMessage.channel_id as string | null) ??
+      conversationChannelId ??
+      undefined;
+
     let accessToken: string;
     try {
       const { config } = await resolveCloudConfig(
         supabase,
         accountId,
-        (owningMessage.channel_id as string | null) ?? undefined
+        mediaChannelId
       );
       accessToken = decrypt(config.access_token);
     } catch (err) {
