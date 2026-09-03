@@ -146,6 +146,31 @@ export function detectEmbeddableImage(
   return null;
 }
 
+const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46]; // "RIFF"
+const WEBP_FORMAT_SIGNATURE = [0x57, 0x45, 0x42, 0x50]; // "WEBP", offset 8
+
+/**
+ * RIFF....WEBP pelos magic bytes — o formato real dos stickers do
+ * WhatsApp (nunca embutível por `detectEmbeddableImage`).
+ *
+ * Existe porque `messages.content_type` não distingue sticker de foto
+ * comum (o webhook normaliza os dois para `'image'` na ingestão — não
+ * há coluna que preserve a diferença, achado da SPEC 067). O sinal só
+ * fica disponível aqui, com os bytes em mãos, depois do download —
+ * antes disso (`model.ts`, ao montar o transcrito) é cedo demais para
+ * saber. Sem mídia baixada (status ausente/erro), a checagem degrada
+ * para "não é sticker" e o cartão sai rotulado como imagem genérica —
+ * pior que o rótulo certo, melhor que o "Imagem" sempre-errado de antes.
+ */
+export function isWebpImage(bytes: Uint8Array | null): boolean {
+  if (!bytes || bytes.length < 12) return false;
+  const hasRiff = WEBP_RIFF_SIGNATURE.every((byte, i) => bytes[i] === byte);
+  const hasWebp = WEBP_FORMAT_SIGNATURE.every(
+    (byte, i) => bytes[8 + i] === byte
+  );
+  return hasRiff && hasWebp;
+}
+
 /**
  * Varre tudo que vai virar texto no documento, parando no primeiro
  * caractere que exija a fonte de emoji.
@@ -175,10 +200,31 @@ export function documentNeedsEmojiFont(
   if (headerTexts.some(needs)) return true;
 
   // Rótulos estáticos: o i18n pode legitimamente pôr um emoji num selo
-  // (⭐ favorita). As funções de rótulo não entram — o texto que elas
-  // produzem já chega pronto dentro dos blocos.
+  // (⭐ favorita).
   for (const value of Object.values(labels)) {
     if (typeof value === 'string' && needs(value)) return true;
+  }
+
+  // Rótulos de FUNÇÃO (messageCount/attachmentCount/formatBytes/page):
+  // ao contrário do que um comentário antigo desta função afirmava, o
+  // texto que elas produzem NÃO chega pronto dentro de `blocks` — é
+  // interpolado direto no cabeçalho, no cartão de anexo e no rodapé,
+  // em `drawHeader`/`buildAttachmentCard`/`drawFooters`, sem nunca
+  // passar por esta varredura. Sem isto, um tradutor pondo um emoji em
+  // qualquer um desses quatro templates (ex.: "📎 {count} anexos")
+  // reintroduz em silêncio o bug de glifo em branco que `sanitizeForPdf`
+  // existe para evitar — `fonts.emoji` ficaria `null` porque a varredura
+  // disse "não precisa", e o desenho cairia de volta para a fonte de
+  // texto, que não tem o glifo. Os números interpolados nunca contêm
+  // emoji (são dígitos/separadores do locale), então qualquer amostra
+  // serve — só o texto FIXO ao redor do placeholder importa aqui.
+  if (
+    needs(labels.messageCount(1)) ||
+    needs(labels.attachmentCount(1)) ||
+    needs(labels.formatBytes(0)) ||
+    needs(labels.page(1, 1))
+  ) {
+    return true;
   }
 
   for (const block of input.blocks) {
@@ -348,10 +394,10 @@ interface BubbleLayout {
   lines: DrawLine[];
 }
 
-function attachmentTypeLabel(
+export function attachmentTypeLabel(
   contentType: MediaPlanEntry['contentType'],
   labels: PdfLabels,
-  imageNotEmbeddable: boolean
+  isSticker: boolean
 ): string {
   switch (contentType) {
     case 'video':
@@ -360,12 +406,13 @@ function attachmentTypeLabel(
       return labels.attachmentAudio;
     case 'document':
       return labels.attachmentDocument;
+    // Inalcançável hoje: `MediaPlanEntry['contentType']` nunca chega
+    // aqui como 'sticker' (ver `isWebpImage` acima) — mantido só pela
+    // exaustividade do switch sobre o tipo.
     case 'sticker':
       return labels.attachmentSticker;
     case 'image':
-      return imageNotEmbeddable
-        ? labels.attachmentImage
-        : labels.attachmentImage;
+      return isSticker ? labels.attachmentSticker : labels.attachmentImage;
   }
 }
 
@@ -721,9 +768,14 @@ async function buildBubbleLayout(
   if (bubble.attachment) {
     const entry = planByMessage.get(bubble.attachment.messageId);
     const media = entry ? input.media.get(entry.index) : undefined;
+    // Chave de cache é o índice CANÔNICO, não o da própria entrada: uma
+    // duplicata (mesma foto encaminhada/citada de novo) tem `entry.index`
+    // sempre novo — sem isto o cache nunca acerta para ela, e a mesma
+    // imagem é decodificada e embutida de novo como um XObject próprio a
+    // cada ocorrência, em vez de reusar o já embutido (achado de review).
     const image =
       entry && media && media.status === 'ok'
-        ? await embedImage(entry.index, media)
+        ? await embedImage(entry.duplicateOfIndex ?? entry.index, media)
         : null;
 
     if (image) {
@@ -820,14 +872,22 @@ function buildAttachmentCard(
   const cardInner = innerWidth - 12;
 
   const rows: string[] = [
-    attachmentTypeLabel(attachment.contentType, labels, true),
+    attachmentTypeLabel(
+      attachment.contentType,
+      labels,
+      isWebpImage(media?.bytes ?? null)
+    ),
     attachment.displayName,
   ];
 
   const statusLabel = mediaStatusLabel(media, labels);
   if (statusLabel) {
     rows.push(statusLabel);
-  } else if (media && media.byteLength > 0) {
+  } else if (media) {
+    // `byteLength` pode ser 0 num download bem-sucedido de um objeto
+    // genuinamente vazio (nenhum dos três caminhos de fetch impõe um
+    // piso mínimo) — sem este `else if` cobrindo status 'ok' inteiro, um
+    // anexo de 0 byte não mostrava NENHUMA linha de tamanho, nem "0 B".
     rows.push(labels.formatBytes(media.byteLength));
   }
 

@@ -24,9 +24,14 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { chunkArray } from '@/lib/array';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import { decrypt } from '@/lib/whatsapp/encryption';
-import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api';
+import {
+  downloadMedia,
+  getMediaUrl,
+  MetaApiError,
+} from '@/lib/whatsapp/meta-api';
 import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
 import type { MediaPlanEntry } from './media-plan';
@@ -75,22 +80,23 @@ function emptyResult(index: number, status: MediaFetchStatus): FetchedMedia {
   return { index, status, bytes: null, mimeType: null, byteLength: 0 };
 }
 
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
-
 /**
  * Token do canal, resolvido UMA vez por canal e memoizado como PROMESSA
  * — não como valor. Com 6 downloads em voo, memoizar o valor deixaria os
  * 6 primeiros de um mesmo canal resolverem a config em paralelo; a
  * promessa faz o segundo em diante aguardar o primeiro.
  *
- * A falha também é memoizada: um canal desconectado não pode custar uma
- * consulta (e uma exceção) por anexo.
+ * A falha só é memoizada quando é PERMANENTE (`ChannelNotConfiguredError`
+ * — canal desconectado, sem credencial: não muda no meio da exportação).
+ * Uma falha TRANSITÓRIA (timeout do Supabase resolvendo
+ * `resolveCloudConfig`, um `decrypt()` pontual) remove a própria entrada
+ * do cache antes de devolver `null` — achado de review: memoizar
+ * qualquer exceção fazia o primeiro anexo de um canal com um hiccup
+ * pontual "envenenar" todos os anexos seguintes do mesmo canal pelo
+ * resto da exportação inteira, mesmo que uma nova tentativa fosse
+ * funcionar. Chamadas concorrentes ao MESMO lote ainda compartilham a
+ * promessa (o propósito original da memoização por promessa); só a
+ * PRÓXIMA chamada, de um lote seguinte, tenta de novo.
  */
 class ChannelTokenCache {
   private readonly pending = new Map<string, Promise<string | null>>();
@@ -111,6 +117,7 @@ class ChannelTokenCache {
   }
 
   private async resolve(channelId: string | null): Promise<string | null> {
+    const key = channelId ?? '';
     try {
       const { config } = await resolveCloudConfig(
         this.supabase,
@@ -126,9 +133,12 @@ class ChannelTokenCache {
         );
         return null;
       }
-      // Segredo indecifrável tem o mesmo efeito prático de canal sem
-      // credencial: nenhuma mídia daquele número é baixável.
-      console.error('[conversation-export] token resolution failed:', err);
+      // Transitório: não fica memoizado (ver comentário da classe).
+      this.pending.delete(key);
+      console.error(
+        '[conversation-export] token resolution failed, will retry on next attachment:',
+        err
+      );
       return null;
     }
   }
@@ -161,6 +171,27 @@ async function fetchFromStorage(
   };
 }
 
+/**
+ * Classifica a falha do caminho `proxy` entre "esta mídia específica
+ * sumiu" (`missing`, D-6 — a Meta apaga mídia recebida bem antes do
+ * prazo documentado) e "algo sistêmico deu errado" (`error` — token
+ * revogado, rate limit, 5xx da Meta, rede).
+ *
+ * Achado de review: a versão anterior tratava QUALQUER exceção como
+ * `missing`, então um token revogado no meio da exportação fazia todo
+ * anexo restante daquele canal sair como "mídia expirada" no PDF e no
+ * manifesto — indistinguível de perda de dado real, quando na verdade
+ * era uma falha só nossa/da Meta que uma nova tentativa resolveria.
+ * Só 404 é `missing` de verdade; qualquer outro status (401/403/429/5xx)
+ * ou erro sem `MetaApiError` (rede, timeout) vira `error`.
+ */
+function classifyProxyFailure(err: unknown): 'missing' | 'error' {
+  if (err instanceof MetaApiError) {
+    return err.status === 404 ? 'missing' : 'error';
+  }
+  return 'error';
+}
+
 async function fetchFromProxy(
   entry: MediaPlanEntry & { ref: { kind: 'proxy' } },
   limits: MediaFetchLimits,
@@ -170,13 +201,19 @@ async function fetchFromProxy(
   if (!accessToken) return emptyResult(entry.index, 'missing');
 
   try {
+    // Sem timeout aqui, uma CDN travada da Meta prendia o lote inteiro
+    // de `Promise.allSettled` (até `maxDuration`) em vez de falhar só
+    // este anexo — achado de review.
+    const signal = AbortSignal.timeout(MEDIA_FETCH_TIMEOUT_MS);
     const { url, mimeType } = await getMediaUrl({
       mediaId: entry.ref.mediaId,
       accessToken,
+      signal,
     });
     const { buffer, contentType } = await downloadMedia({
       downloadUrl: url,
       accessToken,
+      signal,
     });
 
     if (buffer.length > limits.maxFileBytes) {
@@ -191,14 +228,14 @@ async function fetchFromProxy(
       byteLength: buffer.length,
     };
   } catch (err) {
-    // `missing`, não `error`: a Meta apaga mídia recebida bem antes do
-    // prazo documentado, então uma falha aqui é, na prática, sempre
-    // expiração — e o usuário precisa da exportação do que sobrou.
-    console.warn('[conversation-export] media unavailable at Meta:', {
+    const status = classifyProxyFailure(err);
+    const log = status === 'missing' ? console.warn : console.error;
+    log('[conversation-export] proxy media fetch failed:', {
       index: entry.index,
+      status,
       message: err instanceof Error ? err.message : String(err),
     });
-    return emptyResult(entry.index, 'missing');
+    return emptyResult(entry.index, status);
   }
 }
 

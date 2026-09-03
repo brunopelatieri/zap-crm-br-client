@@ -313,6 +313,125 @@ describe('caminho feliz', () => {
   });
 });
 
+describe('contagem de mídia ausente (regressão de review)', () => {
+  it('vídeo nunca baixado no formato só-PDF NÃO conta como ausente', async () => {
+    // Antes do fix, `missingMedia` usava `plan.length` (TODOS os
+    // anexos, inclusive vídeo/áudio/documento que o formato PDF nunca
+    // tenta baixar por design) em vez de `planToFetch.length` (só o que
+    // foi de fato tentado) — um vídeo virava "mídia ausente" na trilha
+    // de auditoria e no toast do usuário sem nunca ter falhado nada.
+    threadResult = makeThread({
+      messages: [
+        {
+          id: 'm-img',
+          conversation_id: CONVERSATION_ID,
+          sender_type: 'customer',
+          content_type: 'image',
+          media_path: 'acc-1/foto.jpg',
+          status: 'delivered',
+          created_at: '2026-08-12T14:32:00.000Z',
+        },
+        {
+          id: 'm-vid',
+          conversation_id: CONVERSATION_ID,
+          sender_type: 'customer',
+          content_type: 'video',
+          media_path: 'acc-1/video.mp4',
+          status: 'delivered',
+          created_at: '2026-08-12T14:33:00.000Z',
+        },
+      ],
+      total: 2,
+    });
+    vi.mocked(fetchMediaBytes).mockResolvedValueOnce(
+      new Map([
+        [
+          1,
+          {
+            index: 1,
+            status: 'ok',
+            bytes: new Uint8Array([1, 2, 3]),
+            mimeType: 'image/jpeg',
+            byteLength: 3,
+          },
+        ],
+      ])
+    );
+
+    const res = await post(validBody); // validBody.format === 'pdf'
+
+    expect(res.status).toBe(200);
+    // A imagem foi baixada e deu certo; o vídeo nunca foi tentado (é
+    // cartão por design) — nem um nem outro é "ausente".
+    expect(res.headers.get('X-Export-Media-Missing')).toBe('0');
+  });
+
+  it('imagem que falha de verdade no formato só-PDF continua contando como ausente', async () => {
+    threadResult = makeThread({
+      messages: [
+        {
+          id: 'm-img',
+          conversation_id: CONVERSATION_ID,
+          sender_type: 'customer',
+          content_type: 'image',
+          media_path: 'acc-1/foto.jpg',
+          status: 'delivered',
+          created_at: '2026-08-12T14:32:00.000Z',
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(fetchMediaBytes).mockResolvedValueOnce(
+      new Map([
+        [
+          1,
+          {
+            index: 1,
+            status: 'missing',
+            bytes: null,
+            mimeType: null,
+            byteLength: 0,
+          },
+        ],
+      ])
+    );
+
+    const res = await post(validBody);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Export-Media-Missing')).toBe('1');
+  });
+
+  it('maxFileBytes do modo só-PDF não passa de maxTotalBytes', async () => {
+    // Regressão do achado de review: `EMBEDDED_IMAGE_LIMITS` reduzia só
+    // `maxTotalBytes` para 40MB e herdava `maxFileBytes` em 50MB do
+    // padrão — um único arquivo abaixo do teto POR ARQUIVO já estourava
+    // sozinho o orçamento TOTAL do modo, porque a checagem de total só
+    // roda antes de cada download começar, não durante.
+    threadResult = makeThread({
+      messages: [
+        {
+          id: 'm-img',
+          conversation_id: CONVERSATION_ID,
+          sender_type: 'customer',
+          content_type: 'image',
+          media_path: 'acc-1/foto.jpg',
+          status: 'delivered',
+          created_at: '2026-08-12T14:32:00.000Z',
+        },
+      ],
+      total: 1,
+    });
+
+    await post(validBody); // validBody.format === 'pdf'
+
+    const call = vi.mocked(fetchMediaBytes).mock.calls[0];
+    const limits = call[3] as { maxFileBytes: number; maxTotalBytes: number };
+    expect(limits.maxFileBytes).toBeLessThanOrEqual(limits.maxTotalBytes);
+    expect(limits.maxFileBytes).toBe(40 * 1024 * 1024);
+  });
+});
+
 describe('resiliência da trilha', () => {
   it('erro no INSERT não derruba o download', async () => {
     auditInsertResult = { error: { message: 'permission denied' } };

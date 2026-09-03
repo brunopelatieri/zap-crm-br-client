@@ -1169,6 +1169,10 @@ function validateInteractiveHeaderFooter(
 export interface GetMediaUrlArgs {
   mediaId: string;
   accessToken: string;
+  /** Opcional — sem ele, esta chamada nunca expira sozinha (achado de
+   *  review: a exportação de conversa usa isto para não deixar um CDN
+   *  travado da Meta prender o lote inteiro de downloads). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -1178,9 +1182,10 @@ export interface GetMediaUrlArgs {
 export async function getMediaUrl(
   args: GetMediaUrlArgs
 ): Promise<{ url: string; mimeType: string }> {
-  const { mediaId, accessToken } = args;
+  const { mediaId, accessToken, signal } = args;
   const response = await fetch(`${META_API_BASE}/${mediaId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal,
   });
   if (!response.ok) {
     await throwMetaError(response, `Media fetch failed: ${response.status}`);
@@ -1196,6 +1201,8 @@ export async function getMediaUrl(
 export interface DownloadMediaArgs {
   downloadUrl: string;
   accessToken: string;
+  /** Opcional — ver o comentário em `GetMediaUrlArgs`. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -1205,12 +1212,19 @@ export interface DownloadMediaArgs {
 export async function downloadMedia(
   args: DownloadMediaArgs
 ): Promise<{ buffer: Buffer; contentType: string }> {
-  const { downloadUrl, accessToken } = args;
+  const { downloadUrl, accessToken, signal } = args;
   const response = await fetch(downloadUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal,
   });
   if (!response.ok) {
-    throw new Error(`Media download failed: ${response.status}`);
+    // `throwMetaError`, não `throw new Error(...)`: sem isso o chamador
+    // (a exportação de conversa) não tinha como distinguir um 404 real
+    // (mídia expirada) de um 401/429/5xx (falha nossa/da Meta, não
+    // ausência do arquivo) — achado de review. `throwMetaError` já
+    // degrada bem para corpo não-JSON (a CDN de download raramente
+    // devolve o formato de erro da Graph API).
+    await throwMetaError(response, `Media download failed: ${response.status}`);
   }
   const contentType =
     response.headers.get('content-type') || 'application/octet-stream';

@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import {
+  attachmentTypeLabel,
   detectEmbeddableImage,
+  documentNeedsEmojiFont,
+  isWebpImage,
   renderConversationPdf,
   scaleToFit,
   type PdfLabels,
   type PdfRenderInput,
 } from './pdf';
+import { loadGlyphCoverage } from './pdf-fonts';
 import type { FetchedMedia } from './fetch-media';
 import type { MediaPlanEntry } from './media-plan';
 import type { TranscriptBlock, TranscriptBubble } from './model';
@@ -118,6 +122,91 @@ describe('detectEmbeddableImage', () => {
   it('não confia no MIME: bytes vazios, curtos ou nulos devolvem null', () => {
     expect(detectEmbeddableImage(null)).toBeNull();
     expect(detectEmbeddableImage(new Uint8Array([0xff, 0xd8]))).toBeNull();
+  });
+});
+
+describe('isWebpImage', () => {
+  const webp = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+  ]);
+
+  it('reconhece RIFF....WEBP — o formato real dos stickers do WhatsApp', () => {
+    expect(isWebpImage(webp)).toBe(true);
+  });
+
+  it('recusa JPEG, PNG, GIF e bytes curtos/nulos', () => {
+    expect(isWebpImage(PNG_1X1)).toBe(false);
+    expect(
+      isWebpImage(new Uint8Array([0xff, 0xd8, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+    ).toBe(false);
+    expect(isWebpImage(null)).toBe(false);
+    expect(isWebpImage(new Uint8Array([0x52, 0x49]))).toBe(false);
+  });
+
+  it('exige RIFF E WEBP — um RIFF de outro formato (ex.: WAV) não confunde', () => {
+    const wav = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
+    ]); // "RIFF....WAVE"
+    expect(isWebpImage(wav)).toBe(false);
+  });
+});
+
+describe('attachmentTypeLabel', () => {
+  const labels = makeLabels();
+
+  it('sticker do WhatsApp (WebP) rotula como Figurinha, não Imagem', () => {
+    // Regressão do achado de review: `content_type: 'image'` +
+    // `isSticker: true` (detectado pelos bytes reais, ver `isWebpImage`)
+    // é o único caminho por onde um sticker de verdade passa — o
+    // `case 'sticker'` do switch é inalcançável a partir do modelo.
+    expect(attachmentTypeLabel('image', labels, true)).toBe('Figurinha');
+  });
+
+  it('imagem comum (não-WebP) continua rotulada como Imagem', () => {
+    expect(attachmentTypeLabel('image', labels, false)).toBe('Imagem');
+  });
+
+  it('vídeo/áudio/documento não dependem do parâmetro isSticker', () => {
+    expect(attachmentTypeLabel('video', labels, true)).toBe('Vídeo');
+    expect(attachmentTypeLabel('audio', labels, false)).toBe('Áudio');
+    expect(attachmentTypeLabel('document', labels, true)).toBe('Documento');
+  });
+});
+
+describe('documentNeedsEmojiFont — rótulos de função', () => {
+  it('detecta emoji dentro do TEMPLATE de messageCount/attachmentCount/formatBytes/page', async () => {
+    // Regressão do achado de review: a varredura só olhava rótulos
+    // STRING, então um emoji dentro de um dos quatro rótulos de FUNÇÃO
+    // (interpolados direto no cabeçalho/cartão/rodapé, nunca pré-
+    // -assados para dentro de `blocks`) passava batido — a fonte de
+    // emoji não era embutida e o glifo saía em branco no documento.
+    const coverage = await loadGlyphCoverage();
+    const baseInput = makeInput();
+
+    const withEmojiInPageLabel: PdfRenderInput = {
+      ...baseInput,
+      labels: {
+        ...baseInput.labels,
+        page: (current, total) => `📄 ${current}/${total}`,
+      },
+    };
+    expect(documentNeedsEmojiFont(withEmojiInPageLabel, coverage)).toBe(true);
+
+    const withEmojiInMessageCount: PdfRenderInput = {
+      ...baseInput,
+      labels: {
+        ...baseInput.labels,
+        messageCount: (n) => `📨 ${n}`,
+      },
+    };
+    expect(documentNeedsEmojiFont(withEmojiInMessageCount, coverage)).toBe(
+      true
+    );
+  });
+
+  it('sem emoji em rótulo nenhum (string ou função) continua false', async () => {
+    const coverage = await loadGlyphCoverage();
+    expect(documentNeedsEmojiFont(makeInput(), coverage)).toBe(false);
   });
 });
 
@@ -294,7 +383,11 @@ describe('renderConversationPdf — paginação', () => {
     const bytes = await render(makeInput({ blocks, labels }));
     const total = (await PDFDocument.load(bytes)).getPageCount();
 
-    expect(pageSpy).toHaveBeenCalledTimes(total);
+    // `total` chamadas do rodapé em si + 1: `documentNeedsEmojiFont`
+    // sonda `labels.page(1, 1)` uma vez para saber se o TEMPLATE do
+    // rótulo de página contém emoji (regressão coberta em
+    // pdf-fonts.test.ts) — a mesma função de rótulo, chamada de novo.
+    expect(pageSpy).toHaveBeenCalledTimes(total + 1);
     expect(pageSpy).toHaveBeenCalledWith(1, total);
     expect(pageSpy).toHaveBeenCalledWith(total, total);
   });
@@ -357,19 +450,39 @@ describe('renderConversationPdf — anexos', () => {
     expect(bytes.length).toBeGreaterThan(1000);
   });
 
-  it('reusa o mesmo XObject quando a mesma imagem aparece várias vezes', async () => {
+  it('reusa o mesmo XObject quando a mesma imagem é encaminhada em mensagens diferentes', async () => {
+    // Regressão do achado de review: o cache de embed em pdf.ts era
+    // chaveado por `entry.index`, mas CADA entrada do plano — inclusive
+    // as duplicatas de um forward/citação — tem o SEU PRÓPRIO índice
+    // sequencial (`duplicateOfIndex` é um campo à parte apontando pro
+    // índice canônico). Um teste com um único `messageId`/`entry.index`
+    // repetido em 8 bolhas nunca exercitava esse caminho — ele reusava
+    // trivialmente até com o bug. Aqui são 8 MENSAGENS/entradas DE
+    // VERDADE distintas, 7 delas com `duplicateOfIndex` apontando para
+    // a primeira, exatamente como `buildMediaPlan` gera para um
+    // catálogo encaminhado várias vezes.
     const single = await render(withAttachment(okMedia));
 
+    const plan: MediaPlanEntry[] = Array.from({ length: 8 }, (_, i) => ({
+      ...planEntry,
+      index: i + 1,
+      messageId: `m${i + 1}`,
+      duplicateOfIndex: i === 0 ? null : 1,
+    }));
+    const media = new Map<number, FetchedMedia>(
+      plan.map((entry) => [entry.index, { ...okMedia, index: entry.index }])
+    );
+
     const repeated = makeInput({
-      blocks: Array.from({ length: 8 }, () => ({
+      blocks: plan.map((entry) => ({
         kind: 'bubble' as const,
         bubble: bubble({
-          messageId: 'm1',
+          messageId: entry.messageId,
           text: [],
           attachment: {
-            messageId: 'm1',
+            messageId: entry.messageId,
             contentType: 'image',
-            ref: planEntry.ref,
+            ref: entry.ref,
             displayName: 'foto.png',
             caption: null,
             createdAt: '2026-08-12T14:32:00.000Z',
@@ -377,13 +490,14 @@ describe('renderConversationPdf — anexos', () => {
           },
         }),
       })),
-      plan: [planEntry],
-      media: new Map([[1, okMedia]]),
+      plan,
+      media,
       includeZipReferences: true,
     });
     const many = await render(repeated);
 
-    // 8 desenhos da mesma foto não podem custar 8 cópias dos bytes.
+    // 8 desenhos da mesma foto (7 delas duplicatas) não podem custar 8
+    // cópias dos bytes embutidos — cada JPEG/PNG só entra uma vez.
     expect(many.length).toBeLessThan(single.length * 2);
   });
 
@@ -416,6 +530,29 @@ describe('renderConversationPdf — anexos', () => {
 
   it('sem zip, o cartão não cita caminho de midias/', async () => {
     const bytes = await render(withAttachment(okMedia, 'document', false));
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
+
+  it('anexo de 0 byte com download bem-sucedido não derruba o render', async () => {
+    // Regressão do achado de review: `status: 'ok'` com `byteLength: 0`
+    // (download genuinamente vazio, nenhum dos três caminhos de fetch
+    // impõe piso mínimo) não caía no ramo de status de erro NEM no de
+    // tamanho (`byteLength > 0`) — o cartão saía sem nenhuma linha de
+    // tamanho, nem "0 B". A extração de texto do PDF não é viável nesta
+    // pipeline (a fonte embutida codifica os glifos, não ASCII puro),
+    // então este teste garante ao menos que o caminho não lança nem
+    // produz um documento vazio — a asserção de TEXTO ("0 B" aparece")
+    // ficou coberta pela leitura do código em `buildAttachmentCard`.
+    const empty: FetchedMedia = {
+      index: 1,
+      status: 'ok',
+      bytes: new Uint8Array(0),
+      mimeType: 'application/octet-stream',
+      byteLength: 0,
+    };
+    const bytes = await render(withAttachment(empty, 'document'));
+    const reopened = await PDFDocument.load(bytes);
+    expect(reopened.getPageCount()).toBe(1);
     expect(bytes.length).toBeGreaterThan(1000);
   });
 });

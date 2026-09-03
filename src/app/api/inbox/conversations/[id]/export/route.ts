@@ -60,11 +60,21 @@ const UUID_RE =
 /** D-9: uma exportação pode custar 100 MB de egresso do Storage. */
 const RATE_LIMIT = { limit: 3, windowMs: 600_000 };
 
-/** D-5: no formato "só PDF" nada vai para o zip, então só as imagens
- *  que serão embutidas em linha são baixadas. */
+/**
+ * D-5: no formato "só PDF" nada vai para o zip, então só as imagens
+ * que serão embutidas em linha são baixadas.
+ *
+ * `maxFileBytes` também é reduzido para bater com `maxTotalBytes`
+ * (achado de review): sem isto, um único arquivo dentro do teto padrão
+ * de 50MB por arquivo — mas acima do teto de 40MB deste modo — baixava
+ * inteiro e sozinho já estourava o orçamento que `maxTotalBytes` existe
+ * para impor, já que a checagem do total só roda ANTES de cada
+ * download, não durante.
+ */
 const EMBEDDED_IMAGE_LIMITS = {
   ...DEFAULT_MEDIA_FETCH_LIMITS,
   maxTotalBytes: 40 * 1024 * 1024,
+  maxFileBytes: 40 * 1024 * 1024,
 };
 
 interface ParsedExportRequest {
@@ -245,7 +255,12 @@ export async function POST(
   }
 
   const okMedia = [...media.values()].filter((m) => m.status === 'ok');
-  const missingMedia = plan.length - okMedia.length;
+  // `planToFetch.length`, não `plan.length` (achado de review): no
+  // formato "só PDF", vídeo/áudio/documento nunca são baixados — viram
+  // cartão por design (passo 8) — e contá-los contra `plan.length`
+  // inteiro os apontava como "mídia ausente" na trilha de auditoria e no
+  // toast do usuário, quando na verdade nunca foram sequer tentados.
+  const missingMedia = planToFetch.length - okMedia.length;
 
   const periodLabel =
     from && to

@@ -27,6 +27,7 @@ import type {
   Message,
   MessageReaction,
 } from '@/types';
+import { chunkArray } from '@/lib/array';
 import type { ThreadExportData } from './model';
 
 export interface ThreadExportScope {
@@ -56,14 +57,6 @@ type ConversationRow = Omit<Conversation, 'contact' | 'channel'> & {
   contact: Contact | null;
   channel: Channel | null;
 };
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
 
 /** Pagina por `.range()` até o lote vir incompleto. `makeQuery` PRECISA
  *  de um `.order()` determinístico antes do `.range()` — OFFSET sem

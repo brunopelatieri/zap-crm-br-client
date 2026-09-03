@@ -7,17 +7,30 @@ vi.mock('@/lib/whatsapp/cloud-channels', () => ({
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: vi.fn((value: string) => `plain:${value}`),
 }));
-vi.mock('@/lib/whatsapp/meta-api', () => ({
-  getMediaUrl: vi.fn(),
-  downloadMedia: vi.fn(),
-}));
+vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => {
+  // `MetaApiError` real (não mockada): `classifyProxyFailure` faz
+  // `instanceof MetaApiError` para distinguir 404 (mídia expirada) de
+  // qualquer outro status (falha transitória) — precisa da classe de
+  // verdade, não de um stub.
+  const actual =
+    await importOriginal<typeof import('@/lib/whatsapp/meta-api')>();
+  return {
+    ...actual,
+    getMediaUrl: vi.fn(),
+    downloadMedia: vi.fn(),
+  };
+});
 vi.mock('@/lib/webhooks/ssrf', () => ({
   isDeliverableUrl: vi.fn(async () => true),
 }));
 
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
-import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api';
+import {
+  downloadMedia,
+  getMediaUrl,
+  MetaApiError,
+} from '@/lib/whatsapp/meta-api';
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
 import {
   DEFAULT_MEDIA_FETCH_LIMITS,
@@ -180,6 +193,9 @@ describe('fetchMediaBytes — origem proxy (Meta)', () => {
     expect(getMediaUrl).toHaveBeenCalledWith({
       mediaId: 'xyz',
       accessToken: 'plain:cipher-b',
+      // Timeout por anexo (achado de review): sem ele, uma CDN travada
+      // da Meta prendia o lote inteiro em vez de falhar só este item.
+      signal: expect.any(AbortSignal),
     });
     expect(result.get(1)?.status).toBe('ok');
     expect(result.get(1)?.mimeType).toBe('audio/ogg');
@@ -205,13 +221,13 @@ describe('fetchMediaBytes — origem proxy (Meta)', () => {
     expect(getMediaUrl).not.toHaveBeenCalled();
   });
 
-  it('mídia expirada na Meta vira missing (D-6), não error', async () => {
+  it('mídia expirada na Meta (404 real) vira missing (D-6), não error', async () => {
     vi.mocked(resolveCloudConfig).mockResolvedValue({
       channel: {} as never,
       config: { access_token: 'cipher' } as never,
     });
     vi.mocked(getMediaUrl).mockRejectedValue(
-      new Error('Media fetch failed: 404')
+      new MetaApiError('Media fetch failed', 404, null)
     );
 
     const result = await fetchMediaBytes(
@@ -226,6 +242,133 @@ describe('fetchMediaBytes — origem proxy (Meta)', () => {
     );
 
     expect(result.get(1)?.status).toBe('missing');
+  });
+
+  it('token revogado (401) vira error, NÃO missing — não é a mesma coisa que expiração', async () => {
+    // Regressão do achado de review: antes, QUALQUER exceção do
+    // caminho `proxy` virava `missing`, então um token revogado no meio
+    // da exportação fazia todo anexo do canal sair como "mídia
+    // expirada" — indistinguível de perda de dado real.
+    vi.mocked(resolveCloudConfig).mockResolvedValue({
+      channel: {} as never,
+      config: { access_token: 'cipher' } as never,
+    });
+    vi.mocked(getMediaUrl).mockRejectedValue(
+      new MetaApiError('Invalid OAuth access token', 401, 190)
+    );
+
+    const result = await fetchMediaBytes(
+      makeSupabase({}),
+      ACCOUNT_ID,
+      [
+        planEntry({
+          ref: { kind: 'proxy', url: '/api/whatsapp/media/x', mediaId: 'x' },
+        }),
+      ],
+      limits
+    );
+
+    expect(result.get(1)?.status).toBe('error');
+  });
+
+  it('rate limit (429) vira error, NÃO missing', async () => {
+    vi.mocked(resolveCloudConfig).mockResolvedValue({
+      channel: {} as never,
+      config: { access_token: 'cipher' } as never,
+    });
+    vi.mocked(getMediaUrl).mockResolvedValue({
+      url: 'https://lookaside.meta/x',
+      mimeType: 'image/jpeg',
+    });
+    vi.mocked(downloadMedia).mockRejectedValue(
+      new MetaApiError('Application request limit reached', 429, 4)
+    );
+
+    const result = await fetchMediaBytes(
+      makeSupabase({}),
+      ACCOUNT_ID,
+      [
+        planEntry({
+          ref: { kind: 'proxy', url: '/api/whatsapp/media/x', mediaId: 'x' },
+        }),
+      ],
+      limits
+    );
+
+    expect(result.get(1)?.status).toBe('error');
+  });
+
+  it('falha de rede (sem MetaApiError) vira error, NÃO missing', async () => {
+    vi.mocked(resolveCloudConfig).mockResolvedValue({
+      channel: {} as never,
+      config: { access_token: 'cipher' } as never,
+    });
+    vi.mocked(getMediaUrl).mockRejectedValue(new Error('fetch failed'));
+
+    const result = await fetchMediaBytes(
+      makeSupabase({}),
+      ACCOUNT_ID,
+      [
+        planEntry({
+          ref: { kind: 'proxy', url: '/api/whatsapp/media/x', mediaId: 'x' },
+        }),
+      ],
+      limits
+    );
+
+    expect(result.get(1)?.status).toBe('error');
+  });
+
+  it('falha TRANSITÓRIA ao resolver o token não envenena o canal para o próximo anexo', async () => {
+    // Regressão do achado de review: o cache memoizava por PROMESSA
+    // qualquer resultado — inclusive uma falha pontual (timeout do
+    // Supabase, p.ex.) — e a mantinha pelo resto da exportação. O
+    // primeiro anexo de um canal com um hiccup transitório derrubava
+    // TODOS os anexos seguintes do mesmo canal como "ausente", mesmo
+    // que uma nova tentativa fosse funcionar.
+    //
+    // `concurrency: 1` força os dois anexos do MESMO canal em lotes
+    // SEPARADOS e sequenciais dentro de uma única chamada a
+    // `fetchMediaBytes` — é exatamente o cenário "primeiro lote falha
+    // transitoriamente, próximo lote tenta de novo".
+    vi.mocked(resolveCloudConfig)
+      .mockRejectedValueOnce(new Error('timeout pontual do Supabase'))
+      .mockResolvedValueOnce({
+        channel: {} as never,
+        config: { access_token: 'cipher' } as never,
+      });
+    vi.mocked(getMediaUrl).mockResolvedValue({
+      url: 'https://lookaside.meta/x',
+      mimeType: 'image/jpeg',
+    });
+    vi.mocked(downloadMedia).mockResolvedValue({
+      buffer: Buffer.alloc(4),
+      contentType: 'image/jpeg',
+    });
+
+    const result = await fetchMediaBytes(
+      makeSupabase({}),
+      ACCOUNT_ID,
+      [
+        planEntry({
+          index: 1,
+          messageId: 'm1',
+          channelId: 'channel-a',
+          ref: { kind: 'proxy', url: '/api/whatsapp/media/x', mediaId: 'x' },
+        }),
+        planEntry({
+          index: 2,
+          messageId: 'm2',
+          channelId: 'channel-a',
+          ref: { kind: 'proxy', url: '/api/whatsapp/media/y', mediaId: 'y' },
+        }),
+      ],
+      { ...limits, concurrency: 1 }
+    );
+
+    expect(result.get(1)?.status).toBe('missing');
+    expect(result.get(2)?.status).toBe('ok');
+    expect(resolveCloudConfig).toHaveBeenCalledTimes(2);
   });
 
   it('resolve a credencial uma vez por canal, mesmo com vários anexos', async () => {

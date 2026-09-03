@@ -22,6 +22,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Contact } from '@/types';
 import type { ChannelType } from '@/lib/channels/types';
+import { chunkArray } from '@/lib/array';
 import { resolveSessionWindow } from '@/lib/channels/session-window';
 import { planContactQuery } from './contact-filter-query';
 import type { ContactExportFieldId } from './export-fields';
@@ -51,14 +52,6 @@ interface FetchContactsForExportResult {
   truncated: boolean;
   /** Total do escopo — usado pela rota na mensagem de erro do 413. */
   total: number;
-}
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
 }
 
 /**
