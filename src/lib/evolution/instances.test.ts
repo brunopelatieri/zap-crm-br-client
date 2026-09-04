@@ -99,7 +99,7 @@ vi.mock('@/lib/supabase/admin', () => ({
   supabaseAdmin: () => currentDb.client,
 }));
 
-import { bindChannelToPhone } from './instances';
+import { bindChannelToPhone, listEvolutionInstances } from './instances';
 
 const INPUT = {
   accountId: 'acct-1',
@@ -265,5 +265,125 @@ describe('identifier já correto', () => {
     await bindChannelToPhone(INPUT);
 
     expect(opsFor('channels', 'update')).toHaveLength(0);
+  });
+});
+
+describe('listEvolutionInstances — SPEC 069 §6.7 (F9)', () => {
+  /** Fake mínimo com `.rpc()` — a cascata de limites usa a RPC de
+   *  conta, o resto da leitura são `.select()` comuns. */
+  function makeListDb(opts: {
+    instanceRow: Record<string, unknown>;
+    channelRow: Record<string, unknown>;
+    accountLimits?: Record<string, unknown>;
+  }) {
+    return {
+      rpc: (fn: string) => {
+        if (fn === 'account_effective_limits') {
+          return Promise.resolve({
+            data: opts.accountLimits ?? {},
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: null, error: null });
+      },
+      from: (table: string) => {
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: () => chain,
+          in: () => chain,
+          order: () => chain,
+          maybeSingle: () => {
+            if (table === 'evolution_instances') {
+              return Promise.resolve({ data: opts.instanceRow, error: null });
+            }
+            return Promise.resolve({ data: null, error: null });
+          },
+          then: (resolve: (v: unknown) => unknown) => {
+            if (table === 'evolution_instances') {
+              return Promise.resolve({
+                data: [opts.instanceRow],
+                error: null,
+              }).then(resolve);
+            }
+            if (table === 'channels') {
+              return Promise.resolve({
+                data: [opts.channelRow],
+                error: null,
+              }).then(resolve);
+            }
+            return Promise.resolve({ data: null, error: null }).then(resolve);
+          },
+        };
+        return chain;
+      },
+    };
+  }
+
+  it('traz os switches, o teto de captação e os limites resolvidos com o nível de origem', async () => {
+    currentDb = {
+      client: makeListDb({
+        instanceRow: {
+          id: 'inst-1',
+          channel_id: 'chan-1',
+          connected_phone: '5511900000001',
+          connected_jid: '5511900000001@s.whatsapp.net',
+          last_qr_at: null,
+          created_at: '2026-01-01T00:00:00Z',
+          check_enabled: true,
+          harvest_enabled: false,
+          harvest_max_contacts: null,
+          harvested_count: 0,
+        },
+        channelRow: {
+          id: 'chan-1',
+          name: 'Comercial',
+          status: 'connected',
+          status_detail: null,
+          is_default: false,
+        },
+        accountLimits: { evolution_cold_send_per_day: 150 },
+      }),
+    } as unknown as typeof currentDb;
+
+    const [summary] = await listEvolutionInstances('acct-1');
+
+    expect(summary.checkEnabled).toBe(true);
+    expect(summary.harvestEnabled).toBe(false);
+    expect(summary.harvestMaxContacts).toBeNull();
+    expect(summary.limits.coldSendPerDay).toEqual({
+      value: 150,
+      level: 'account',
+    });
+    expect(summary.limits.checkPerDay).toEqual({ value: 300, level: 'code' });
+    expect(summary.limits.harvestMaxPerInstance.hardCap).toBe(2000);
+  });
+
+  it('canal órfão (apagado fora do fluxo normal) é omitido, não derruba a lista', async () => {
+    currentDb = {
+      client: makeListDb({
+        instanceRow: {
+          id: 'inst-1',
+          channel_id: 'chan-orfa',
+          connected_phone: null,
+          connected_jid: null,
+          last_qr_at: null,
+          created_at: '2026-01-01T00:00:00Z',
+          check_enabled: false,
+          harvest_enabled: false,
+          harvest_max_contacts: null,
+          harvested_count: 0,
+        },
+        channelRow: {
+          id: 'chan-outro',
+          name: 'x',
+          status: 'connected',
+          status_detail: null,
+          is_default: false,
+        },
+      }),
+    } as unknown as typeof currentDb;
+
+    const result = await listEvolutionInstances('acct-1');
+    expect(result).toEqual([]);
   });
 });

@@ -125,6 +125,12 @@ describe('checkColdSend', () => {
   it('canal QR, contato nunca escreveu: frio, dentro do teto', async () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const { client } = makeDb([
+      // SPEC 069 F2: `checkColdSend` resolve os tetos pela cascata antes
+      // de avaliar, e o nível de instância é uma leitura de
+      // `evolution_instances.limit_overrides`. Sem override, a cascata
+      // desce para o `.env`/padrão de código — que são exatamente os
+      // valores que este teste já esperava.
+      { data: null }, // evolution_instances.limit_overrides
       { count: 0 }, // last24h
       { count: 0 }, // lastHour
       { data: null }, // lastColdSendAt
@@ -145,6 +151,7 @@ describe('checkColdSend', () => {
   it('canal QR sobre o teto diário: nega com o motivo certo', async () => {
     const now = new Date('2026-08-14T12:00:00Z');
     const { client } = makeDb([
+      { data: null }, // evolution_instances.limit_overrides (cascata, F2)
       { count: COLD_SEND_DEFAULTS.perDay }, // last24h já no teto
       { count: 0 },
       { data: null },

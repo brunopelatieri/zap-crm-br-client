@@ -19,26 +19,45 @@
  *
  * `instances` — consumo por instância (SPEC 049 §6.2, F6.1)
  *
- *   Os cinco números acima descrevem a POLÍTICA; `instances` descreve o
- *   CONSUMO — o que a aba WhatsApp QRCode (F3) precisa para desenhar a
- *   barra e o selo de aquecimento. Só canais `whatsapp_qr`: é o único
- *   tipo onde o teto se aplica (a Meta já regula o resto).
+ *   Os cinco números acima descrevem a POLÍTICA da CONTA — o que vale
+ *   para uma instância hipotética sem override próprio, usado onde
+ *   ainda não há canal escolhido (o aviso do construtor de automações).
+ *   `instances` descreve o CONSUMO por canal, já com o override daquele
+ *   canal aplicado quando existir — o que a aba WhatsApp QRCode (F3)
+ *   precisa para desenhar a barra e o selo de aquecimento. Só canais
+ *   `whatsapp_qr`: é o único tipo onde o teto se aplica (a Meta já
+ *   regula o resto).
+ *
+ * ✅ Correção (SPEC 069, code review): esta rota resolvia os tetos só
+ * pelo `.env` (`readColdSendLimits`, níveis 2/3), enquanto o ENVIO em
+ * si (`checkColdSend`, `cold-send-wiring.ts`) já percorre a cascata de
+ * quatro níveis (instância → conta → `.env` → código, F2). Um override
+ * de instância ou de conta feito pelo dono no painel de limites por
+ * canal mudava o que era de fato aplicado no envio, mas esta tela
+ * continuava mostrando o número antigo — o selo "aquecendo" e o
+ * restante do dia podiam discordar do que o próximo envio realmente
+ * respeitaria. Trocado para `resolveColdSendLimits`, a mesma função que
+ * `checkColdSend` usa.
  */
 
 import { NextResponse } from 'next/server';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
-import {
-  readColdSendLimits,
-  evaluateColdSend,
-} from '@/lib/channels/cold-send-limit';
+import { evaluateColdSend } from '@/lib/channels/cold-send-limit';
+import { resolveColdSendLimits } from '@/lib/channels/cold-send-resolve';
 import { loadColdSendUsage } from '@/lib/channels/cold-send-usage';
+import { createLimitsCache } from '@/lib/limits/load';
 
 export async function GET() {
   try {
     const ctx = await requireRole('viewer');
+    const cache = createLimitsCache();
 
-    const limits = readColdSendLimits();
+    const { limits } = await resolveColdSendLimits(
+      ctx.supabase,
+      { accountId: ctx.accountId },
+      cache
+    );
 
     const { data: channels } = await ctx.supabase
       .from('channels')
@@ -49,8 +68,15 @@ export async function GET() {
     const instances = await Promise.all(
       ((channels ?? []) as { id: string; name: string; status: string }[]).map(
         async (channel) => {
-          const usage = await loadColdSendUsage(ctx.supabase, channel.id);
-          const decision = evaluateColdSend(limits, usage);
+          const [{ limits: channelLimits }, usage] = await Promise.all([
+            resolveColdSendLimits(
+              ctx.supabase,
+              { accountId: ctx.accountId, channelId: channel.id },
+              cache
+            ),
+            loadColdSendUsage(ctx.supabase, channel.id),
+          ]);
+          const decision = evaluateColdSend(channelLimits, usage);
           return {
             channelId: channel.id,
             name: channel.name,

@@ -15,7 +15,7 @@ import {
   formatPlanPrice,
   planChangeErrorKey,
 } from '@/lib/plans/format';
-import { FEATURE_KEYS, QUOTA_KEYS } from '@/lib/plans/types';
+import { FEATURE_KEYS, USAGE_QUOTA_KEYS } from '@/lib/plans/types';
 import type { PlanCatalogEntry } from '@/hooks/use-account-plan';
 import { PlanCycleDialog } from './plan-cycle-dialog';
 
@@ -188,7 +188,7 @@ export function PlanCatalog({
             </CardHeader>
             <CardContent className="flex flex-1 flex-col gap-3">
               <ul className="flex flex-col gap-1.5 text-sm">
-                {QUOTA_KEYS.map((key) => (
+                {USAGE_QUOTA_KEYS.map((key) => (
                   <li
                     key={key}
                     className="text-muted-foreground flex justify-between gap-2"

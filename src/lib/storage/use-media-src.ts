@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { resolveMediaRef } from './media-url';
+import { resolveMediaRef, type PrivateMediaBucket } from './media-url';
 import { signMediaUrl } from './sign-media-client';
 
 /**
@@ -40,7 +40,10 @@ const deadProxyMedia = new Set<string>();
 
 export function useMediaSrc(
   url: string | null | undefined,
-  path?: string | null
+  path?: string | null,
+  /** `chat-media` por padrão — passe `'contact-avatars'` para o avatar
+   *  de contato (SPEC 069 D-12). */
+  bucket?: PrivateMediaBucket
 ) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -54,7 +57,7 @@ export function useMediaSrc(
     setSrc(null);
 
     async function load() {
-      const ref = resolveMediaRef(url, path);
+      const ref = resolveMediaRef(url, path, bucket);
 
       if (ref.kind === 'none') {
         if (!cancelled) setLoading(false);
@@ -111,7 +114,7 @@ export function useMediaSrc(
       cancelled = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [url, path]);
+  }, [url, path, bucket]);
 
   return { src, loading, error };
 }

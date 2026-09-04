@@ -29,6 +29,24 @@
  * Idempotente: se `contact_identities` já tem uma linha pra este
  * contato neste canal, não bate `/user/check` de novo.
  *
+ * 🔴 **Achado da SPEC 069 F3 (2026-09-03): este módulo nunca extraiu o
+ * LID de verdade em produção.** O parser original cobria dois formatos
+ * hipotéticos para `/user/check` (array cru de objetos planos, ou um
+ * objeto único) — nenhum dos dois é o que o servidor realmente devolve.
+ * Medido contra `go.local.ia.br`: `{"data":{"Users":[{Query,
+ * IsInWhatsapp,JID,RemoteJID,LID,VerifiedName}]},"message":"success"}`.
+ * Com o parser antigo, `Object.values({Users:[...]})` produzia UM valor
+ * — o próprio array `Users` — e `asRecord()` o rejeitava por ser array,
+ * então a função sempre devolvia `null`. Ou seja: toda vez que o
+ * gatilho deste módulo disparou desde a SPEC 048, o LID nunca foi
+ * gravado, e o backfill que o cabeçalho acima descreve nunca aconteceu
+ * de verdade — o problema de produção que ele existe para fechar
+ * ("remetente só identificável por LID sem vínculo conhecido") pode
+ * muito bem ainda estar ocorrendo. Corrigido reaproveitando o parser
+ * compartilhado de `user.ts` (`checkWhatsappUsers`/`matchCheckResult`),
+ * que já cobre a forma real medida — ver o cabeçalho daquele módulo
+ * para os cinco achados completos.
+ *
  * ⚠️ Isso pressupõe que o LID de um contato, uma vez aprendido, nunca
  * muda — o SPEC 048 §6.4 não afirma isso explicitamente, e o schema
  * (PK em `account_id, channel_type, external_id`, migração 056) não
@@ -48,9 +66,8 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { evolutionRequest, unwrap } from './client';
 import { readEvolutionConfig } from './config';
-import { asRecord, pickString } from './payload';
+import { checkWhatsappUsers, matchCheckResult } from './user';
 
 export async function ensureContactIdentity(params: {
   accountId: string;
@@ -89,13 +106,9 @@ export async function ensureContactIdentity(params: {
       .maybeSingle();
     if (existing) return;
 
-    const raw = await evolutionRequest(config, '/user/check', {
-      method: 'POST',
-      key: instanceToken,
-      body: { number: [phone] },
-    });
-
-    const lid = extractLidFromUserCheck(raw);
+    const results = await checkWhatsappUsers(config, instanceToken, [phone]);
+    const matched = matchCheckResult(results, phone);
+    const lid = matched?.lid ?? null;
     if (!lid) return;
 
     const { error } = await db.from('contact_identities').upsert(
@@ -116,43 +129,4 @@ export async function ensureContactIdentity(params: {
   } catch (err) {
     console.error('[evolution] LID backfill failed:', err);
   }
-}
-
-/**
- * `/user/check` não fez parte da sondagem de mensageria da F0 — o
- * exemplo em SPEC 048 §1.2 mostra um objeto plano (`{Query,JID,LID,…}`)
- * para uma consulta; um array por número (mesma forma de `/user/info`)
- * é a alternativa mais provável quando o body pede `number: [...]`.
- * Aceita as duas sem lançar.
- *
- * O envelope `{data:...}` eventual usa `unwrap()` de `client.ts` — o
- * mesmo desembrulho usado no resto do domínio Evolution — em vez de
- * reimplementar a checagem aqui. `unwrap()` devolve `{}` pra array cru,
- * por isso o caso array é tratado à parte, antes.
- */
-function extractLidFromUserCheck(raw: unknown): string | null {
-  const tryOne = (v: unknown): string | null => {
-    const rec = asRecord(v);
-    if (!rec) return null;
-    return pickString(rec, 'LID', 'lid');
-  };
-
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      const lid = tryOne(item);
-      if (lid) return lid;
-    }
-    return null;
-  }
-
-  const data = unwrap(raw);
-  const direct = tryOne(data);
-  if (direct) return direct;
-
-  // Mapa chaveado por JID/telefone (forma de /user/info — R3).
-  for (const value of Object.values(data)) {
-    const lid = tryOne(value);
-    if (lid) return lid;
-  }
-  return null;
 }

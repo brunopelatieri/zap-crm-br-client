@@ -32,12 +32,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
-  readColdSendLimits,
   isColdSend,
   evaluateColdSend,
   describeDenial,
   type ColdSendDecision,
 } from './cold-send-limit';
+import { resolveColdSendLimits } from './cold-send-resolve';
+import type { LimitsCache } from '@/lib/limits/load';
 import { loadColdSendUsage } from './cold-send-usage';
 import { can } from './capabilities';
 import type { ChannelType } from './types';
@@ -64,16 +65,35 @@ export async function checkColdSend(
   input: {
     channelId: string;
     channelType: ChannelType;
+    /**
+     * Conta dona do canal. Opcional porque nem todo call site a tem em
+     * mãos; sem ela o nível 1a (o teto comprado no plano) não participa
+     * e a cascata resolve por instância, `.env` e padrão de código —
+     * nunca "sem limite". Passe-a sempre que existir: é o que faz o
+     * teto vendido ao cliente valer de fato.
+     */
+    accountId?: string | null;
     /** Última mensagem DO CONTATO nesta conversa; `null` = nunca escreveu. */
     lastInboundAt: Date | null;
   },
-  now: Date = new Date()
+  now: Date = new Date(),
+  /** Cache de um ciclo (SPEC 069 §4.3) — o cron resolve os limites uma
+   *  vez por instância, não uma vez por contato. */
+  cache?: LimitsCache
 ): Promise<ColdSendCheck> {
   if (can(input.channelType, 'sessionWindow24h')) {
     return { applicable: false, cold: false, decision: null };
   }
 
-  const limits = readColdSendLimits();
+  // SPEC 069 F2: os tetos passam a vir da cascata (instância > conta >
+  // .env > código) em vez de direto do `.env`. Sem nada configurado o
+  // resultado é idêntico ao de antes — é o que torna esta troca
+  // invisível para quem não pediu nada.
+  const { limits } = await resolveColdSendLimits(
+    db,
+    { accountId: input.accountId, channelId: input.channelId },
+    cache
+  );
   const cold = isColdSend(input.lastInboundAt, limits, now);
   if (!cold) return { applicable: true, cold: false, decision: null };
 

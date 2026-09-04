@@ -32,8 +32,18 @@
 //   daqui.
 // ============================================================
 
-/** Buckets cujo conteúdo passou a ser privado na migração 040. */
-export const PRIVATE_MEDIA_BUCKETS = ['chat-media', 'flow-media'] as const;
+/**
+ * Buckets privados que passam por este pipeline. `chat-media` e
+ * `flow-media` desde a migração 040; `contact-avatars` desde a 078
+ * (SPEC 069 D-12) — mesmo regime (privado, URL assinada sob demanda),
+ * dono diferente (avatar de contato trazido pela instância QRCode, sem
+ * upload manual).
+ */
+export const PRIVATE_MEDIA_BUCKETS = [
+  'chat-media',
+  'flow-media',
+  'contact-avatars',
+] as const;
 export type PrivateMediaBucket = (typeof PRIVATE_MEDIA_BUCKETS)[number];
 
 /** Prefixo da rota-proxy de mídia recebida (ver o route handler). */
@@ -129,13 +139,20 @@ export type MediaRef =
  */
 export function resolveMediaRef(
   url: string | null | undefined,
-  path?: string | null
+  path?: string | null,
+  /**
+   * O bucket dono de `path` quando ele vem preenchido. Não é
+   * persistido junto da coluna — `chat-media` continua o padrão
+   * (compatibilidade com todo chamador existente, que só passava
+   * `url`/`path`); `contact-avatars` é o segundo dono desde a SPEC 069
+   * D-12 (`contacts.avatar_path`), passado explicitamente por quem
+   * chama (`useMediaSrc(contact.avatar_url, contact.avatar_path,
+   * 'contact-avatars')`).
+   */
+  bucket: PrivateMediaBucket = 'chat-media'
 ): MediaRef {
   if (path) {
-    // O bucket não é persistido junto do path: `chat-media` é o único
-    // que grava em `messages`, e o flow guarda a URL inteira no config
-    // do nó. Se algum dia isso mudar, vira uma coluna a mais.
-    return { kind: 'storage', bucket: 'chat-media', path };
+    return { kind: 'storage', bucket, path };
   }
 
   if (!url) return { kind: 'none' };

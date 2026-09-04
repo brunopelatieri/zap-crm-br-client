@@ -50,6 +50,14 @@ export const EVOLUTION_KEY_SCOPE = {
   '/message/markread': 'instance',
   '/message/presence': 'instance',
   '/message/downloadmedia': 'instance',
+  // Enriquecimento/validação (SPEC 069 F3) — as quatro medidas contra o
+  // servidor real em 2026-09-03 (D-14): as quatro aceitaram o token DA
+  // INSTÂNCIA (não a global), inclusive `/user/contacts`, o que também
+  // é a confirmação empírica que desbloqueia a F7 (D-14 #1).
+  '/user/check': 'instance',
+  '/user/info': 'instance',
+  '/user/avatar': 'instance',
+  '/user/contacts': 'instance',
 } as const satisfies Record<string, EvolutionKeyScope>;
 
 export type EvolutionErrorKind =

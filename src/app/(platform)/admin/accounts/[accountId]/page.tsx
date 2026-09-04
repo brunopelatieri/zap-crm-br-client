@@ -32,6 +32,7 @@ import { PlanUsageBars } from '@/components/plan/plan-usage-bars';
 import { BlockToggle } from '@/components/platform/block-toggle';
 import { ChangePlanDialog } from '@/components/platform/change-plan-dialog';
 import { AccountRetentionPanel } from '@/components/retention/retention-panel';
+import { ChannelLimitsPanel } from '@/components/platform/channel-limits-panel';
 import { Button } from '@/components/ui/button';
 import type { AccountDetail, AccountMember } from '@/lib/platform/accounts';
 import type { PlanUsage } from '@/lib/plans/types';
@@ -228,6 +229,10 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
           que o dono via em Configurações até a 069 e a prévia calculada
           sobre os dados reais dela. */}
       <AccountRetentionPanel accountId={account.accountId} />
+
+      {/* SPEC 069 D-9/F10 — limite de segurança é alavanca comercial;
+          quem configura é o proprietário, aqui, não o cliente. */}
+      <ChannelLimitsPanel accountId={account.accountId} />
 
       <Card>
         <CardHeader>

@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { useMediaSrc } from '@/lib/storage/use-media-src';
 import type { BoardAssignTarget } from '@/lib/inbox/assignment-board';
 import type { BoardCard as BoardCardData } from './use-assignment-board';
 
@@ -54,6 +55,13 @@ export function ConversationCard({
 
   const displayName = contact?.name || contact?.phone || tList('unknown');
   const initial = displayName.charAt(0).toUpperCase();
+  // SPEC 069 D-12/R4: prefere avatar_path assinado sobre avatar_url —
+  // `BOARD_CONVERSATION_SELECT` já traz avatar_path desde a mesma SPEC.
+  const { src: avatarSrc } = useMediaSrc(
+    contact?.avatar_url,
+    contact?.avatar_path,
+    'contact-avatars'
+  );
   const time = conversation.last_message_at
     ? format(new Date(conversation.last_message_at), 'HH:mm')
     : '';
@@ -90,9 +98,9 @@ export function ConversationCard({
       {/* Linha 1: avatar + nome + hora + não lidas + menu */}
       <div className="flex items-center gap-2">
         <span className="bg-muted text-foreground flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold">
-          {contact?.avatar_url ? (
+          {avatarSrc ? (
             <img
-              src={contact.avatar_url}
+              src={avatarSrc}
               alt=""
               className="h-7 w-7 rounded-full object-cover"
             />

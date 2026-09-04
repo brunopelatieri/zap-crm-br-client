@@ -947,7 +947,8 @@
         "reason": {
           "consecutive_failures": "2 falhas de entrega seguidas",
           "meta_error": "A Meta informou que este número não é WhatsApp",
-          "manual": "definido pela equipe"
+          "manual": "definido pela equipe",
+          "qr_check": "checado via a instância WhatsApp QR"
         },
         "since": "desde {when} — {reason}",
         "hint": "Excluído por padrão de disparos futuros. Marque como válido de novo se achar que foi engano.",
@@ -1033,6 +1034,33 @@
       "toastQuotaBlocked": "Limite de contatos atingido ({used}/{limit}). Faça upgrade do plano para importar mais contatos.",
       "toastQuotaPartial": "Seu plano tem espaço para mais {available} contato(s), mas este arquivo tem {total}. Importar os primeiros {available} e parar por aí?",
       "toastQuotaStopped": "Importação interrompida: limite de contatos atingido depois de {count} importados."
+    },
+    "check": {
+      "enqueueLabel": "Verificar estes números no WhatsApp",
+      "enqueueHint": "Pergunta ao WhatsApp se cada número existe — nenhuma mensagem é enviada. Números que não existem são marcados como inválidos.",
+      "enqueueDisabledNoInstance": "Ligue a verificação de números numa instância WhatsApp QRCode conectada primeiro (Configurações → WhatsApp QRCode)",
+      "enqueueQueued": "{count} número enfileirado para verificação",
+      "enqueueQueued_plural": "{count} números enfileirados para verificação",
+      "enqueueEstimate": "no ritmo atual, cerca de {hours}h para terminar",
+      "enqueueInstanceLabel": "Verificar usando",
+      "verifiedAt": "Verificado em {date} via {instance}",
+      "statusInvalidQr": "Não encontrado no WhatsApp",
+      "statusConflict": "O WhatsApp diz que este número existe, mas ele continua marcado como inválido — veja a nota no contato"
+    },
+    "harvested": {
+      "tabLabel": "Importados do telefone",
+      "emptyTitle": "Nenhum contato esperando revisão",
+      "emptyBody": "Quando uma instância WhatsApp QRCode tem a captação de contatos ligada, os números da agenda daquele telefone aparecem aqui para você aprovar.",
+      "lgpdNotice": "Essas pessoas nunca falaram com sua empresa — elas estão na agenda deste telefone. Promover alguém aqui adiciona como contato com consentimento desconhecido; não significa que concordaram em receber marketing.",
+      "promote": "Adicionar como contato",
+      "ignore": "Ignorar",
+      "promoted": "{count} contato adicionado",
+      "promoted_plural": "{count} contatos adicionados",
+      "promoteQuotaError": "{promoted} adicionados, mas o limite de contatos do seu plano bloqueou o resto ({blocked} não adicionados)",
+      "sourceInstance": "De {instance}",
+      "loadFailed": "Falha ao carregar",
+      "actionFailed": "Ação falhou",
+      "loadMore": "Carregar mais"
     },
     "exportModal": {
       "title": "Exportar contatos",
@@ -1338,11 +1366,17 @@
       "sent": "Enviado",
       "failed": "Falhou",
       "streaming": "Em fluxo",
+      "awaiting_check": "Em espera — disparo parcial",
       "pending": "Pendente",
       "delivered": "Entregue",
       "read": "Lida",
       "replied": "Respondido",
       "unknown": "Desconhecido"
+    },
+    "awaitingCheck": {
+      "progress": "{checked}/{total} checados",
+      "nextResume": "Próximo lote quando a cota de checagem renovar",
+      "outsideWindow": "Esperando a janela de envio permitida"
     },
     "sourceFilter": {
       "campaigns": "Campanhas",
@@ -1817,6 +1851,12 @@
         "ab_category_mismatch": "As duas variantes precisam ser da mesma categoria de template.",
         "ab_audience_too_small": "Audiência pequena demais para dividir em dois braços.",
         "channel_unavailable": "O número do WhatsApp usado por este disparo não está disponível agora (desconectado ou removido). Reconecte-o ou escolha outro número e tente novamente."
+      },
+      "checkBeforeSend": {
+        "noAbTest": "Checar antes de disparar não é suportado para testes A/B.",
+        "createError": "Não foi possível criar a campanha: {error}",
+        "enqueueError": "A campanha foi salva, mas enfileirar os números para checagem falhou. Abra-a e tente de novo.",
+        "queuedToast": "Campanha enfileirada — ela vai sair em lotes conforme os números forem verificados."
       },
       "stageError": {
         "template_not_found": "Este template não foi encontrado. Volte e escolha novamente.",
@@ -3136,7 +3176,30 @@
       "deleteWarning": "Isso apaga a instância do servidor e desta conta. As conversas existentes são preservadas como somente leitura e recebem o selo \"canal removido\" — nada é apagado do seu histórico de conversas.",
       "deleteTypeToConfirm": "Digite <bold>{name}</bold> para confirmar",
       "deleteError": "Falha ao excluir instância",
-      "deleteSuccess": "\"{name}\" excluída"
+      "deleteSuccess": "\"{name}\" excluída",
+      "enrichment": {
+        "checkTitle": "Verificar números",
+        "checkDescription": "Antes de checar um contato, pergunta ao WhatsApp se o número existe — nenhuma mensagem é enviada.",
+        "checkRiskWarning": "Checar em massa não é livre de risco: sinaliza interesse ao antispam do WhatsApp como qualquer outro tráfego automatizado. Mantenha o volume baixo num número novo.",
+        "harvestTitle": "Importar contatos deste telefone",
+        "harvestDescription": "Traz a agenda deste telefone para uma fila de triagem — nada é adicionado aos seus contatos até você aprovar.",
+        "harvestCap": "Teto desta instância",
+        "harvestCapPlaceholder": "Herdar o padrão da conta",
+        "harvestCapCeiling": "Teto máximo: {max}",
+        "harvestedCount": "{count} importados até agora",
+        "harvestComplete": "Teto atingido — nenhum contato novo será importado até você aumentá-lo",
+        "notConnected": "Conecte esta instância primeiro",
+        "saveError": "Falha ao salvar",
+        "limitsTitle": "Limites em vigor",
+        "limitColdSendPerDay": "Envios frios / dia",
+        "limitColdSendPerHour": "Envios frios / hora",
+        "limitCheckPerDay": "Checagens / dia",
+        "limitCheckPerHour": "Checagens / hora",
+        "limitFromInstance": "valor próprio",
+        "limitFromAccount": "herdando da conta",
+        "limitFromDefault": "padrão do sistema",
+        "limitBlocked": "bloqueado"
+      }
     },
     "sections": {
       "overview": "Visão geral",
@@ -3629,6 +3692,36 @@
       "intervalNotice": "A varredura roda no máximo uma vez a cada {hours}h.",
       "accountSectionTitle": "Retenção",
       "accountSectionDescription": "A política própria desta conta, por canal. Todo campo deixado em branco cai para o padrão da plataforma e, depois, para o valor do .env do servidor."
+    },
+    "channelLimits": {
+      "title": "Limites de segurança do WhatsApp QRCode",
+      "description": "Até onde esta conta (e, por instância, cada um dos números dela) pode forçar o canal não oficial — envio frio, checagem de número, captação de contatos. Sobrescrever isto é decisão comercial/de segurança, não uma preferência de usuário.",
+      "accountLevel": "Conta",
+      "useDefault": "Usar padrão",
+      "ownValue": "Valor próprio",
+      "blockAxis": "Bloquear este eixo",
+      "hardCapHint": "Teto máximo: {max}",
+      "instanceOverridesWarning": "{count} instância tem valor próprio e não será afetada por isto",
+      "instanceOverridesWarning_plural": "{count} instâncias têm valor próprio e não serão afetadas por isto",
+      "saveSuccess": "Salvo",
+      "saveError": "Falha ao salvar",
+      "aboveHardCap": "Isso está acima do teto máximo de {max}",
+      "belowHardFloor": "Isso está abaixo do piso mínimo de {min}",
+      "instancesTitle": "Overrides por instância",
+      "noInstances": "Esta conta ainda não tem instâncias WhatsApp QRCode.",
+      "axis": {
+        "evolution_cold_send_silence_hours": "Silêncio para contar como frio (h)",
+        "evolution_cold_send_per_hour": "Envios frios / hora",
+        "evolution_cold_send_per_day": "Envios frios / dia",
+        "evolution_cold_send_min_interval_seconds": "Intervalo mín. entre envios frios (s)",
+        "evolution_cold_send_warmup_days": "Aquecimento (dias)",
+        "evolution_check_per_hour": "Checagens de número / hora",
+        "evolution_check_per_day": "Checagens de número / dia",
+        "evolution_check_min_interval_seconds": "Intervalo mín. entre checagens (s)",
+        "evolution_check_batch_size": "Checagens por execução do cron",
+        "evolution_harvest_per_run": "Contatos importados por execução",
+        "evolution_harvest_max_per_instance": "Teto de captação por instância"
+      }
     },
     "notifications": {
       "title": "Notificações",

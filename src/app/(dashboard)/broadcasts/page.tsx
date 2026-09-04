@@ -73,6 +73,7 @@ export default function BroadcastsPage() {
   const router = useRouter();
   const t = useTranslations('Broadcasts.page');
   const tStatus = useTranslations('Broadcasts.status');
+  const tAwaitingCheck = useTranslations('Broadcasts.awaitingCheck');
   const tSource = useTranslations('Broadcasts.sourceFilter');
   const canCreate = useCan('send-messages');
   const channels = useAccountChannels();
@@ -115,8 +116,18 @@ export default function BroadcastsPage() {
   // D-5) — não é uma transição limitada que valha ficar reconsultando
   // a cada 5s como uma campanha 'sending' de verdade é. Só o status
   // real de campanha dispara o polling.
+  //
+  // `awaiting_check` (SPEC 069 R6) ENTRA — ✅ correção de code review:
+  // ao contrário de `streaming`, é transitório (o cron avança a
+  // campanha a cada ciclo, minutos, não meses) e esta lista já mostra
+  // o "checado X de Y" por linha (abaixo); sem pollar, o número fica
+  // congelado até o usuário dar F5, mesmo com a campanha progredindo em
+  // segundo plano.
   const anySending = useMemo(
-    () => broadcasts.some((b) => b.status === 'sending'),
+    () =>
+      broadcasts.some(
+        (b) => b.status === 'sending' || b.status === 'awaiting_check'
+      ),
     [broadcasts]
   );
 
@@ -368,6 +379,17 @@ export default function BroadcastsPage() {
                         )}
                         {tStatus(status.label)}
                       </span>
+                      {/* SPEC 069 R6 — o progresso é o que distingue uma
+                          campanha parada de propósito (esperando cota
+                          de checagem) de uma parecida presa por erro. */}
+                      {broadcast.status === 'awaiting_check' && (
+                        <p className="text-muted-foreground mt-1 text-[10px]">
+                          {tAwaitingCheck('progress', {
+                            checked: broadcast.checked_count ?? 0,
+                            total: broadcast.total_recipients,
+                          })}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground hidden sm:table-cell">
                       {new Date(broadcast.created_at).toLocaleDateString()}

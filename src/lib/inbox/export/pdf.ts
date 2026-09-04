@@ -29,6 +29,7 @@ import {
 import type { FetchedMedia } from './fetch-media';
 import type { MediaPlanEntry } from './media-plan';
 import type { TranscriptBlock, TranscriptBubble } from './model';
+import { detectImageSignature } from '@/lib/image-format';
 import {
   loadExportFonts,
   loadGlyphCoverage,
@@ -130,21 +131,14 @@ export interface PdfRenderInput {
  * Formato realmente embutível pelo `pdf-lib` — só JPEG e PNG (D-3: o
  * byte original vira o stream do PDF, sem recodificar).
  *
- * Decide pelos MAGIC BYTES, não pelo MIME: o MIME vem do bucket, da
- * Meta ou de um header de terceiro e pode mentir; `embedJpg` com bytes
- * que não são JPEG lança e derrubaria a página inteira.
+ * A detecção em si (pelos MAGIC BYTES, nunca pelo MIME — `embedJpg`
+ * com bytes que não são JPEG lança e derrubaria a página inteira) mora
+ * em `@/lib/image-format`, compartilhada com `evolution/avatar.ts`
+ * (achado de code review: as duas tinham a mesma tabela de assinaturas
+ * duplicada). Este nome continua existindo porque é o vocabulário do
+ * módulo de PDF ("embutível"), mas é só um alias.
  */
-export function detectEmbeddableImage(
-  bytes: Uint8Array | null
-): 'jpeg' | 'png' | null {
-  if (!bytes || bytes.length < 8) return null;
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return 'jpeg';
-  }
-  const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (PNG_SIGNATURE.every((byte, i) => bytes[i] === byte)) return 'png';
-  return null;
-}
+export const detectEmbeddableImage = detectImageSignature;
 
 const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46]; // "RIFF"
 const WEBP_FORMAT_SIGNATURE = [0x57, 0x45, 0x42, 0x50]; // "WEBP", offset 8

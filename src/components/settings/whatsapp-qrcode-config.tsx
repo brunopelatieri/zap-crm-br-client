@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RequireRole } from '@/components/auth/require-role';
 import { useAuth } from '@/hooks/use-auth';
@@ -54,6 +55,12 @@ import { SettingsPanelHead } from './settings-panel-head';
 // Tipos — espelham o que as rotas /api/channels/evolution/instances
 // devolvem (src/lib/evolution/instances.ts).
 // ------------------------------------------------------------
+
+/** Um limite resolvido, com o nível de origem (SPEC 069 D-8). */
+interface InstanceLimitView {
+  value: number;
+  level: 'instance' | 'account' | 'env' | 'code';
+}
 
 interface InstanceSummary {
   id: string;
@@ -66,6 +73,18 @@ interface InstanceSummary {
   isDefault: boolean;
   lastQrAt: string | null;
   createdAt: string;
+  /** SPEC 069 R1 — os switches de checagem/captação (migração 078). */
+  checkEnabled: boolean;
+  harvestEnabled: boolean;
+  harvestMaxContacts: number | null;
+  harvestedCount: number;
+  limits: {
+    coldSendPerDay: InstanceLimitView;
+    coldSendPerHour: InstanceLimitView;
+    checkPerDay: InstanceLimitView;
+    checkPerHour: InstanceLimitView;
+    harvestMaxPerInstance: InstanceLimitView & { hardCap: number | null };
+  };
 }
 
 interface LimitStatus {
@@ -320,6 +339,7 @@ export function WhatsappQrcodeConfig() {
               instance={instance}
               coldSendUsage={coldSendUsage[instance.channelId]}
               busy={busyId === instance.id}
+              onEnrichmentSaved={() => void load()}
               onConnect={() => setConnectTarget(instance)}
               onEdit={() => setEditTarget(instance)}
               onDelete={() => setDeleteTarget(instance)}
@@ -369,6 +389,25 @@ export function WhatsappQrcodeConfig() {
             isDefault: false,
             lastQrAt: null,
             createdAt: new Date().toISOString(),
+            // Uma instância recém-criada nasce sem nada disto — os
+            // switches são FALSE de propósito (migração 078, PRD 068
+            // §6.2). `load()` acima já busca os valores reais; este
+            // placeholder só precisa sobreviver até lá.
+            checkEnabled: false,
+            harvestEnabled: false,
+            harvestMaxContacts: null,
+            harvestedCount: 0,
+            limits: {
+              coldSendPerDay: { value: 60, level: 'code' },
+              coldSendPerHour: { value: 12, level: 'code' },
+              checkPerDay: { value: 300, level: 'code' },
+              checkPerHour: { value: 60, level: 'code' },
+              harvestMaxPerInstance: {
+                value: 500,
+                level: 'code',
+                hardCap: 2000,
+              },
+            },
           });
         }}
       />
@@ -429,10 +468,33 @@ const STATUS_DOT: Record<InstanceSummary['status'], string> = {
   disabled: 'bg-muted-foreground',
 };
 
+/** Rótulo + valor de um eixo do bloco "Limites em vigor" (D-8). */
+function LimitRow({ label, view }: { label: string; view: InstanceLimitView }) {
+  const t = useTranslations('Settings.whatsappQrcode.enrichment');
+  const levelKey =
+    view.level === 'instance'
+      ? 'limitFromInstance'
+      : view.level === 'account'
+        ? 'limitFromAccount'
+        : 'limitFromDefault';
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-foreground font-medium">
+        {view.value === 0 ? t('limitBlocked') : view.value}
+        <span className="text-muted-foreground ml-1 font-normal">
+          ({t(levelKey)})
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function InstanceCard({
   instance,
   coldSendUsage,
   busy,
+  onEnrichmentSaved,
   onConnect,
   onEdit,
   onDelete,
@@ -443,6 +505,7 @@ function InstanceCard({
   instance: InstanceSummary;
   coldSendUsage?: ColdSendInstanceUsage;
   busy: boolean;
+  onEnrichmentSaved: () => void;
   onConnect: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -451,8 +514,61 @@ function InstanceCard({
   onReconnect: () => void;
 }) {
   const t = useTranslations('Settings.whatsappQrcode');
+  const tEnrich = useTranslations('Settings.whatsappQrcode.enrichment');
+  const { canEditSettings } = useAuth();
   const isDisabled = instance.status === 'disabled';
   const isConnected = instance.status === 'connected';
+
+  const [savingEnrichment, setSavingEnrichment] = useState(false);
+  const [harvestCapDraft, setHarvestCapDraft] = useState(
+    instance.harvestMaxContacts !== null
+      ? String(instance.harvestMaxContacts)
+      : ''
+  );
+
+  async function patchEnrichment(body: Record<string, unknown>) {
+    setSavingEnrichment(true);
+    try {
+      const res = await fetch(
+        `/api/channels/evolution/instances/${instance.id}/enrichment`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        toast.error(await readError(res, tEnrich('saveError')));
+        return;
+      }
+      onEnrichmentSaved();
+    } catch (err) {
+      console.error('[WhatsappQrcodeConfig] enrichment save error:', err);
+      toast.error(tEnrich('saveError'));
+    } finally {
+      setSavingEnrichment(false);
+    }
+  }
+
+  function commitHarvestCap() {
+    const trimmed = harvestCapDraft.trim();
+    if (trimmed === '') {
+      void patchEnrichment({ harvestMaxContacts: null });
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      setHarvestCapDraft(
+        instance.harvestMaxContacts !== null
+          ? String(instance.harvestMaxContacts)
+          : ''
+      );
+      return;
+    }
+    if (parsed !== instance.harvestMaxContacts) {
+      void patchEnrichment({ harvestMaxContacts: parsed });
+    }
+  }
 
   return (
     <Card>
@@ -560,6 +676,119 @@ function InstanceCard({
               </Button>
             </div>
           </RequireRole>
+        )}
+
+        {!isDisabled && (
+          <div className="border-border space-y-3 border-t pt-3">
+            {canEditSettings ? (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-foreground text-xs font-medium">
+                      {tEnrich('checkTitle')}
+                    </p>
+                    <p className="text-muted-foreground text-[11px]">
+                      {isConnected
+                        ? tEnrich('checkDescription')
+                        : tEnrich('notConnected')}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={instance.checkEnabled}
+                    disabled={
+                      savingEnrichment ||
+                      (!instance.checkEnabled && !isConnected)
+                    }
+                    onCheckedChange={(checked) =>
+                      void patchEnrichment({ checkEnabled: checked })
+                    }
+                  />
+                </div>
+                {instance.checkEnabled && (
+                  <Alert className="border-amber-500/30 bg-amber-500/5 py-2">
+                    <AlertDescription className="text-[11px] text-amber-100/70">
+                      {tEnrich('checkRiskWarning')}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-foreground text-xs font-medium">
+                      {tEnrich('harvestTitle')}
+                    </p>
+                    <p className="text-muted-foreground text-[11px]">
+                      {tEnrich('harvestDescription')}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={instance.harvestEnabled}
+                    disabled={savingEnrichment}
+                    onCheckedChange={(checked) =>
+                      void patchEnrichment({ harvestEnabled: checked })
+                    }
+                  />
+                </div>
+                {instance.harvestEnabled && (
+                  <div className="space-y-1">
+                    <Label className="text-[11px]">
+                      {tEnrich('harvestCap')}
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      className="h-8 text-xs"
+                      placeholder={tEnrich('harvestCapPlaceholder')}
+                      value={harvestCapDraft}
+                      disabled={savingEnrichment}
+                      onChange={(e) => setHarvestCapDraft(e.target.value)}
+                      onBlur={commitHarvestCap}
+                    />
+                    <p className="text-muted-foreground text-[11px]">
+                      {tEnrich('harvestCapCeiling', {
+                        max:
+                          instance.limits.harvestMaxPerInstance.hardCap ?? '—',
+                      })}
+                      {' · '}
+                      {tEnrich('harvestedCount', {
+                        count: instance.harvestedCount,
+                      })}
+                    </p>
+                    {instance.harvestMaxContacts !== null &&
+                      instance.harvestedCount >=
+                        instance.harvestMaxContacts && (
+                        <p className="text-[11px] text-amber-400">
+                          {tEnrich('harvestComplete')}
+                        </p>
+                      )}
+                  </div>
+                )}
+              </>
+            ) : null}
+
+            <div className="space-y-1">
+              <p className="text-muted-foreground text-[11px] font-medium">
+                {tEnrich('limitsTitle')}
+              </p>
+              <LimitRow
+                label={tEnrich('limitColdSendPerDay')}
+                view={instance.limits.coldSendPerDay}
+              />
+              <LimitRow
+                label={tEnrich('limitColdSendPerHour')}
+                view={instance.limits.coldSendPerHour}
+              />
+              <LimitRow
+                label={tEnrich('limitCheckPerDay')}
+                view={instance.limits.checkPerDay}
+              />
+              <LimitRow
+                label={tEnrich('limitCheckPerHour')}
+                view={instance.limits.checkPerHour}
+              />
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

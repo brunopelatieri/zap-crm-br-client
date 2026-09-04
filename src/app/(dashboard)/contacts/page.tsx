@@ -67,6 +67,9 @@ import { CustomFieldsManager } from '@/components/contacts/custom-fields-manager
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { useTranslations } from 'next-intl';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { HarvestedContactsTab } from '@/components/contacts/harvested-contacts-tab';
 
 const PAGE_SIZE = CONTACTS_PAGE_SIZE;
 
@@ -74,7 +77,7 @@ interface ContactWithTags extends Contact {
   tags?: Tag[];
 }
 
-export default function ContactsPage() {
+function ContactsListView() {
   const t = useTranslations('Contacts.page');
   const supabase = createClient();
   const canEdit = useCan('send-messages');
@@ -1042,5 +1045,46 @@ export default function ContactsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Casca fina de abas (SPEC 069 §8 ponto 6): `ContactsListView` acima é
+ * a tela de sempre, intocada — a triagem vive num componente à parte
+ * (`HarvestedContactsTab`) para não misturar o estado das duas telas
+ * (1046 linhas de filtros/seleção/paginação da lista principal não
+ * precisam saber que a triagem existe, e vice-versa). `?tab=harvested`
+ * é o único estado compartilhado, e mora na URL — recarregar a página
+ * com a aba de triagem aberta continua nela.
+ */
+export default function ContactsPage() {
+  const t = useTranslations('Contacts.page');
+  const tHarvested = useTranslations('Contacts.harvested');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tab =
+    searchParams.get('tab') === 'harvested' ? 'harvested' : 'contacts';
+
+  return (
+    <Tabs
+      value={tab}
+      onValueChange={(value) =>
+        router.push(
+          value === 'harvested' ? '/contacts?tab=harvested' : '/contacts'
+        )
+      }
+      className="space-y-6"
+    >
+      <TabsList>
+        <TabsTrigger value="contacts">{t('title')}</TabsTrigger>
+        <TabsTrigger value="harvested">{tHarvested('tabLabel')}</TabsTrigger>
+      </TabsList>
+      <TabsContent value="contacts">
+        <ContactsListView />
+      </TabsContent>
+      <TabsContent value="harvested">
+        <HarvestedContactsTab />
+      </TabsContent>
+    </Tabs>
   );
 }

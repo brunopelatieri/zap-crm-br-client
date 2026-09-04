@@ -724,6 +724,7 @@ export async function sendAndPersistOutbound(input: {
     coldSend = await checkColdSend(db, {
       channelId: ctx.channel.id,
       channelType: ctx.channel.type,
+      accountId,
       lastInboundAt: conv?.last_customer_message_at
         ? new Date(conv.last_customer_message_at)
         : null,

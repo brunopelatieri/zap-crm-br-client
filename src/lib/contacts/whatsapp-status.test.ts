@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createSupabaseMock,
+  hasOp,
   opArgs,
   type MockResult,
   type QueryOp,
 } from '@/lib/audience/supabase-mock';
 
 import {
+  applyQrCheckVerdict,
   detectDeadNumberOnFailure,
   isWhatsappInvalid,
   markWhatsappInvalid,
@@ -178,5 +180,159 @@ describe('detectDeadNumberOnFailure', () => {
     await detectDeadNumberOnFailure(db, { contactId: 'c1', errorMessage: '' });
 
     expect(sawOrder?.[0]).toBe('created_at');
+  });
+});
+
+describe('applyQrCheckVerdict — a Evolution como terceira fonte (SPEC 069 D-2)', () => {
+  function makeContactMock(currentStatus: string) {
+    let selectDone = false;
+    const updates: Record<string, unknown>[] = [];
+    const updateFilters: unknown[][] = [];
+    const mock = createSupabaseMock((table, ops) => {
+      if (table !== 'contacts') return undefined;
+      if (hasOp(ops, 'select') && !selectDone) {
+        selectDone = true;
+        return { data: { whatsapp_status: currentStatus } };
+      }
+      const upd = opArgs(ops, 'update');
+      if (upd) {
+        updates.push(upd[0] as Record<string, unknown>);
+        updateFilters.push(ops.filter((o) => o.fn === 'eq').map((o) => o.args));
+      }
+      return { data: null };
+    });
+    return { ...mock, updates, updateFilters };
+  }
+
+  it('IsInWhatsapp:false + status valid → marca invalid com motivo qr_check E grava proveniência', async () => {
+    const { db, updates } = makeContactMock('valid');
+
+    await applyQrCheckVerdict(db, {
+      contactId: 'c1',
+      channelId: 'chan-1',
+      isInWhatsapp: false,
+    });
+
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).toMatchObject({
+      whatsapp_status: 'invalid',
+      whatsapp_status_reason: 'qr_check',
+    });
+    expect(updates[1]).toMatchObject({
+      whatsapp_checked_channel_id: 'chan-1',
+    });
+    expect(updates[1].whatsapp_checked_at).toEqual(expect.any(String));
+  });
+
+  it('IsInWhatsapp:false + status JÁ invalid → NÃO chama markWhatsappInvalid de novo, só grava proveniência (regra 1: não sobrescreve motivo)', async () => {
+    const { db, updates } = makeContactMock('invalid');
+
+    await applyQrCheckVerdict(db, {
+      contactId: 'c1',
+      channelId: 'chan-1',
+      isInWhatsapp: false,
+    });
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).not.toHaveProperty('whatsapp_status');
+    expect(updates[0]).toMatchObject({ whatsapp_checked_channel_id: 'chan-1' });
+  });
+
+  it('IsInWhatsapp:true + status invalid (outra fonte) → regra 2: NUNCA reverte; regra 3: grava qr_check_conflict', async () => {
+    const { db, updates, updateFilters } = makeContactMock('invalid');
+
+    await applyQrCheckVerdict(db, {
+      contactId: 'c1',
+      channelId: 'chan-1',
+      isInWhatsapp: true,
+    });
+
+    // Dois UPDATEs, não um: proveniência (incondicional) e a nota de
+    // conflito (condicionada no WHERE, não numa variável lida antes —
+    // ver a correção abaixo).
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).not.toHaveProperty('whatsapp_status');
+    expect(updates[0]).not.toHaveProperty('whatsapp_check_note');
+    expect(updates[0]).toMatchObject({ whatsapp_checked_channel_id: 'chan-1' });
+    expect(updates[1]).toEqual({ whatsapp_check_note: 'qr_check_conflict' });
+    expect(updateFilters[1]).toEqual([
+      ['id', 'c1'],
+      ['whatsapp_status', 'invalid'],
+    ]);
+  });
+
+  it('IsInWhatsapp:true + status valid → concordância, sem nota persistida, só proveniência (a corrida vira um WHERE que só casa quem estiver invalid AGORA — achado de code review)', async () => {
+    const { db, updates, updateFilters } = makeContactMock('valid');
+
+    await applyQrCheckVerdict(db, {
+      contactId: 'c1',
+      channelId: 'chan-1',
+      isInWhatsapp: true,
+    });
+
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).not.toHaveProperty('whatsapp_check_note');
+    expect(updates[0]).not.toHaveProperty('whatsapp_status');
+    expect(updates[0]).toMatchObject({ whatsapp_checked_channel_id: 'chan-1' });
+    // O segundo UPDATE é DISPARADO (o código não sabe mais, sem ir ao
+    // banco, se o contato segue `valid`), mas seu WHERE só casa
+    // `whatsapp_status = 'invalid'` — num banco real ele não persiste
+    // nada aqui, e é exatamente essa condição que a asserção prova.
+    expect(updates[1]).toEqual({ whatsapp_check_note: 'qr_check_conflict' });
+    expect(updateFilters[1]).toEqual([
+      ['id', 'c1'],
+      ['whatsapp_status', 'invalid'],
+    ]);
+  });
+
+  it('contato não encontrado — não lança, não grava nada', async () => {
+    const mock = createSupabaseMock((table) => {
+      if (table === 'contacts') return { data: null };
+      return undefined;
+    });
+
+    await expect(
+      applyQrCheckVerdict(mock.db, {
+        contactId: 'c-inexistente',
+        channelId: 'chan-1',
+        isInWhatsapp: true,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it('erro na leitura do contato — não lança', async () => {
+    const mock = createSupabaseMock((table) => {
+      if (table === 'contacts')
+        return { data: null, error: { message: 'boom' } };
+      return undefined;
+    });
+
+    await expect(
+      applyQrCheckVerdict(mock.db, {
+        contactId: 'c1',
+        channelId: 'chan-1',
+        isInWhatsapp: true,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it('erro no UPDATE de proveniência é logado, não lança — best-effort de verdade', async () => {
+    let selectDone = false;
+    const mock = createSupabaseMock((table, ops) => {
+      if (table !== 'contacts') return undefined;
+      if (hasOp(ops, 'select') && !selectDone) {
+        selectDone = true;
+        return { data: { whatsapp_status: 'valid' } };
+      }
+      return { data: null, error: { message: 'boom' } };
+    });
+
+    await expect(
+      applyQrCheckVerdict(mock.db, {
+        contactId: 'c1',
+        channelId: 'chan-1',
+        isInWhatsapp: true,
+      })
+    ).resolves.toBeUndefined();
   });
 });

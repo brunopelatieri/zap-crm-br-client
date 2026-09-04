@@ -68,7 +68,7 @@ export const BOARD_STATUSES: readonly ConversationStatus[] = [
  */
 export const BOARD_CONVERSATION_SELECT =
   'id, contact_id, assigned_agent_id, status, last_message_at, unread_count, ' +
-  'contact:contacts(id, name, phone, avatar_url, company, contact_tags(tags(*)))';
+  'contact:contacts(id, name, phone, avatar_url, avatar_path, company, contact_tags(tags(*)))';
 
 export interface BoardColumn {
   /** `UNASSIGNED_COLUMN_ID` para a fila, ou `profile.user_id` para um agente. */

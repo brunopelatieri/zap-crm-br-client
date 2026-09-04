@@ -1,9 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const evolutionRequest = vi.fn();
-vi.mock('./client', () => ({
-  evolutionRequest: (...args: unknown[]) => evolutionRequest(...args),
-}));
+vi.mock('./client', async () => {
+  // `unwrap` é puro e usado de verdade por `user.ts` (que
+  // `contact-identity.ts` agora reaproveita) — só `evolutionRequest`
+  // precisa ser dublado.
+  const actual = await vi.importActual<typeof import('./client')>('./client');
+  return {
+    ...actual,
+    evolutionRequest: (...args: unknown[]) => evolutionRequest(...args),
+  };
+});
 
 let config: unknown = {
   apiUrl: 'https://evo.example.com',
@@ -188,6 +195,44 @@ describe('ensureContactIdentity', () => {
         body: { number: ['5511999999999'] },
       })
     );
+    const upsert = ops.find(
+      (o) => o.table === 'contact_identities' && o.verb === 'upsert'
+    );
+    expect(upsert?.payload).toEqual({
+      account_id: 'acct-1',
+      contact_id: 'contact-1',
+      channel_type: 'whatsapp_qr',
+      external_id: '225941787816134@lid',
+    });
+  });
+
+  it('REGRESSÃO SPEC 069 F3: a forma REAL medida ({data:{Users:[...]}}) agora extrai o LID — antes desta correção, esse envelope sempre devolvia null em silêncio', async () => {
+    const { client, ops } = makeDb({
+      'contacts.select': { data: { id: 'contact-1' }, error: null },
+      'contact_identities.select': { data: null, error: null },
+    });
+    dbState.client = client;
+    evolutionRequest.mockResolvedValue({
+      data: {
+        Users: [
+          {
+            Query: '+5511999999999@s.whatsapp.net',
+            IsInWhatsapp: true,
+            JID: '5511999999999@s.whatsapp.net',
+            LID: '225941787816134@lid',
+            VerifiedName: 'Alguém',
+          },
+        ],
+      },
+      message: 'success',
+    });
+
+    await ensureContactIdentity({
+      accountId: 'acct-1',
+      instanceToken: 'token-1',
+      phone: '5511999999999',
+    });
+
     const upsert = ops.find(
       (o) => o.table === 'contact_identities' && o.verb === 'upsert'
     );

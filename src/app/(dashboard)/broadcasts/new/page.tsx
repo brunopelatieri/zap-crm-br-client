@@ -143,6 +143,8 @@ export default function NewBroadcastPage() {
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
+  // SPEC 069 R6 — "checar antes de disparar".
+  const [checkBeforeSend, setCheckBeforeSend] = useState(false);
 
   // ── Teste A/B (SPEC 044 §6.6) ──────────────────────────────────
   // O segundo template tem os PRÓPRIOS placeholders e a própria mídia
@@ -259,8 +261,103 @@ export default function NewBroadcastPage() {
     }
   }
 
+  /**
+   * SPEC 069 R6 — em vez de disparar, cria a campanha (rascunho ou
+   * agendada) e a enfileira para checagem. Caminho DELIBERADAMENTE
+   * separado de `createAndSendBroadcast`: aquele resolve a audiência,
+   * valida cota e dispara AGORA — exatamente o que "checar antes" não
+   * pode fazer. A resolução de audiência de verdade acontece dentro
+   * de `POST /api/contacts/check-queue`, a partir do `audience_filter`
+   * que este INSERT grava.
+   */
+  async function handleSendWithCheck(options: SendOptions) {
+    if (!template || !accountId) return;
+    if (variantTemplate) {
+      toast.error(tAudience('checkBeforeSend.noAbTest'));
+      return;
+    }
+
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) {
+      toast.error(t('toastNotSignedIn'));
+      return;
+    }
+
+    const { data: created, error } = await supabase
+      .from('broadcasts')
+      .insert({
+        user_id: user.id,
+        account_id: accountId,
+        name: name.trim() || template.name,
+        template_name: template.name,
+        template_language: template.language ?? 'en_US',
+        template_variables: variables,
+        audience_filter: audience,
+        header_media_url: headerMediaUrl || null,
+        channel_id: effectiveChannelId,
+        status: options.scheduledAt ? 'scheduled' : 'draft',
+        scheduled_at: options.scheduledAt ?? null,
+        scheduled_timezone: options.scheduledAt
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone
+          : null,
+        window_override: options.windowOverride,
+        total_recipients: 0,
+      })
+      .select('id')
+      .single();
+
+    if (error || !created) {
+      toast.error(
+        tAudience('checkBeforeSend.createError', {
+          error: error?.message ?? 'unknown',
+        })
+      );
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/contacts/check-queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'broadcast',
+          broadcastId: created.id,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(
+          typeof body?.error === 'string'
+            ? body.error
+            : tAudience('checkBeforeSend.enqueueError')
+        );
+        // A campanha continua existindo como draft/scheduled — o
+        // usuário pode reabri-la e tentar de novo, em vez de perder o
+        // que já preencheu no wizard.
+        router.push(`/broadcasts/${created.id}`);
+        return;
+      }
+    } catch (err) {
+      console.error('[broadcasts/new] check-queue enqueue failed:', err);
+      toast.error(tAudience('checkBeforeSend.enqueueError'));
+      router.push(`/broadcasts/${created.id}`);
+      return;
+    }
+
+    toast.success(tAudience('checkBeforeSend.queuedToast'));
+    router.push(`/broadcasts/${created.id}`);
+  }
+
   async function handleSend(options: SendOptions) {
     if (!template) return;
+    if (checkBeforeSend) {
+      await handleSendWithCheck(options);
+      return;
+    }
 
     try {
       const result = await createAndSendBroadcast({
@@ -495,6 +592,8 @@ export default function NewBroadcastPage() {
                 audience={audience}
                 onUpdate={setAudience}
                 onBack={() => setCurrentStepKey('template')}
+                checkBeforeSend={checkBeforeSend}
+                onCheckBeforeSendChange={setCheckBeforeSend}
               />
             )}
             {currentStepKey === 'personalize' && template && (

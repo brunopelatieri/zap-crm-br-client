@@ -146,4 +146,38 @@ describe('resolveMediaRef', () => {
     expect(resolveMediaRef(undefined, null)).toEqual({ kind: 'none' });
     expect(resolveMediaRef('')).toEqual({ kind: 'none' });
   });
+
+  // SPEC 069 D-12 — avatar de contato em bucket privado próprio.
+  describe('bucket explícito (contact-avatars)', () => {
+    it('com path e bucket=contact-avatars, resolve para aquele bucket, não chat-media', () => {
+      expect(
+        resolveMediaRef(null, 'account-1/contact-2.png', 'contact-avatars')
+      ).toEqual({
+        kind: 'storage',
+        bucket: 'contact-avatars',
+        path: 'account-1/contact-2.png',
+      });
+    });
+
+    it('sem bucket explícito, path continua caindo em chat-media — compatibilidade com todo chamador existente', () => {
+      expect(resolveMediaRef(null, 'account-1/foo.jpg')).toEqual({
+        kind: 'storage',
+        bucket: 'chat-media',
+        path: 'account-1/foo.jpg',
+      });
+    });
+
+    it('sem path (avatar_url legado, string externa), cai em external — o bucket explícito não afeta esse ramo', () => {
+      expect(
+        resolveMediaRef(
+          'https://terceiro.example.com/foto.jpg',
+          null,
+          'contact-avatars'
+        )
+      ).toEqual({
+        kind: 'external',
+        url: 'https://terceiro.example.com/foto.jpg',
+      });
+    });
+  });
 });

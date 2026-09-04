@@ -205,6 +205,32 @@ export interface PlanDashboardBroadcastParams {
    * papéis só vinculam as que já existem.
    */
   canCreateTags?: boolean;
+  /**
+   * Disparo PARCIAL (SPEC 069 R6): esta chamada é uma FATIA de uma
+   * campanha que já existe e que vai receber outras fatias depois.
+   *
+   * Só faz sentido junto de `adoptBroadcastId`, e muda uma coisa: o
+   * UPDATE de adoção não reescreve os três campos que pertencem à
+   * campanha INTEIRA, não a esta fatia —
+   *
+   *   `audience_filter`  a audiência de verdade é a original; gravar a
+   *                      lista de ids deste ciclo apagaria o que o
+   *                      usuário escolheu e a tela mostraria a última
+   *                      fatia como se fosse a audiência;
+   *   `total_recipients` cada fatia acrescenta destinatários, não
+   *                      substitui — quem soma é o chamador, depois do
+   *                      INSERT;
+   *   `status`           quem manda no status é a máquina do §7.3
+   *                      (`partial-send.ts`), que sabe se ainda falta
+   *                      checar. Deixar `sending` aqui faria a campanha
+   *                      parecer viva entre ciclos e, se o processo
+   *                      morresse, presa em `sending` para sempre.
+   *
+   * Os destinatários continuam sendo INSERIDOS normalmente: é a
+   * existência da linha em `broadcast_recipients` que impede a mesma
+   * pessoa de entrar em duas fatias.
+   */
+  partialAppend?: boolean;
 }
 
 // ============================================================
@@ -492,6 +518,8 @@ interface MaterializeArmParams {
   members: EvaluatedContact[];
   /** Ver `PlanDashboardBroadcastParams.adoptBroadcastId`. */
   adoptBroadcastId?: string;
+  /** Ver `PlanDashboardBroadcastParams.partialAppend`. */
+  partialAppend?: boolean;
   /** Rótulo do braço no teste A/B (§6.6). Ausente = campanha comum. */
   variantLabel?: 'A' | 'B';
   /** Só na variante B: aponta para a linha da variante A. */
@@ -527,6 +555,7 @@ async function materializeArm(
     audience,
     members,
     adoptBroadcastId,
+    partialAppend,
     variantLabel,
     parentBroadcastId,
     abSplitPercent,
@@ -555,12 +584,22 @@ async function materializeArm(
   // Os contadores por status são do trigger agregador (migrações
   // 003/005), derivados das linhas de `broadcast_recipients`. Semear um
   // valor aqui seria sobrescrito na primeira mudança de destinatário.
+  // SPEC 069 R6: numa fatia parcial, três campos pertencem à campanha
+  // inteira e não a esta chamada — ver `PlanDashboardBroadcastParams.
+  // partialAppend` para o porquê de cada um.
+  const wholeCampaignFields = partialAppend
+    ? {}
+    : {
+        audience_filter: audienceFilterOf(audience),
+        status: 'sending' as const,
+        total_recipients: contacts.length,
+      };
+
   const row = {
     name,
     template_name: templateName,
     template_language: templateLanguage,
     template_variables: variables,
-    audience_filter: audienceFilterOf(audience),
     // Persistido também no disparo imediato: é o que permite a um
     // futuro cron de drenagem (§12, item 8) retomar uma campanha
     // cortada no meio sem perder a mídia do header.
@@ -574,8 +613,7 @@ async function materializeArm(
     // de `broadcasts.channel_source` quando o cron está adotando um
     // agendamento via `adoptBroadcastId`).
     channel_source: context.channelSource,
-    status: 'sending' as const,
-    total_recipients: contacts.length,
+    ...wholeCampaignFields,
   };
 
   // As colunas do §6.6 só entram quando há teste — uma campanha comum
@@ -595,6 +633,16 @@ async function materializeArm(
   const adoptId =
     adoptBroadcastId ??
     (audience.type === 'staged' ? audience.draftId : undefined);
+
+  // Uma fatia parcial sem campanha para adotar criaria uma linha nova
+  // sem status nem total — erro de programação, não estado do sistema.
+  if (partialAppend && !adoptId) {
+    throw new BroadcastError(
+      'bad_request',
+      'partialAppend requires adoptBroadcastId.',
+      400
+    );
+  }
 
   if (audience.type === 'staged' && !adoptId) {
     throw new BroadcastError(
@@ -776,6 +824,7 @@ export async function planDashboardBroadcast(
     batchLimit,
     adoptBroadcastId,
     canCreateTags,
+    partialAppend,
   }: PlanDashboardBroadcastParams
 ): Promise<DashboardBroadcastPlan> {
   const templateLanguage = input.templateLanguage || 'en_US';
@@ -849,6 +898,7 @@ export async function planDashboardBroadcast(
     audience: input.audience,
     members: evaluated,
     adoptBroadcastId,
+    partialAppend,
   });
 
   return { ...arm, excludedOptedOut, excludedInvalidWhatsapp };

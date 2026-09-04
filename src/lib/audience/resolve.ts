@@ -643,6 +643,13 @@ export async function resolveAudienceContacts(
       const ids = await contactIdsForCustomField(db, cf);
       contacts = await contactsByIds(db, accountId, [...ids]);
     }
+  } else if (audience.type === 'contact_ids') {
+    // SPEC 069 R6 — o disparo parcial já decidiu QUEM sai neste ciclo
+    // (os contatos validados e ainda sem linha de destinatário). Passa
+    // por `contactsByIds` como qualquer outra origem, então continua
+    // escopado por conta e sujeito às mesmas subtrações abaixo
+    // (opt-out e número morto vivem em `resolveSendableAudience`).
+    contacts = await contactsByIds(db, accountId, audience.contactIds ?? []);
   } else if (audience.type === 'csv') {
     const result = await upsertImportedContacts(db, {
       accountId,

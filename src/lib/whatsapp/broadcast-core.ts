@@ -477,6 +477,19 @@ export interface DeliverOptions {
    */
   batchSize?: number;
   delayMs?: number;
+  /**
+   * Escrever o status TERMINAL (`sent`/`failed`) na campanha ao fim do
+   * fan-out. Padrão `true` — é o comportamento de sempre.
+   *
+   * `false` no disparo PARCIAL (SPEC 069 R6): ali esta função entrega
+   * UMA FATIA de uma campanha que vai receber outras depois, e carimbar
+   * `sent` no fim da primeira fatia encerraria a campanha com a maior
+   * parte da audiência nunca checada e nunca enviada — em silêncio, que
+   * é exatamente como o R6 pode dar errado (§4.10). Quem decide o
+   * status naquele caminho é `decidePartialSend`, que é quem sabe se
+   * ainda falta alguém na fila de checagem.
+   */
+  finalizeStatus?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -502,7 +515,7 @@ export async function deliverBroadcast(
   options: DeliverOptions = {}
 ): Promise<void> {
   let sentCount = 0;
-  const { batchSize = 0, delayMs = 0 } = options;
+  const { batchSize = 0, delayMs = 0, finalizeStatus = true } = options;
   const paced = batchSize > 0 && delayMs > 0;
   let sinceLastPause = 0;
 
@@ -615,11 +628,16 @@ export async function deliverBroadcast(
   // Terminal status only — counts are trigger-owned (see the note
   // above). If nothing sent, the broadcast failed outright; a partial
   // send is still 'sent' (per-recipient failures show in failed_count).
-  await db
-    .from('broadcasts')
-    .update({
-      status: sentCount > 0 ? 'sent' : 'failed',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', plan.broadcastId);
+  //
+  // SPEC 069 R6: uma FATIA de disparo parcial não encerra a campanha —
+  // ver `DeliverOptions.finalizeStatus`.
+  if (finalizeStatus) {
+    await db
+      .from('broadcasts')
+      .update({
+        status: sentCount > 0 ? 'sent' : 'failed',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', plan.broadcastId);
+  }
 }

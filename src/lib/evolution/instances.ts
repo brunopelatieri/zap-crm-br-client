@@ -28,6 +28,9 @@ import {
 import { readEvolutionConfig, type EvolutionConfig } from './config';
 import { buildInstanceName } from './instance-name';
 import { checkInstanceLimit, type InstanceLimitDecision } from './limits';
+import { createLimitsCache, loadLimitSourcesCached } from '@/lib/limits/load';
+import { resolveKey } from '@/lib/limits/resolve';
+import type { LimitLevel } from '@/lib/limits/registry';
 
 const SUBSCRIBED_EVENTS = [
   'MESSAGE',
@@ -101,6 +104,13 @@ async function cleanupOrphanedVpsInstance(
 // Leitura
 // ------------------------------------------------------------
 
+/** Um limite resolvido, com o nível que a UI da F9 precisa para dizer
+ *  "herdando da conta" (SPEC 069 §3.4 regra 4 / D-8). */
+export interface InstanceLimitView {
+  value: number;
+  level: LimitLevel;
+}
+
 export interface EvolutionInstanceSummary {
   id: string;
   channelId: string;
@@ -112,6 +122,21 @@ export interface EvolutionInstanceSummary {
   isDefault: boolean;
   lastQrAt: string | null;
   createdAt: string;
+  /** SPEC 069 R1 — os dois switches nascem `FALSE` (migração 078). */
+  checkEnabled: boolean;
+  harvestEnabled: boolean;
+  /** `null` = herda o teto resolvido pela cascata. */
+  harvestMaxContacts: number | null;
+  harvestedCount: number;
+  /** §6.7 — os limites resolvidos com o nível de origem, para o
+   *  cartão poder dizer "herdando da conta"/"valor próprio". */
+  limits: {
+    coldSendPerDay: InstanceLimitView;
+    coldSendPerHour: InstanceLimitView;
+    checkPerDay: InstanceLimitView;
+    checkPerHour: InstanceLimitView;
+    harvestMaxPerInstance: InstanceLimitView & { hardCap: number | null };
+  };
 }
 
 /**
@@ -128,7 +153,7 @@ export async function listEvolutionInstances(
   const { data: instances, error } = await db
     .from('evolution_instances')
     .select(
-      'id, channel_id, connected_phone, connected_jid, last_qr_at, created_at'
+      'id, channel_id, connected_phone, connected_jid, last_qr_at, created_at, check_enabled, harvest_enabled, harvest_max_contacts, harvested_count'
     )
     .eq('account_id', accountId)
     .order('created_at', { ascending: true });
@@ -150,13 +175,33 @@ export async function listEvolutionInstances(
   }
   const channelById = new Map((channels ?? []).map((c) => [c.id, c]));
 
-  return instances.flatMap((row) => {
-    const channel = channelById.get(row.channel_id);
-    // Linha órfã (canal apagado fora do fluxo normal) — omitida em vez
-    // de quebrar a lista inteira.
-    if (!channel) return [];
-    return [
-      {
+  // Cache de UM ciclo desta chamada (§4.3): o nível de conta é o MESMO
+  // para todas as instâncias, e cada instância só paga a leitura
+  // própria uma vez, não uma por chave resolvida.
+  const cache = createLimitsCache();
+
+  const results = await Promise.all(
+    instances.map(async (row) => {
+      const channel = channelById.get(row.channel_id);
+      // Linha órfã (canal apagado fora do fluxo normal) — omitida em
+      // vez de quebrar a lista inteira.
+      if (!channel) return null;
+
+      const sources = await loadLimitSourcesCached(
+        db,
+        { accountId, channelId: row.channel_id },
+        cache
+      );
+      const view = (key: string): InstanceLimitView => {
+        const r = resolveKey(key, sources);
+        return { value: r.value, level: r.level };
+      };
+      const harvestCeiling = resolveKey(
+        'evolution_harvest_max_per_instance',
+        sources
+      );
+
+      const summary: EvolutionInstanceSummary = {
         id: row.id,
         channelId: row.channel_id,
         name: channel.name,
@@ -167,9 +212,27 @@ export async function listEvolutionInstances(
         isDefault: channel.is_default,
         lastQrAt: row.last_qr_at,
         createdAt: row.created_at,
-      },
-    ];
-  });
+        checkEnabled: row.check_enabled,
+        harvestEnabled: row.harvest_enabled,
+        harvestMaxContacts: row.harvest_max_contacts,
+        harvestedCount: row.harvested_count,
+        limits: {
+          coldSendPerDay: view('evolution_cold_send_per_day'),
+          coldSendPerHour: view('evolution_cold_send_per_hour'),
+          checkPerDay: view('evolution_check_per_day'),
+          checkPerHour: view('evolution_check_per_hour'),
+          harvestMaxPerInstance: {
+            value: harvestCeiling.value,
+            level: harvestCeiling.level,
+            hardCap: harvestCeiling.hardCap,
+          },
+        },
+      };
+      return summary;
+    })
+  );
+
+  return results.filter((r): r is EvolutionInstanceSummary => r !== null);
 }
 
 export type InstanceLimitStatus = InstanceLimitDecision;

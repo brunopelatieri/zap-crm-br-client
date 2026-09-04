@@ -947,7 +947,8 @@
         "reason": {
           "consecutive_failures": "2 failed deliveries in a row",
           "meta_error": "Meta reported this number isn't on WhatsApp",
-          "manual": "set by the team"
+          "manual": "set by the team",
+          "qr_check": "checked via the WhatsApp QR instance"
         },
         "since": "since {when} — {reason}",
         "hint": "Excluded from future broadcasts by default. Mark it valid again if you believe this was a mistake.",
@@ -1033,6 +1034,33 @@
       "toastQuotaBlocked": "Contact limit reached ({used}/{limit}). Upgrade your plan to import more contacts.",
       "toastQuotaPartial": "Your plan has room for {available} more contact(s), but this file has {total}. Import the first {available} and stop there?",
       "toastQuotaStopped": "Import stopped: contact limit reached after {count} imported."
+    },
+    "check": {
+      "enqueueLabel": "Verify these numbers on WhatsApp",
+      "enqueueHint": "Asks WhatsApp if each number exists — no message is sent. Numbers that don't exist are marked invalid.",
+      "enqueueDisabledNoInstance": "Turn on number verification for a connected WhatsApp QRCode instance first (Settings → WhatsApp QRCode)",
+      "enqueueQueued": "{count} number queued for verification",
+      "enqueueQueued_plural": "{count} numbers queued for verification",
+      "enqueueEstimate": "at the current rate, about {hours}h to finish",
+      "enqueueInstanceLabel": "Verify using",
+      "verifiedAt": "Verified {date} via {instance}",
+      "statusInvalidQr": "Not found on WhatsApp",
+      "statusConflict": "WhatsApp says this number exists, but it's still marked invalid — see the note on the contact"
+    },
+    "harvested": {
+      "tabLabel": "Imported from phone",
+      "emptyTitle": "No contacts waiting for review",
+      "emptyBody": "When a WhatsApp QRCode instance has contact import turned on, the numbers from its phone book show up here for you to approve.",
+      "lgpdNotice": "These people never talked to your business — they're in this phone's address book. Promoting someone here adds them as a contact with unknown opt-in status; it does not mean they agreed to receive marketing.",
+      "promote": "Add as contact",
+      "ignore": "Ignore",
+      "promoted": "{count} contact added",
+      "promoted_plural": "{count} contacts added",
+      "promoteQuotaError": "Added {promoted}, but your plan's contact limit stopped the rest ({blocked} not added)",
+      "sourceInstance": "From {instance}",
+      "loadFailed": "Failed to load",
+      "actionFailed": "Action failed",
+      "loadMore": "Load more"
     },
     "exportModal": {
       "title": "Export contacts",
@@ -1338,11 +1366,17 @@
       "sent": "Sent",
       "failed": "Failed",
       "streaming": "Streaming",
+      "awaiting_check": "Awaiting check",
       "pending": "Pending",
       "delivered": "Delivered",
       "read": "Read",
       "replied": "Replied",
       "unknown": "Unknown"
+    },
+    "awaitingCheck": {
+      "progress": "{checked}/{total} checked",
+      "nextResume": "Next batch when the number-check quota renews",
+      "outsideWindow": "Waiting for the allowed send window"
     },
     "sourceFilter": {
       "campaigns": "Campaigns",
@@ -1817,6 +1851,12 @@
         "ab_category_mismatch": "Both variants must share the same template category.",
         "ab_audience_too_small": "This audience is too small to split into two arms.",
         "channel_unavailable": "The WhatsApp number this broadcast uses is not available right now (disconnected or removed). Reconnect it or choose another number and try again."
+      },
+      "checkBeforeSend": {
+        "noAbTest": "Checking before sending is not supported for A/B tests.",
+        "createError": "Could not create the broadcast: {error}",
+        "enqueueError": "The broadcast was saved, but queuing the numbers for checking failed. Open it and try again.",
+        "queuedToast": "Campaign queued — it will send in batches as numbers are verified."
       },
       "stageError": {
         "template_not_found": "This template could not be found. Go back and pick it again.",
@@ -3136,7 +3176,30 @@
       "deleteWarning": "This deletes the instance from the server and from this account. Existing conversations are preserved as read-only and show a \"channel removed\" badge — nothing is deleted from your conversation history.",
       "deleteTypeToConfirm": "Type <bold>{name}</bold> to confirm",
       "deleteError": "Failed to delete instance",
-      "deleteSuccess": "\"{name}\" deleted"
+      "deleteSuccess": "\"{name}\" deleted",
+      "enrichment": {
+        "checkTitle": "Verify numbers",
+        "checkDescription": "Before checking a contact, ask WhatsApp if the number exists — no message is sent.",
+        "checkRiskWarning": "Checking in bulk is not free of risk: it signals interest to WhatsApp's anti-spam like any other automated traffic. Keep volume low on a new number.",
+        "harvestTitle": "Import contacts from this phone",
+        "harvestDescription": "Bring this phone's contact list into a review queue — nothing is added to your contacts until you approve it.",
+        "harvestCap": "Cap for this instance",
+        "harvestCapPlaceholder": "Inherit account default",
+        "harvestCapCeiling": "Ceiling: {max}",
+        "harvestedCount": "{count} imported so far",
+        "harvestComplete": "Cap reached — no more contacts will be imported until you raise it",
+        "notConnected": "Connect this instance first",
+        "saveError": "Failed to save",
+        "limitsTitle": "Limits in effect",
+        "limitColdSendPerDay": "Cold sends / day",
+        "limitColdSendPerHour": "Cold sends / hour",
+        "limitCheckPerDay": "Checks / day",
+        "limitCheckPerHour": "Checks / hour",
+        "limitFromInstance": "own value",
+        "limitFromAccount": "inherited from account",
+        "limitFromDefault": "system default",
+        "limitBlocked": "blocked"
+      }
     },
     "sections": {
       "overview": "Overview",
@@ -3629,6 +3692,36 @@
       "intervalNotice": "The sweep runs at most once every {hours}h.",
       "accountSectionTitle": "Retention",
       "accountSectionDescription": "This account's own policy, per channel. Any field left empty falls back to the platform default, then to the server's .env value."
+    },
+    "channelLimits": {
+      "title": "WhatsApp QRCode safety limits",
+      "description": "How hard this account (and, per instance, each of its numbers) may push the unofficial channel — cold sends, number checks, contact import. Overriding these is a commercial/security decision, not a per-user setting.",
+      "accountLevel": "Account",
+      "useDefault": "Use default",
+      "ownValue": "Own value",
+      "blockAxis": "Block this axis",
+      "hardCapHint": "Hard ceiling: {max}",
+      "instanceOverridesWarning": "{count} instance has its own value and won't be affected by this",
+      "instanceOverridesWarning_plural": "{count} instances have their own value and won't be affected by this",
+      "saveSuccess": "Saved",
+      "saveError": "Failed to save",
+      "aboveHardCap": "That's above the hard ceiling of {max}",
+      "belowHardFloor": "That's below the hard floor of {min}",
+      "instancesTitle": "Per-instance overrides",
+      "noInstances": "This account has no WhatsApp QRCode instances yet.",
+      "axis": {
+        "evolution_cold_send_silence_hours": "Silence to count as cold (h)",
+        "evolution_cold_send_per_hour": "Cold sends / hour",
+        "evolution_cold_send_per_day": "Cold sends / day",
+        "evolution_cold_send_min_interval_seconds": "Min. interval between cold sends (s)",
+        "evolution_cold_send_warmup_days": "Warm-up (days)",
+        "evolution_check_per_hour": "Number checks / hour",
+        "evolution_check_per_day": "Number checks / day",
+        "evolution_check_min_interval_seconds": "Min. interval between checks (s)",
+        "evolution_check_batch_size": "Checks per cron run",
+        "evolution_harvest_per_run": "Contacts imported per run",
+        "evolution_harvest_max_per_instance": "Contact import cap per instance"
+      }
     },
     "notifications": {
       "title": "Notifications",

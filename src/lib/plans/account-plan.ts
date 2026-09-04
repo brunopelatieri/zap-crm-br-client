@@ -18,12 +18,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { bucketStatus } from './usage';
 import {
-  QUOTA_KEYS,
+  USAGE_QUOTA_KEYS,
   type AccountPlan,
   type Plan,
   type PlanUsage,
   type PlanUsageBucket,
-  type QuotaKey,
+  type UsageQuotaKey,
 } from './types';
 
 export interface AccountPlanSnapshot {
@@ -205,7 +205,7 @@ async function computeUsage(
     roleCounts.owner + roleCounts.admin + roleCounts.agent + roleCounts.viewer;
   const membersAdmin = roleCounts.owner + roleCounts.admin;
 
-  const usedByKey: Record<QuotaKey, number> = {
+  const usedByKey: Record<UsageQuotaKey, number> = {
     contacts: contactsCounter?.value ?? 0,
     members_total: membersTotal,
     members_admin: membersAdmin,
@@ -215,7 +215,10 @@ async function computeUsage(
     channels_whatsapp_cloud: cloudCount ?? 0,
   };
 
-  const buckets: PlanUsageBucket[] = QUOTA_KEYS.map((key) => {
+  // USAGE_QUOTA_KEYS, não QUOTA_KEYS: as chaves de segurança da SPEC
+  // 069 compartilham o mecanismo de plano, mas não são uso — não têm
+  // contador e não viram barra na tela do cliente (§15.3).
+  const buckets: PlanUsageBucket[] = USAGE_QUOTA_KEYS.map((key) => {
     // Espelha account_effective_limits() (migração 067 §8): com o
     // interruptor desligado, TODA quota é ilimitada — não só quando a
     // trigger é chamada, também quando a UI mostra a barra de uso.

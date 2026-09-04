@@ -1206,7 +1206,7 @@ export function MessageThread({
     <div className={cn('flex min-w-0 flex-1 flex-col', DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
-      <div className="border-border bg-card flex items-center justify-between gap-2 border-b px-3 py-3 sm:px-4">
+      <div className="border-border bg-card flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -1264,7 +1264,15 @@ export function MessageThread({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Abaixo de 1480px este grupo quebra para a própria linha, à
+            direita — acima do badge de canal/sessão, `w-full` força a
+            quebra (o pai tem `flex-wrap`); a partir de 1480px volta a
+            dividir a linha com o grupo nome/avatar como antes. Sem isto o
+            grupo (ocultar contato → atribuir) sobrepõe o nome/avatar
+            quando o painel de contato está aberto e encolhe a coluna da
+            thread. 1480 não é breakpoint padrão do Tailwind, daí
+            `min-[1480px]:` em vez de `xl:` (mesmo ajuste do composer). */}
+        <div className="flex w-full items-center justify-end gap-2 min-[1480px]:w-auto min-[1480px]:justify-normal">
           {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just

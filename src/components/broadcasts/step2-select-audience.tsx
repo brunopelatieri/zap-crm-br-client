@@ -32,6 +32,8 @@ import type {
 import { toCsvContacts } from '@/lib/audience/normalize';
 import type { NormalizedAudience } from '@/lib/audience/types';
 import { saveStageSummary } from '@/lib/audience/stage-summary-storage';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useCheckInstances } from '@/lib/evolution/use-check-instances';
 
 /**
  * Fonte visível na UI (§3.1), mais estreita que `AudienceConfig['type']`:
@@ -61,6 +63,9 @@ interface Step2Props {
   audience: AudienceConfig;
   onUpdate: (audience: AudienceConfig) => void;
   onBack: () => void;
+  /** SPEC 069 R6 — "checar antes de disparar". */
+  checkBeforeSend: boolean;
+  onCheckBeforeSendChange: (checked: boolean) => void;
 }
 
 /**
@@ -81,10 +86,18 @@ function toAudienceType(source: AudienceSourceId): AudienceType {
  * volta para a triagem em vez de reabrir este passo), mas o tipo largo
  * de `AudienceConfig` exige um retorno válido mesmo assim. `'all'` é o
  * fallback mais seguro: nunca fica com um filtro escondido pré-marcado.
+ *
+ * `'contact_ids'` (SPEC 069 R6) cai no mesmo fallback pelo mesmo
+ * motivo, e por um a mais: ele é construído SÓ pelo servidor, no
+ * disparo parcial, e nunca é persistido em `audience_filter` — então
+ * este passo não tem como recebê-lo de volta. Está aqui porque o tipo
+ * permite, não porque acontece.
  */
 function initialSource(audience: AudienceConfig): AudienceSourceId {
   if (audience.type === 'csv') return 'spreadsheet';
-  if (audience.type === 'staged') return 'all';
+  if (audience.type === 'staged' || audience.type === 'contact_ids') {
+    return 'all';
+  }
   return audience.type;
 }
 
@@ -94,13 +107,18 @@ export function Step2SelectAudience({
   audience,
   onUpdate,
   onBack,
+  checkBeforeSend,
+  onCheckBeforeSendChange,
 }: Step2Props) {
   const router = useRouter();
   const t = useTranslations('Broadcasts.wizard');
   const tAudience = useTranslations('Broadcasts.audience');
+  const tCheck = useTranslations('Contacts.check');
   const tParseError = useTranslations('Import.parseError');
   const tStageError = useTranslations('Broadcasts.audience.stageError');
   const sourceOptions = useAudienceSourceOptions();
+  const { instances: checkInstances, loading: checkInstancesLoading } =
+    useCheckInstances();
 
   const OPERATOR_OPTIONS = useMemo<
     { value: CustomFieldOperator; label: string }[]
@@ -643,6 +661,31 @@ export function Step2SelectAudience({
             {tAudience('estimate.empty')}
           </p>
         )}
+      </div>
+
+      {/* ── Checar antes de disparar (SPEC 069 R6) ───────────────── */}
+      <div className="border-border bg-card/50 space-y-1.5 rounded-xl border p-4">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="check-before-send"
+            checked={checkBeforeSend}
+            disabled={checkInstancesLoading || checkInstances.length === 0}
+            onCheckedChange={(checked) =>
+              onCheckBeforeSendChange(checked === true)
+            }
+          />
+          <label
+            htmlFor="check-before-send"
+            className="text-foreground text-sm leading-tight"
+          >
+            {tCheck('enqueueLabel')}
+          </label>
+        </div>
+        <p className="text-muted-foreground pl-6 text-xs">
+          {checkInstances.length === 0 && !checkInstancesLoading
+            ? tCheck('enqueueDisabledNoInstance')
+            : tCheck('enqueueHint')}
+        </p>
       </div>
 
       <div className="border-border flex items-center justify-between border-t pt-4">

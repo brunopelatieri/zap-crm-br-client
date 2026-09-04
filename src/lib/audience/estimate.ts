@@ -41,7 +41,16 @@ export interface CustomFieldFilter {
 }
 
 export interface AudienceConfig {
-  type: 'all' | 'tags' | 'custom_field' | 'csv' | 'staged';
+  /**
+   * `contact_ids` é INTERNO (SPEC 069 R6): é como o disparo parcial
+   * expressa "a audiência já filtrada pelos contatos validados neste
+   * ciclo" sem inventar um segundo caminho de envio. De propósito ele
+   * NÃO está em `AUDIENCE_TYPES` (`lib/broadcasts/parse-input.ts`), a
+   * lista que valida o que chega pela rede — um cliente não deve poder
+   * postar uma lista arbitrária de ids e pular a resolução de
+   * audiência. Só código de servidor o constrói.
+   */
+  type: 'all' | 'tags' | 'custom_field' | 'csv' | 'staged' | 'contact_ids';
   tagIds?: string[];
   customField?: CustomFieldFilter;
   csvContacts?: {
@@ -53,6 +62,9 @@ export interface AudienceConfig {
   }[];
   /** Contatos com qualquer uma destas etiquetas são subtraídos do resultado. */
   excludeTagIds?: string[];
+  /** Só em `type === 'contact_ids'` — a lista exata, já decidida pelo
+   *  servidor (SPEC 069 R6). */
+  contactIds?: string[];
   /**
    * Id do rascunho staged (`broadcasts.id`, status `draft`) — SPEC 044
    * §3.3. Presente só quando `type === 'staged'`: a audiência já foi

@@ -6,7 +6,20 @@
  * silencioso, nunca some da navegação (é a armadilha "agendamento não
  * dispara, sem erro" do AGENTS.md se repetindo, e este módulo existe
  * para fechá-la logo na leitura do `.env`).
+ *
+ * O que é conectividade e o que é limite (SPEC 069 §3.4, regra 5)
+ *
+ *   `EVOLUTION_API_URL`, `EVOLUTION_GLOBAL_API_KEY`,
+ *   `EVOLUTION_INSTANCE_PREFIX` e `EVOLUTION_WEBHOOK_PUBLIC_URL`
+ *   continuam sendo lidos aqui: são endereço e credencial, não teto —
+ *   não fazem sentido "por conta" e ninguém os compra num plano.
+ *
+ *   Os quatro NÚMEROS, sim, migraram para `src/lib/limits/`. Eles são
+ *   tetos, e um teto com parser próprio é um teto que um dia diverge
+ *   dos outros.
  */
+
+import { resolveKey } from '@/lib/limits/resolve';
 
 export interface EvolutionConfig {
   apiUrl: string;
@@ -31,11 +44,28 @@ export interface EvolutionConfig {
   mediaRequestTimeoutMs: number;
 }
 
-function positiveInt(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return fallback;
-  return n;
+/**
+ * Os quatro valores NUMÉRICOS deste módulo passam pelo registro de
+ * limites (SPEC 069 §3.1, itens 1, 2, 8 e 9) em vez de terem parser
+ * próprio — é a regra 5 do §3.4: não existe um segundo resolvedor.
+ *
+ * Aqui a cascata é curta de propósito: só os níveis 2 (`.env`) e 3
+ * (código). `maxInstancesPerAccount` ganha o nível de conta no seu
+ * ponto de uso, onde `checkInstanceLimit` já recebe
+ * `plan_limit('channels_whatsapp_qr')`; os dois timeouts não têm nível
+ * de conta nenhum, e `maxInstancesTotal` protege a VPS e não pode ter.
+ *
+ * O comportamento é o mesmo de sempre, inclusive na borda que mais
+ * importa: `'0'` continua caindo no padrão nestes quatro (é o que o
+ * `allowZero: false` do registro expressa, e o que `config.test.ts`
+ * fixa desde a SPEC 048) — um timeout de 0 ms ou um teto de 0
+ * instâncias no deployment é erro de digitação, nunca intenção.
+ */
+function limitFromEnv(
+  key: string,
+  env: Record<string, string | undefined>
+): number {
+  return resolveKey(key, { env }).value;
 }
 
 /**
@@ -55,20 +85,17 @@ export function readEvolutionConfig(
     // Sem barra no final — os call sites concatenam `${apiUrl}/instance/...`.
     apiUrl: apiUrl.replace(/\/+$/, ''),
     globalApiKey,
-    maxInstancesPerAccount: positiveInt(
-      env.EVOLUTION_MAX_INSTANCES_PER_ACCOUNT,
-      3
-    ),
-    maxInstancesTotal: positiveInt(env.EVOLUTION_MAX_INSTANCES_TOTAL, 20),
+    maxInstancesPerAccount: limitFromEnv('channels_whatsapp_qr', env),
+    maxInstancesTotal: limitFromEnv('evolution_max_instances_total', env),
     instancePrefix: env.EVOLUTION_INSTANCE_PREFIX?.trim() || 'zapcrm',
     webhookPublicUrl:
       env.EVOLUTION_WEBHOOK_PUBLIC_URL?.trim() ||
       env.NEXT_PUBLIC_SITE_URL?.trim() ||
       null,
-    requestTimeoutMs: positiveInt(env.EVOLUTION_REQUEST_TIMEOUT_MS, 15_000),
-    mediaRequestTimeoutMs: positiveInt(
-      env.EVOLUTION_MEDIA_REQUEST_TIMEOUT_MS,
-      60_000
+    requestTimeoutMs: limitFromEnv('evolution_request_timeout_ms', env),
+    mediaRequestTimeoutMs: limitFromEnv(
+      'evolution_media_request_timeout_ms',
+      env
     ),
   };
 }

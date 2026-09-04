@@ -41,6 +41,9 @@
  * chama reúne o uso (as contagens) e executa a decisão.
  */
 
+import { resolveKey, type LimitSources } from '@/lib/limits/resolve';
+import { COLD_SEND_LIMIT_KEYS, type LimitLevel } from '@/lib/limits/registry';
+
 /** Piso da cota diária durante o aquecimento. */
 const WARMUP_FLOOR = 5;
 
@@ -69,45 +72,58 @@ export const COLD_SEND_DEFAULTS: ColdSendLimits = {
  *
  * `0` é aceito e significa **bloquear todo envio frio** nesse eixo; é a
  * forma de o dono do sistema desligar o recurso sem mexer em código.
+ *
+ * Desde a SPEC 069 (F2) esta função é uma VISTA da cascata, restrita
+ * aos níveis 2 e 3 — a assinatura e o resultado são exatamente os de
+ * antes, e é isso que `cold-send-limit.test.ts`, intocado, continua
+ * provando. Quem precisa dos quatro níveis chama
+ * `resolveColdSendLimits` (`cold-send-resolve.ts`); quem só tem o
+ * `.env` em mãos — a rota de leitura de configuração, os testes —
+ * continua aqui.
  */
 export function readColdSendLimits(
   env: Record<string, string | undefined> = process.env
 ): ColdSendLimits {
+  return readColdSendLimitsFromSources({ env });
+}
+
+/**
+ * O corpo compartilhado: dado um conjunto de fontes (instância, conta,
+ * env), monta `ColdSendLimits` percorrendo o registro. Existe para que
+ * a versão de `.env` e a versão de quatro níveis não possam divergir —
+ * duas funções montando o mesmo objeto por caminhos diferentes seriam
+ * exatamente o "segundo resolvedor" que a regra 5 do §3.4 proíbe.
+ */
+export function readColdSendLimitsFromSources(
+  sources: LimitSources
+): ColdSendLimits {
   return {
-    silenceHours: positiveInt(
-      env.EVOLUTION_COLD_SEND_SILENCE_HOURS,
-      COLD_SEND_DEFAULTS.silenceHours,
-      { allowZero: false }
-    ),
-    perHour: positiveInt(
-      env.EVOLUTION_COLD_SEND_PER_HOUR,
-      COLD_SEND_DEFAULTS.perHour
-    ),
-    perDay: positiveInt(
-      env.EVOLUTION_COLD_SEND_PER_DAY,
-      COLD_SEND_DEFAULTS.perDay
-    ),
-    minIntervalSeconds: positiveInt(
-      env.EVOLUTION_COLD_SEND_MIN_INTERVAL_SECONDS,
-      COLD_SEND_DEFAULTS.minIntervalSeconds
-    ),
-    warmupDays: positiveInt(
-      env.EVOLUTION_COLD_SEND_WARMUP_DAYS,
-      COLD_SEND_DEFAULTS.warmupDays
-    ),
+    silenceHours: resolveKey(COLD_SEND_LIMIT_KEYS.silenceHours, sources).value,
+    perHour: resolveKey(COLD_SEND_LIMIT_KEYS.perHour, sources).value,
+    perDay: resolveKey(COLD_SEND_LIMIT_KEYS.perDay, sources).value,
+    minIntervalSeconds: resolveKey(
+      COLD_SEND_LIMIT_KEYS.minIntervalSeconds,
+      sources
+    ).value,
+    warmupDays: resolveKey(COLD_SEND_LIMIT_KEYS.warmupDays, sources).value,
   };
 }
 
-function positiveInt(
-  raw: string | undefined,
-  fallback: number,
-  { allowZero = true }: { allowZero?: boolean } = {}
-): number {
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0) return fallback;
-  if (n === 0 && !allowZero) return fallback;
-  return n;
+/** O nível que venceu em cada eixo — o que a UI da F9 mostra como
+ *  "herdando da conta" (§3.4 regra 4). */
+export function describeColdSendLevels(
+  sources: LimitSources
+): Record<keyof ColdSendLimits, LimitLevel> {
+  return {
+    silenceHours: resolveKey(COLD_SEND_LIMIT_KEYS.silenceHours, sources).level,
+    perHour: resolveKey(COLD_SEND_LIMIT_KEYS.perHour, sources).level,
+    perDay: resolveKey(COLD_SEND_LIMIT_KEYS.perDay, sources).level,
+    minIntervalSeconds: resolveKey(
+      COLD_SEND_LIMIT_KEYS.minIntervalSeconds,
+      sources
+    ).level,
+    warmupDays: resolveKey(COLD_SEND_LIMIT_KEYS.warmupDays, sources).level,
+  };
 }
 
 /**

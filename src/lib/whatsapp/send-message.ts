@@ -358,6 +358,7 @@ export async function sendMessageToConversation(
     coldSendCheck = await checkColdSend(db, {
       channelId: channelCtx.channel.id,
       channelType: channelCtx.channel.type,
+      accountId,
       lastInboundAt: conversation.last_customer_message_at
         ? new Date(conversation.last_customer_message_at)
         : null,

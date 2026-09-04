@@ -47,6 +47,8 @@ import { GoogleSheetsSource } from '@/components/import/google-sheets-source';
 import { useSpreadsheetParser } from '@/hooks/use-spreadsheet-parser';
 import { MAX_CONTACTS_ROWS } from '@/lib/spreadsheet/types';
 import type { NormalizedAudienceRow } from '@/lib/audience/types';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useCheckInstances } from '@/lib/evolution/use-check-instances';
 
 const DEFAULT_TAG_COLOR = '#3b82f6';
 const PREVIEW_LIMIT = 5;
@@ -132,6 +134,7 @@ export function ImportModal({
 }: ImportModalProps) {
   const t = useTranslations('Contacts.importModal');
   const tParseError = useTranslations('Import.parseError');
+  const tCheck = useTranslations('Contacts.check');
   const supabase = createClient();
   const { accountId, canEditSettings } = useAuth();
 
@@ -149,7 +152,14 @@ export function ImportModal({
     skipped: number;
     failed: number;
     tagsAssigned: number;
+    checkQueued?: number;
+    checkEstimatedHours?: number | null;
   } | null>(null);
+
+  // SPEC 069 R2 — checar os números recém-importados no WhatsApp QR.
+  const { instances: checkInstances, loading: checkInstancesLoading } =
+    useCheckInstances();
+  const [checkNumbers, setCheckNumbers] = useState(false);
 
   const parser = useSpreadsheetParser();
 
@@ -402,6 +412,11 @@ export function ImportModal({
       }
 
       const tagAssignments: ContactTagAssignment[] = [];
+      // SPEC 069 R2: os ids desta importação, para enfileirar a
+      // checagem DEPOIS que todos existirem — nunca antes, e nunca
+      // parcial (um contato que falhou o insert não deve entrar na
+      // fila de um id que não existe).
+      const createdContactIds: string[] = [];
 
       // 4) Batch insert the genuinely-new rows in chunks of 50. The DB
       //    unique index is the backstop: a 23505 (race, or a format
@@ -440,6 +455,7 @@ export function ImportModal({
 
             if (!singleErr && singleData) {
               imported++;
+              createdContactIds.push(singleData.id);
               if (source.tagNames.length > 0) {
                 tagAssignments.push({
                   contactId: singleData.id,
@@ -461,6 +477,7 @@ export function ImportModal({
         } else {
           const inserted = data ?? [];
           imported += inserted.length;
+          for (const row of inserted) createdContactIds.push(row.id);
           // inserted[j] ↔ chunk[j] only holds because a single INSERT
           // preserves RETURNING order. If this path is ever split into
           // parallel inserts, zip by phone or returned id instead.
@@ -488,7 +505,44 @@ export function ImportModal({
         toast.warning(t('toastTagsWarning'));
       }
 
-      setResult({ imported, skipped, failed, tagsAssigned });
+      // 6) SPEC 069 R2 — enfileira a checagem dos contatos que ACABARAM
+      //    de ser criados. Best-effort: uma falha aqui não pode
+      //    esconder um import bem-sucedido atrás de um erro de
+      //    checagem — ela é sempre um passo A MAIS, nunca uma condição
+      //    do sucesso principal.
+      let checkQueued: number | undefined;
+      let checkEstimatedHours: number | null | undefined;
+      if (checkNumbers && createdContactIds.length > 0) {
+        try {
+          const checkRes = await fetch('/api/contacts/check-queue', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              source: 'contacts_import',
+              contactIds: createdContactIds,
+            }),
+          });
+          if (checkRes.ok) {
+            const checkData = (await checkRes.json()) as {
+              queued: number;
+              estimatedHours: number | null;
+            };
+            checkQueued = checkData.queued;
+            checkEstimatedHours = checkData.estimatedHours;
+          }
+        } catch (err) {
+          console.error('[ImportModal] check-queue error:', err);
+        }
+      }
+
+      setResult({
+        imported,
+        skipped,
+        failed,
+        tagsAssigned,
+        checkQueued,
+        checkEstimatedHours,
+      });
       if (imported > 0) {
         toast.success(t('toastImported', { count: imported }));
         onImported();
@@ -712,6 +766,34 @@ export function ImportModal({
             />
           )}
 
+          {!result && rows.length > 0 && (
+            <div className="border-border bg-background/50 space-y-1.5 rounded-xl border p-3">
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="check-numbers"
+                  checked={checkNumbers}
+                  disabled={
+                    checkInstancesLoading || checkInstances.length === 0
+                  }
+                  onCheckedChange={(checked) =>
+                    setCheckNumbers(checked === true)
+                  }
+                />
+                <label
+                  htmlFor="check-numbers"
+                  className="text-foreground text-sm leading-tight"
+                >
+                  {tCheck('enqueueLabel')}
+                </label>
+              </div>
+              <p className="text-muted-foreground pl-6 text-xs">
+                {checkInstances.length === 0 && !checkInstancesLoading
+                  ? tCheck('enqueueDisabledNoInstance')
+                  : tCheck('enqueueHint')}
+              </p>
+            </div>
+          )}
+
           {result && (
             <div className="border-border bg-background/50 rounded-xl border p-4">
               <p className="text-popover-foreground text-sm font-medium">
@@ -743,6 +825,19 @@ export function ImportModal({
                   </div>
                 )}
               </div>
+              {result.checkQueued !== undefined && result.checkQueued > 0 && (
+                <p className="text-muted-foreground mt-2 text-xs">
+                  {tCheck('enqueueQueued', { count: result.checkQueued })}
+                  {result.checkEstimatedHours ? (
+                    <>
+                      {' — '}
+                      {tCheck('enqueueEstimate', {
+                        hours: result.checkEstimatedHours,
+                      })}
+                    </>
+                  ) : null}
+                </p>
+              )}
             </div>
           )}
         </div>

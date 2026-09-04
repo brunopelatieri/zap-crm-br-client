@@ -57,6 +57,10 @@ import {
   nextWindowOpening,
   resolveTimeZone,
 } from '@/lib/broadcasts/send-window';
+import {
+  decidePartialSend,
+  type PartialSendState,
+} from '@/lib/broadcasts/partial-send';
 import { loadBlockedAccountIds } from '@/lib/platform/blocked';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
@@ -165,9 +169,12 @@ export async function GET(request: Request) {
     console.error('[broadcasts-cron] due scan failed:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  if (!due || due.length === 0) {
-    return NextResponse.json({ dispatched: 0, postponed: 0, failed: 0 });
-  }
+  // Sem agendamento vencido NÃO se retorna cedo: desde a SPEC 069 F8
+  // esta rota tem uma SEGUNDA responsabilidade — varrer as campanhas
+  // paradas em `awaiting_check` (R6). Sair aqui faria o disparo parcial
+  // só andar nos ciclos em que, por coincidência, houvesse também um
+  // agendamento vencido — que é quase nunca.
+  const dueRows = (due ?? []) as DueBroadcast[];
 
   // SPEC 062 §4.3 ponto 1. Este cliente é `service_role` e não passa
   // por RLS: sem esta lista, a campanha agendada de uma conta bloqueada
@@ -184,7 +191,7 @@ export async function GET(request: Request) {
   let failed = 0;
   let skippedBlocked = 0;
 
-  for (const row of due as DueBroadcast[]) {
+  for (const row of dueRows) {
     if (blockedAccounts.has(row.account_id)) {
       skippedBlocked++;
       continue;
@@ -504,10 +511,534 @@ export async function GET(request: Request) {
     }
   }
 
+  // ── Segunda passada: o disparo parcial do R6 (SPEC 069 §7.3) ──
+  const partial = await sweepAwaitingCheck(admin, now, blockedAccounts);
+
   return NextResponse.json({
     dispatched,
     postponed,
     failed,
     skippedBlocked,
+    partialSend: partial,
   });
+}
+
+// ============================================================
+// R6 — disparo parcial (SPEC 069 §7.3, F8)
+// ============================================================
+
+/**
+ * Quantas campanhas em `awaiting_check` uma invocação assume.
+ *
+ * Mais alto que `MAX_PER_RUN` porque uma retomada é barata perto de um
+ * disparo agendado: o lote de cada ciclo é o que a cota de CHECAGEM
+ * liberou desde o ciclo anterior (dezenas, não milhares).
+ */
+const MAX_AWAITING_CHECK_PER_RUN = 20;
+
+/**
+ * Teto de itens já checados que uma retomada olha por ciclo. O lote
+ * real costuma ser bem menor (o que a cota de checagem liberou em 5
+ * min); este número existe para o caso de a janela de envio ter ficado
+ * fechada a noite inteira e o acúmulo ser grande.
+ */
+const MAX_READY_PER_RUN = 5000;
+
+interface AwaitingCheckRow {
+  id: string;
+  account_id: string;
+  user_id: string;
+  name: string;
+  template_name: string;
+  template_language: string;
+  template_variables: unknown;
+  header_media_url: string | null;
+  channel_id: string | null;
+  channel_source: 'resource' | 'default' | null;
+  scheduled_timezone: string | null;
+  window_override: boolean | null;
+  check_resumed_at: string | null;
+}
+
+/**
+ * Varre as campanhas paradas em `awaiting_check` e aplica a máquina de
+ * estados do §7.3 a cada uma.
+ *
+ * Por que a varredura mora AQUI e não no cron de checagem
+ *
+ *   O cron de checagem só age sobre campanhas cuja fila ele acabou de
+ *   processar. Uma campanha cuja fila esvaziou — porque a última fatia
+ *   ficou fora da janela de envio, ou porque a instância sumiu — não
+ *   teria mais nenhum item para disparar o gatilho, e ficaria parada
+ *   para sempre sem ninguém para reavaliá-la. Este cron varre por
+ *   ESTADO (`status = 'awaiting_check'`), não por evento, então toda
+ *   campanha é reavaliada a cada ciclo independentemente do que a
+ *   checagem fez.
+ *
+ * A variante B de um teste A/B nunca é varrida (D-11, corolário) — o
+ * filtro `parent_broadcast_id IS NULL` é o mesmo raciocínio do §6.6 da
+ * SPEC 044. Hoje a rota de enfileiramento recusa A/B na entrada, então
+ * este filtro é a segunda tranca, não a primeira.
+ */
+async function sweepAwaitingCheck(
+  admin: ReturnType<typeof supabaseAdmin>,
+  now: Date,
+  blockedAccounts: Set<string>
+): Promise<{
+  resumed: number;
+  completed: number;
+  postponed: number;
+  failed: number;
+  waiting: number;
+}> {
+  const result = {
+    resumed: 0,
+    completed: 0,
+    postponed: 0,
+    failed: 0,
+    waiting: 0,
+  };
+
+  const { data: rows, error } = await admin
+    .from('broadcasts')
+    .select(
+      'id, account_id, user_id, name, template_name, template_language, template_variables, header_media_url, channel_id, channel_source, scheduled_timezone, window_override, check_resumed_at'
+    )
+    .eq('status', 'awaiting_check')
+    .is('parent_broadcast_id', null)
+    // Quem esperou mais tempo sai primeiro; `null` (nunca retomada)
+    // antes de todos.
+    .order('check_resumed_at', { ascending: true, nullsFirst: true })
+    .limit(MAX_AWAITING_CHECK_PER_RUN);
+
+  if (error) {
+    console.error(
+      '[broadcasts-cron] awaiting_check scan failed:',
+      error.message
+    );
+    return result;
+  }
+
+  for (const raw of rows ?? []) {
+    const row = raw as unknown as AwaitingCheckRow;
+    if (blockedAccounts.has(row.account_id)) continue;
+
+    try {
+      const state = await loadPartialSendState(admin, row, now);
+      const decision = decidePartialSend(state.counters);
+
+      // Contadores primeiro: mesmo quando a decisão é esperar, a tela
+      // precisa mostrar o progresso da checagem avançando.
+      await admin
+        .from('broadcasts')
+        .update({ checked_count: state.resolvedChecks })
+        .eq('id', row.id);
+
+      if (decision.action === 'wait') {
+        result.waiting++;
+        continue;
+      }
+
+      if (decision.action === 'complete') {
+        await admin
+          .from('broadcasts')
+          .update({ status: 'sent' })
+          .eq('id', row.id)
+          .eq('status', 'awaiting_check');
+        result.completed++;
+        continue;
+      }
+
+      if (decision.action === 'fail') {
+        await admin
+          .from('broadcasts')
+          .update({ status: 'failed' })
+          .eq('id', row.id)
+          .eq('status', 'awaiting_check');
+        result.failed++;
+        await logBroadcastAudit(admin, {
+          accountId: row.account_id,
+          event: 'failed',
+          broadcastId: row.id,
+          broadcastName: row.name,
+          templateName: row.template_name,
+          details: {
+            reason: decision.reason,
+            unresolved_checks: state.counters.unresolvedChecks,
+            partial_send: true,
+          },
+        });
+        continue;
+      }
+
+      if (decision.action === 'postpone') {
+        result.postponed++;
+        await logBroadcastAudit(admin, {
+          accountId: row.account_id,
+          event: 'blocked_window',
+          broadcastId: row.id,
+          broadcastName: row.name,
+          templateName: row.template_name,
+          details: {
+            reason: decision.reason,
+            ready_to_dispatch: state.counters.readyToDispatch,
+            time_zone: state.timeZone,
+            window: describeSendWindow(),
+            partial_send: true,
+          },
+        });
+        continue;
+      }
+
+      // ── Claim: o mesmo lock do disparo agendado (decisão 3 do
+      // cabeçalho), aplicado aqui à fatia parcial. Sem ele, duas
+      // invocações do cron sobrepostas calculam o MESMO lote pronto
+      // (nenhuma inseriu `broadcast_recipients` ainda) e as duas
+      // despacham — a mesma pessoa recebe o template duas vezes.
+      const { data: claimed } = await admin
+        .from('broadcasts')
+        .update({ status: 'sending' })
+        .eq('id', row.id)
+        .eq('status', 'awaiting_check')
+        .select('id')
+        .maybeSingle();
+      if (!claimed) continue;
+
+      try {
+        await dispatchPartialSlice(admin, row, state, decision.nextStatus, now);
+        result.resumed++;
+      } catch (dispatchErr) {
+        // O claim não pode deixar a campanha travada em `sending` se o
+        // disparo falhar no meio — devolve a `awaiting_check` para os
+        // blocos de tratamento abaixo (que esperam esse status) agirem.
+        await admin
+          .from('broadcasts')
+          .update({ status: 'awaiting_check' })
+          .eq('id', row.id)
+          .eq('status', 'sending');
+        throw dispatchErr;
+      }
+    } catch (err) {
+      // Cota da janela de 24 h é condição TEMPORÁRIA: a campanha fica
+      // em `awaiting_check` e tenta de novo no próximo ciclo, sem
+      // avançar `check_resumed_at` — nada do que já estava pronto se
+      // perde.
+      const code = err instanceof BroadcastError ? err.code : 'internal';
+      if (code === 'quota_exceeded') {
+        result.waiting++;
+        await logBroadcastAudit(admin, {
+          accountId: row.account_id,
+          event: 'blocked_quota',
+          broadcastId: row.id,
+          broadcastName: row.name,
+          templateName: row.template_name,
+          details: {
+            message: err instanceof Error ? err.message : String(err),
+            partial_send: true,
+          },
+        });
+        continue;
+      }
+
+      console.error('[broadcasts-cron] partial send failed:', row.id, err);
+      result.failed++;
+      await admin
+        .from('broadcasts')
+        .update({ status: 'failed' })
+        .eq('id', row.id)
+        .eq('status', 'awaiting_check');
+      await logBroadcastAudit(admin, {
+        accountId: row.account_id,
+        event: 'failed',
+        broadcastId: row.id,
+        broadcastName: row.name,
+        templateName: row.template_name,
+        details: {
+          code,
+          message: err instanceof Error ? err.message : String(err),
+          partial_send: true,
+        },
+      });
+    }
+  }
+
+  return result;
+}
+
+interface PartialSendSnapshot {
+  counters: PartialSendState;
+  /** Contatos que saem AGORA — já cortados pela cota de 24 h. */
+  readyContactIds: string[];
+  resolvedChecks: number;
+  timeZone: string;
+  batchLimit: number;
+}
+
+/** Itens que saíram da fila SEM veredito (§14). */
+const UNRESOLVED_STATUSES = ['failed', 'expired', 'skipped'] as const;
+
+/**
+ * Monta o estado que `decidePartialSend` consome. Tudo por contagem no
+ * banco — nada é derivado de um campo que alguém precise lembrar de
+ * atualizar (§15.2 item 3: `checked_count` conta itens resolvidos, não
+ * subtrai do total).
+ */
+async function loadPartialSendState(
+  admin: ReturnType<typeof supabaseAdmin>,
+  row: AwaitingCheckRow,
+  now: Date
+): Promise<PartialSendSnapshot> {
+  const timeZone = resolveTimeZone(row.scheduled_timezone ?? DEFAULT_TIME_ZONE);
+
+  const [pendingRes, unresolvedRes, doneRes, dispatchedRes] = await Promise.all(
+    [
+      admin
+        .from('contact_check_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('broadcast_id', row.id)
+        .in('status', ['pending', 'in_progress']),
+      admin
+        .from('contact_check_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('broadcast_id', row.id)
+        .in('status', UNRESOLVED_STATUSES),
+      admin
+        .from('contact_check_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('broadcast_id', row.id)
+        .eq('status', 'done'),
+      admin
+        .from('broadcast_recipients')
+        .select('id', { count: 'exact', head: true })
+        .eq('broadcast_id', row.id),
+    ]
+  );
+
+  const pendingChecks = pendingRes.count ?? 0;
+  const unresolvedChecks = unresolvedRes.count ?? 0;
+  const doneChecks = doneRes.count ?? 0;
+  const everDispatched = dispatchedRes.count ?? 0;
+
+  const quota = await loadAccountQuota(admin, row.account_id, {
+    channelId: row.channel_id,
+  });
+  const batchLimit = quota.configured
+    ? quota.snapshot.batchLimit
+    : Number.POSITIVE_INFINITY;
+
+  const ready = await loadReadyContactIds(admin, row, batchLimit);
+
+  return {
+    counters: {
+      pendingChecks,
+      readyToDispatch: ready.ids.length,
+      readyRemaining: ready.remaining,
+      unresolvedChecks,
+      everDispatched,
+      withinSendWindow: isWithinSendWindow(now, timeZone),
+      windowOverride: row.window_override === true,
+    },
+    readyContactIds: ready.ids,
+    resolvedChecks: doneChecks + unresolvedChecks,
+    timeZone,
+    batchLimit,
+  };
+}
+
+/**
+ * Quem sai neste ciclo: checado, com número válido, e ainda SEM linha
+ * de destinatário nesta campanha.
+ *
+ * Duas travas, e as duas são necessárias
+ *
+ *   `checked_at >= check_resumed_at` é o que impede a consulta de
+ *   varrer os 100 mil itens já despachados de uma campanha grande a
+ *   cada 5 minutos. A marca d'água só avança quando a fatia despachou
+ *   TODO o lote pronto (`readyRemaining === 0`, ver `dispatchPartialSlice`)
+ *   — se sobrou gente por causa da cota, ela fica parada, senão o
+ *   próprio filtro tornaria os que ficaram para trás invisíveis para
+ *   sempre (bug real corrigido em code review: o avanço incondicional
+ *   escondia contatos já validados e nunca disparados).
+ *
+ *   A subtração pela existência de `broadcast_recipients` é a trava de
+ *   correção: é ELA que garante que ninguém receba duas vezes. O claim
+ *   em `sweepAwaitingCheck` (mesmo lock do disparo agendado, decisão 3
+ *   do cabeçalho) impede que duas invocações sobrepostas cheguem a
+ *   despachar a mesma fatia ao mesmo tempo; esta linha é o cinto e a
+ *   suspensório, não a única defesa.
+ *
+ * Contato com `whatsapp_status = 'invalid'` é filtrado AQUI, e não
+ * deixado para o pipeline de disparo, por um motivo específico do R6:
+ * ele nunca vai virar destinatário, então continuaria "pronto" para
+ * sempre e a campanha jamais chegaria a `complete`.
+ */
+async function loadReadyContactIds(
+  admin: ReturnType<typeof supabaseAdmin>,
+  row: AwaitingCheckRow,
+  batchLimit: number
+): Promise<{ ids: string[]; remaining: number }> {
+  let query = admin
+    .from('contact_check_queue')
+    .select('contact_id, checked_at')
+    .eq('broadcast_id', row.id)
+    .eq('status', 'done')
+    .order('checked_at', { ascending: true })
+    .limit(MAX_READY_PER_RUN);
+
+  if (row.check_resumed_at) {
+    query = query.gte('checked_at', row.check_resumed_at);
+  }
+
+  const { data: doneRows, error } = await query;
+  if (error || !doneRows || doneRows.length === 0) {
+    return { ids: [], remaining: 0 };
+  }
+
+  const candidateIds = [
+    ...new Set(doneRows.map((r) => r.contact_id as string)),
+  ];
+
+  const { data: alreadySent } = await admin
+    .from('broadcast_recipients')
+    .select('contact_id')
+    .eq('broadcast_id', row.id)
+    .in('contact_id', candidateIds);
+  const sentIds = new Set(
+    (alreadySent ?? []).map((r) => r.contact_id as string)
+  );
+
+  const notYetSent = candidateIds.filter((id) => !sentIds.has(id));
+  if (notYetSent.length === 0) return { ids: [], remaining: 0 };
+
+  const { data: validContacts } = await admin
+    .from('contacts')
+    .select('id')
+    .eq('account_id', row.account_id)
+    .eq('whatsapp_status', 'valid')
+    .in('id', notYetSent);
+
+  const ready = (validContacts ?? []).map((c) => c.id as string);
+
+  // Corta pela cota de 24 h em vez de deixar `assertFitsQuota` lançar:
+  // um lote maior que a cota lançaria o MESMO erro a cada ciclo, para
+  // sempre. Cortado, o que cabe sai agora e o resto sai depois — e o
+  // RESTO precisa ser reportado, senão a campanha seria encerrada como
+  // `sent` com esses contatos nunca enviados.
+  const ids = Number.isFinite(batchLimit) ? ready.slice(0, batchLimit) : ready;
+  return { ids, remaining: ready.length - ids.length };
+}
+
+/**
+ * Dispara UMA fatia e devolve a campanha ao estado que a máquina
+ * decidiu.
+ *
+ * A audiência é `contact_ids` — a lista exata deste ciclo — e o
+ * planejamento roda em modo `partialAppend`, que NÃO reescreve
+ * `audience_filter`, `total_recipients` nem `status` (ver
+ * `PlanDashboardBroadcastParams.partialAppend`). O `deliverBroadcast`
+ * roda com `finalizeStatus: false` pelo mesmo motivo: quem encerra a
+ * campanha é a máquina de estados, não o fim do fan-out de uma fatia.
+ */
+async function dispatchPartialSlice(
+  admin: ReturnType<typeof supabaseAdmin>,
+  row: AwaitingCheckRow,
+  state: PartialSendSnapshot,
+  nextStatus: 'awaiting_check' | 'sent',
+  now: Date
+): Promise<void> {
+  const variables = parseVariableMap(row.template_variables);
+  if (!variables) {
+    throw new BroadcastError(
+      'bad_request',
+      'Broadcast has malformed template variables.',
+      400
+    );
+  }
+
+  const { data: schedulerProfile } = await admin
+    .from('profiles')
+    .select('account_role')
+    .eq('user_id', row.user_id)
+    .eq('account_id', row.account_id)
+    .maybeSingle();
+  const canCreateTags = schedulerProfile
+    ? canEditSettings(schedulerProfile.account_role as AccountRole)
+    : false;
+
+  const plan = await planDashboardBroadcast(admin, {
+    accountId: row.account_id,
+    userId: row.user_id,
+    batchLimit: state.batchLimit,
+    adoptBroadcastId: row.id,
+    partialAppend: true,
+    canCreateTags,
+    input: {
+      name: row.name,
+      templateName: row.template_name,
+      templateLanguage: row.template_language,
+      audience: { type: 'contact_ids', contactIds: state.readyContactIds },
+      variables,
+      headerMediaUrl: row.header_media_url ?? undefined,
+      channelId: row.channel_id,
+      channelSource: row.channel_source,
+    },
+  });
+
+  // `total_recipients` acumula ao longo das fatias — quem soma é aqui,
+  // contando as linhas que existem, não somando o que esta fatia
+  // acrescentou (uma soma perderia o fio se um ciclo falhasse no meio).
+  const { count: recipientCount } = await admin
+    .from('broadcast_recipients')
+    .select('id', { count: 'exact', head: true })
+    .eq('broadcast_id', row.id);
+
+  // A marca d'água só avança quando o lote pronto coube INTEIRO nesta
+  // fatia (`readyRemaining === 0`). Se a cota cortou o lote, os
+  // contatos que ficaram de fora têm `checked_at` ANTERIOR a `now` — um
+  // avanço incondicional os tornaria invisíveis para sempre em
+  // `loadReadyContactIds` (filtro `checked_at >= check_resumed_at`),
+  // mesmo estando prontos e nunca disparados. Sem sobra, avançar é só
+  // otimização (evita revarrer uma campanha grande a cada ciclo).
+  const nextCheckResumedAt =
+    state.counters.readyRemaining > 0
+      ? row.check_resumed_at
+      : now.toISOString();
+
+  await admin
+    .from('broadcasts')
+    .update({
+      status: nextStatus,
+      total_recipients: recipientCount ?? 0,
+      check_resumed_at: nextCheckResumedAt,
+    })
+    .eq('id', row.id);
+
+  await logBroadcastAudit(admin, {
+    accountId: row.account_id,
+    event: 'dispatched',
+    broadcastId: row.id,
+    broadcastName: row.name,
+    actorUserId: null,
+    templateName: row.template_name,
+    totalRecipients: recipientCount ?? plan.totalRecipients,
+    excludedOptedOut: plan.excludedOptedOut,
+    details: {
+      partial_send: true,
+      slice_size: plan.planned.length,
+      rejected: plan.rejected,
+      excluded_invalid_whatsapp: plan.excludedInvalidWhatsapp,
+      pending_checks: state.counters.pendingChecks,
+      next_status: nextStatus,
+      time_zone: state.timeZone,
+    },
+  });
+
+  after(() =>
+    deliverBroadcast(admin, plan, {
+      batchSize: SEND_BATCH_SIZE,
+      delayMs: SEND_BATCH_DELAY_MS,
+      // A fatia não encerra a campanha — ver `DeliverOptions`.
+      finalizeStatus: false,
+    })
+  );
 }

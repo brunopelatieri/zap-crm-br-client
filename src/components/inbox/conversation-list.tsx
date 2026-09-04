@@ -6,6 +6,7 @@ import { matchesContactFilters } from '@/lib/inbox/conversations';
 import type { ConversationTabId } from '@/lib/inbox/tabs';
 import type { InboxStatusFilter } from '@/hooks/use-inbox-tabs';
 import { cn } from '@/lib/utils';
+import { useMediaSrc } from '@/lib/storage/use-media-src';
 import type { Contact, Conversation, ConversationStatus, Tag } from '@/types';
 import {
   Search,
@@ -583,6 +584,16 @@ function ConversationItem({
     t('unknown');
   const initials = displayName.charAt(0).toUpperCase();
 
+  // SPEC 069 D-12/R4: prefere avatar_path (assinado, bucket privado
+  // contact-avatars) sobre avatar_url (histórico/externo) — `useMediaSrc`
+  // já resolve essa cascata, e cai em `null` (iniciais) enquanto assina
+  // ou se não houver nenhum dos dois.
+  const { src: avatarSrc } = useMediaSrc(
+    contact?.avatar_url,
+    contact?.avatar_path,
+    'contact-avatars'
+  );
+
   // As etiquetas já chegam hidratadas em `contact.tags` pelo
   // CONVERSATION_SELECT (`contact_tags(tags(*))`) e o TagPickerProvider
   // as mantém em dia via `onTagsChanged` — não há nada a buscar aqui.
@@ -665,9 +676,9 @@ function ConversationItem({
     >
       {/* Avatar */}
       <div className="bg-muted text-foreground flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium">
-        {contact?.avatar_url ? (
+        {avatarSrc ? (
           <img
-            src={contact.avatar_url}
+            src={avatarSrc}
             alt={displayName}
             className="h-10 w-10 rounded-full object-cover"
           />

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { cn } from '@/lib/utils';
+import { useMediaSrc } from '@/lib/storage/use-media-src';
 import type { Contact, Deal, ContactNote } from '@/types';
 import {
   Phone,
@@ -83,6 +84,14 @@ export function ContactSidebar({
   const { evaluations: transferEvaluations } = useTransferChannels(
     contact?.id,
     currentChannelId
+  );
+
+  // SPEC 069 D-12/R4 — antes do `if (!contact) return …` abaixo: hook
+  // precisa ser chamado incondicionalmente (Regras dos Hooks).
+  const { src: avatarSrc } = useMediaSrc(
+    contact?.avatar_url,
+    contact?.avatar_path,
+    'contact-avatars'
   );
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferChannelId, setTransferChannelId] = useState<string | null>(
@@ -271,9 +280,9 @@ export function ContactSidebar({
           {/* Contact Info */}
           <div className="flex flex-col items-center text-center">
             <div className="bg-muted text-foreground flex h-16 w-16 items-center justify-center rounded-full text-lg font-semibold">
-              {contact.avatar_url ? (
+              {avatarSrc ? (
                 <img
-                  src={contact.avatar_url}
+                  src={avatarSrc}
                   alt={displayName}
                   className="h-16 w-16 rounded-full object-cover"
                 />

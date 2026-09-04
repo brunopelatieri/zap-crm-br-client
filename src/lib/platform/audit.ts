@@ -38,7 +38,10 @@ export type PlatformAuditAction =
   | 'plan.lifecycle_notice'
   | 'billing.renew'
   // SPEC 063 §6 — o botão "Reenviar" de /admin/notifications.
-  | 'notification.resend';
+  | 'notification.resend'
+  // SPEC 069 F10 — o editor de limites de segurança (nível 1a/1b) do
+  // ChannelLimitsPanel.
+  | 'channel_limits.update';
 
 export function consoleActorTag(ownerEmail: string): string {
   return `console:${ownerEmail}`;

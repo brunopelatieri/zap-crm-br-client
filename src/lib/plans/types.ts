@@ -6,7 +6,13 @@
  * contrato em catalog.test.ts, que compensam a ausência do CHECK.
  */
 
-export const QUOTA_KEYS = [
+/**
+ * Quotas de **uso** — "quanto você pode ter". São as que têm um
+ * contador do outro lado (contatos cadastrados, membros por papel,
+ * canais conectados), e por isso são as únicas que viram barra de uso
+ * na tela do cliente e linha no catálogo de planos.
+ */
+export const USAGE_QUOTA_KEYS = [
   'contacts',
   'members_total',
   'members_admin',
@@ -16,7 +22,57 @@ export const QUOTA_KEYS = [
   'channels_whatsapp_cloud',
 ] as const;
 
-export type QuotaKey = (typeof QUOTA_KEYS)[number];
+export type UsageQuotaKey = (typeof USAGE_QUOTA_KEYS)[number];
+
+/**
+ * Limites de **segurança** por conta (SPEC 069 D-5, nível 1a): "com
+ * que taxa você pode agir". Compartilham o mecanismo das quotas —
+ * `plan_limit()`, `plans.limits`, `account_plans.limit_overrides` e a
+ * validação da rota de plano — porque um mecanismo só é melhor que
+ * dois, mas **não** são a mesma coisa na tela.
+ *
+ * Por que não entram na barra de uso do cliente (SPEC 069 §15.3)
+ *
+ *   "Envios frios por dia" ao lado de "contatos" faz o cliente ler o
+ *   teto de segurança como algo que ele comprou e pode gastar. Não é:
+ *   é o freio que protege o número dele. Quem edita esses valores é o
+ *   proprietário, em `/admin`, e é lá que eles aparecem.
+ *
+ * Enumeradas à mão, e não derivadas de `ACCOUNT_CONFIGURABLE_LIMIT_KEYS`
+ * em tempo de execução, porque `QuotaKey` precisa continuar sendo uma
+ * união FECHADA: derivar a lista de um `.filter()` a colapsaria em
+ * `string`, e todo `Record<QuotaKey, …>` do módulo deixaria de pegar
+ * chave errada no `typecheck` — trocaríamos um limite escondido por
+ * um tipo cego. A divergência entre as duas listas é fechada por teste
+ * de contrato em `registry.test.ts`, que falha alto no minuto em que
+ * alguém marcar `accountConfigurable: true` numa entrada nova sem
+ * passar por aqui.
+ */
+export const SAFETY_QUOTA_KEYS = [
+  'evolution_cold_send_silence_hours',
+  'evolution_cold_send_per_hour',
+  'evolution_cold_send_per_day',
+  'evolution_cold_send_min_interval_seconds',
+  'evolution_cold_send_warmup_days',
+  'evolution_check_per_hour',
+  'evolution_check_per_day',
+  'evolution_check_min_interval_seconds',
+  'evolution_check_batch_size',
+  'evolution_harvest_per_run',
+  'evolution_harvest_max_per_instance',
+] as const;
+
+export type SafetyQuotaKey = (typeof SAFETY_QUOTA_KEYS)[number];
+
+/**
+ * O contrato completo aceito em `plans.limits` e
+ * `account_plans.limit_overrides` — uso + segurança. É esta lista que
+ * `validateCatalog`/`validateOverrides` e a rota
+ * `PUT /api/admin/accounts/[accountId]/plan` conferem.
+ */
+export const QUOTA_KEYS = [...USAGE_QUOTA_KEYS, ...SAFETY_QUOTA_KEYS] as const;
+
+export type QuotaKey = UsageQuotaKey | SafetyQuotaKey;
 
 export const FEATURE_KEYS = [
   'ai_enabled',
@@ -87,7 +143,10 @@ export interface AccountPlan {
 export type UsageBucketStatus = 'ok' | 'warn' | 'full' | 'over';
 
 export interface PlanUsageBucket {
-  key: QuotaKey;
+  // Só chave de USO: o painel de uso do cliente não mostra limite de
+  // segurança (SPEC 069 §15.3) — misturá-los faz "envios frios" passar
+  // por algo que ele comprou.
+  key: UsageQuotaKey;
   used: number;
   /** `null` = ilimitado. */
   limit: number | null;

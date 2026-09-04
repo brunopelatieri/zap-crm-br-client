@@ -89,6 +89,7 @@ export default function BroadcastDetailPage() {
   const router = useRouter();
   const t = useTranslations('Broadcasts.detail');
   const tStatus = useTranslations('Broadcasts.status');
+  const tAwaitingCheck = useTranslations('Broadcasts.awaitingCheck');
   const tWebhook = useTranslations('Broadcasts.webhookFunnel');
   const broadcastId = params.id as string;
 
@@ -176,8 +177,17 @@ export default function BroadcastDetailPage() {
   // usuário abriu para acompanhar ao vivo — sem isto, novos
   // destinatários que chegam via POST em segundo plano nunca apareceriam
   // sem F5 manual.
+  //
+  // `awaiting_check` (SPEC 069 R6, disparo parcial) também INCLUI —
+  // ✅ correção de code review: sem isto o "checado X de Y" que a tela
+  // mostra pra este status (abaixo) ficava congelado até o usuário dar
+  // F5, mesmo com o cron avançando a campanha a cada ciclo em segundo
+  // plano. Diferente de `streaming`, é transitório (minutos, não meses)
+  // — pollar é barato.
   const isSending =
-    broadcast?.status === 'sending' || broadcast?.status === 'streaming';
+    broadcast?.status === 'sending' ||
+    broadcast?.status === 'streaming' ||
+    broadcast?.status === 'awaiting_check';
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -340,6 +350,16 @@ export default function BroadcastDetailPage() {
                 </span>
               )}
             </div>
+            {broadcast.status === 'awaiting_check' && (
+              <p className="text-muted-foreground mt-1 text-xs">
+                {tAwaitingCheck('progress', {
+                  checked: broadcast.checked_count ?? 0,
+                  total: broadcast.total_recipients,
+                })}
+                {' · '}
+                {tAwaitingCheck('nextResume')}
+              </p>
+            )}
             {broadcast.source === 'webhook' ? (
               // SPEC 055 D-10 — cabeçalho do funil: o webhook_id (com
               // copiar) + link pro log já filtrado por ele. Uma linha

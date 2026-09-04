@@ -69,11 +69,7 @@ export function toEvolutionErrorResponse(err: unknown): NextResponse {
     // `kind` no corpo continua distinguindo "erro do servidor" de
     // "erro do pedido" para quem precisar dessa granularidade.
     const status =
-      err.kind === 'bad_request'
-        ? 400
-        : err.kind === 'not_found'
-          ? 404
-          : 422;
+      err.kind === 'bad_request' ? 400 : err.kind === 'not_found' ? 404 : 422;
     return NextResponse.json(
       { error: `Evolution API error: ${err.message}`, kind: err.kind },
       { status }

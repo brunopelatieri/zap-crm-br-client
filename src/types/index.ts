@@ -132,10 +132,31 @@ export interface Contact {
    * ver `lib/contacts/whatsapp-status.ts`.
    */
   whatsapp_status?: 'valid' | 'invalid';
-  /** Por que ficou no status atual: consecutive_failures | meta_error | manual. */
+  /** Por que ficou no status atual: consecutive_failures | meta_error |
+   *  manual | qr_check (a instância QRCode, terceira fonte desde a 078). */
   whatsapp_status_reason?: string | null;
   /** Quando o status atual passou a valer. NULL = nunca mudou do default. */
   whatsapp_status_updated_at?: string | null;
+  /**
+   * Foto de perfil trazida pela instância QRCode (migração 078, SPEC 069
+   * D-12). Caminho dentro do bucket PRIVADO `contact-avatars` — precisa
+   * ser assinado antes de virar `src`, ao contrário de `avatar_url`, que
+   * já é uma URL pronta. São duas colunas de propósito: sobrescrever
+   * `avatar_url` com um caminho quebraria em silêncio os três lugares
+   * que já a renderizam.
+   */
+  avatar_path?: string | null;
+  /** De onde veio `avatar_path`. Hoje só `whatsapp_qr`. */
+  avatar_source?: 'whatsapp_qr' | null;
+  /** Base do TTL de re-download (D-13). NULL = nunca buscado. */
+  avatar_fetched_at?: string | null;
+  /** Proveniência da checagem (D-2, regra 4): quando, e por qual
+   *  instância. Sem elas ninguém responde isso seis meses depois. */
+  whatsapp_checked_at?: string | null;
+  whatsapp_checked_channel_id?: string | null;
+  /** Discordância entre fontes de `whatsapp_status` (D-2, regra 3).
+   *  Sinal para o operador — nunca decisão automática. */
+  whatsapp_check_note?: string | null;
   created_at: string;
   updated_at: string;
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
@@ -538,7 +559,15 @@ export type BroadcastStatus =
    * funil acumulativo por `webhook_id` nunca "termina", então não
    * chega a `sent`/`failed`.
    */
-  | 'streaming';
+  | 'streaming'
+  /**
+   * SPEC 069 (migração 078, R6) — "Em espera — disparo parcial". A
+   * campanha pediu checagem de números antes de disparar e já gastou a
+   * cota de checagem deste ciclo: ela está PARADA esperando o próximo,
+   * e não morta. Ao contrário de `sending`/`streaming`, não pulsa —
+   * nada está em voo.
+   */
+  | 'awaiting_check';
 
 /** SPEC 055 D-4. `dashboard` (padrão) cobre campanha manual/agendada
  *  E o disparo público hoje (nada além do webhook de entrada grava um
@@ -602,6 +631,22 @@ export interface Broadcast {
    * esta coluna.
    */
   channel_source?: 'resource' | 'default' | null;
+  /**
+   * Checar os números na instância QRCode antes de disparar (SPEC 069
+   * R6, migração 078). `false` — o padrão — é a campanha de hoje.
+   */
+  check_before_send?: boolean;
+  /**
+   * A instância que CHECA, independente do canal que DISPARA (D-10):
+   * uma campanha Cloud API pode querer a checagem, que só o canal QR
+   * sabe fazer. `null` = resolvida no consumo da fila.
+   */
+  check_channel_id?: string | null;
+  /** Quantos itens da fila desta campanha já foram resolvidos. */
+  checked_count?: number;
+  /** Última retomada do disparo parcial — base da previsão mostrada
+   *  no badge `awaiting_check`. */
+  check_resumed_at?: string | null;
   status: BroadcastStatus;
   total_recipients: number;
   sent_count: number;
@@ -635,6 +680,72 @@ export interface BroadcastRecipient {
   whatsapp_message_id?: string;
   created_at: string;
   contact?: Contact;
+}
+
+// ============================================================
+// Checagem e captação pela instância QRCode (migração 078, SPEC 069)
+// ============================================================
+
+export type ContactCheckQueueStatus =
+  'pending' | 'in_progress' | 'done' | 'failed' | 'expired' | 'skipped';
+
+export type ContactCheckQueueSource = 'contacts_import' | 'broadcast';
+
+/**
+ * Um número esperando para ser perguntado ao WhatsApp (SPEC 069
+ * R2/R3/R6). A tabela não tem policy de escrita pelo cliente: é
+ * enchida por rota server-side e consumida pelo cron — uma fila que o
+ * próprio limitado pudesse esvaziar seria o freio com o pedal do lado
+ * de fora.
+ */
+export interface ContactCheckQueueItem {
+  id: string;
+  account_id: string;
+  contact_id: string;
+  /** Congelado no enfileiramento: se o contato for editado depois, o
+   *  que foi de fato checado continua rastreável. */
+  phone_normalized: string;
+  source: ContactCheckQueueSource;
+  broadcast_id?: string | null;
+  /** Instância validadora escolhida no enfileiramento (D-10). `null`
+   *  resolve na hora do consumo — a instância pode ser trocada. */
+  check_channel_id?: string | null;
+  status: ContactCheckQueueStatus;
+  attempts: number;
+  last_error?: string | null;
+  requested_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  checked_at?: string | null;
+}
+
+export type HarvestedContactStatus =
+  'new' | 'promoted' | 'ignored' | 'duplicate';
+
+/**
+ * Contato lido da agenda da instância, à espera de triagem (SPEC 069
+ * D-3 / PRD 068 §3). **Não é `Contact`**: uma pessoa da agenda do dono
+ * do número não é lead até alguém dizer que é. A promoção é ato
+ * explícito, com dono e data — é ela que consome a quota de contatos,
+ * com alguém na tela para ver o erro, em vez de às 3 da manhã.
+ */
+export interface HarvestedContact {
+  id: string;
+  account_id: string;
+  /** Instância de origem — a triagem filtra por ela. */
+  channel_id: string;
+  jid: string;
+  phone_normalized?: string | null;
+  push_name?: string | null;
+  full_name?: string | null;
+  business_name?: string | null;
+  avatar_path?: string | null;
+  status: HarvestedContactStatus;
+  promoted_contact_id?: string | null;
+  promoted_by?: string | null;
+  promoted_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ============================================================

@@ -44,7 +44,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useMediaSrc } from '@/lib/storage/use-media-src';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -81,6 +82,7 @@ export function ContactDetailView({
   const t = useTranslations('Contacts.detailView');
   const tConsent = useTranslations('Contacts.detailView.consent');
   const tWhatsapp = useTranslations('Contacts.detailView.whatsappStatus');
+  const tCheck = useTranslations('Contacts.check');
   const supabase = createClient();
   const { accountId, defaultCurrency } = useAuth();
 
@@ -511,6 +513,15 @@ export function ContactDetailView({
    *  ver o comentário da coluna na migração 049. */
   const whatsappStatus = contact?.whatsapp_status ?? 'valid';
 
+  // SPEC 069 D-12/R4 — a metade que faltava: o gerenciador de contatos
+  // só tinha iniciais até aqui. Mesma cascata dos 3 lugares do inbox
+  // (avatar_path assinado > avatar_url > iniciais).
+  const { src: avatarSrc } = useMediaSrc(
+    contact?.avatar_url,
+    contact?.avatar_path,
+    'contact-avatars'
+  );
+
   function getInitials(name?: string | null) {
     if (!name) return '?';
     return name
@@ -538,6 +549,7 @@ export function ContactDetailView({
               <SheetHeader className="border-border/50 border-b p-4">
                 <div className="flex items-center gap-3">
                   <Avatar className="bg-muted border-border size-12 border">
+                    {avatarSrc && <AvatarImage src={avatarSrc} alt="" />}
                     <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
                       {getInitials(contact.name)}
                     </AvatarFallback>
@@ -781,6 +793,36 @@ export function ContactDetailView({
                         )}
                       </div>
                     </div>
+
+                    {/* ── Selo de checagem (SPEC 069 D-2/R4) ──
+                        Proveniência: quando, e por qual instância. Não
+                        depende do status ser invalid — um contato
+                        `valid` checado com sucesso também mostra isto,
+                        pela mesma razão que um "Verificado" não deveria
+                        aparecer só quando algo deu errado. */}
+                    {contact.whatsapp_checked_at && (
+                      <div className="border-border/50 space-y-1 border-t pt-3">
+                        <p className="text-muted-foreground text-[11px]">
+                          {tCheck('verifiedAt', {
+                            date: new Date(
+                              contact.whatsapp_checked_at
+                            ).toLocaleDateString(),
+                            instance:
+                              (contact.whatsapp_checked_channel_id &&
+                                accountChannels.byId.get(
+                                  contact.whatsapp_checked_channel_id
+                                )?.name) ??
+                              '—',
+                          })}
+                        </p>
+                        {contact.whatsapp_check_note ===
+                          'qr_check_conflict' && (
+                          <p className="text-[11px] text-amber-400">
+                            {tCheck('statusConflict')}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {/* ── Número morto (SPEC 044 §6.4) ──
                         Só aparece quando o status não é o default: um

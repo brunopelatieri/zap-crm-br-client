@@ -53,6 +53,15 @@ export const broadcastStatusConfig: Record<BroadcastStatus, StatusDisplay> = {
     classes: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
     pulse: true,
   },
+  // SPEC 069 (migração 078, R6) — disparo parcial esperando o próximo
+  // ciclo de cota de checagem. Âmbar porque é espera, não erro nem
+  // conclusão; e SEM `pulse`, ao contrário de `sending`/`streaming`:
+  // a campanha está PARADA, e um badge pulsando prometeria movimento
+  // que não existe.
+  awaiting_check: {
+    label: 'awaiting_check',
+    classes: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
+  },
 };
 
 export const recipientStatusConfig: Record<RecipientStatus, StatusDisplay> = {

@@ -38,7 +38,7 @@ import {
 import { RequirePlatformOwner } from '@/components/platform/require-platform-owner';
 import { yearlyPriceCents } from '@/lib/plans/billing';
 import { formatPlanPrice } from '@/lib/plans/format';
-import { FEATURE_KEYS, QUOTA_KEYS } from '@/lib/plans/types';
+import { FEATURE_KEYS, USAGE_QUOTA_KEYS } from '@/lib/plans/types';
 
 interface PlanRow {
   id: string;
@@ -275,7 +275,7 @@ function PlanEditDialog({
             {t('unlimitedHint')}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            {QUOTA_KEYS.map((key) => (
+            {USAGE_QUOTA_KEYS.map((key) => (
               <div key={key} className="space-y-1">
                 <Label className="text-xs font-normal">{key}</Label>
                 <Input
