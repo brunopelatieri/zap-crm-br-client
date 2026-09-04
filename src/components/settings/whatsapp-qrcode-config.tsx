@@ -274,7 +274,7 @@ export function WhatsappQrcodeConfig() {
       >
         <AlertTriangle className="text-amber-400" />
         <AlertTitle>{t('riskBannerTitle')}</AlertTitle>
-        <AlertDescription className="text-amber-100/80">
+        <AlertDescription className="">
           {t('riskBannerBody')}
         </AlertDescription>
       </Alert>
@@ -706,7 +706,7 @@ function InstanceCard({
                 </div>
                 {instance.checkEnabled && (
                   <Alert className="border-amber-500/30 bg-amber-500/5 py-2">
-                    <AlertDescription className="text-[11px] text-amber-100/70">
+                    <AlertDescription className="text-[11px]">
                       {tEnrich('checkRiskWarning')}
                     </AlertDescription>
                   </Alert>

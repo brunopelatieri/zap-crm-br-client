@@ -883,7 +883,7 @@ function CloudNumberDetail({
                 <AlertTitle className="mb-1 text-amber-200">
                   Stored token can&apos;t be decrypted
                 </AlertTitle>
-                <AlertDescription className="text-sm text-amber-100/80">
+                <AlertDescription className="text-sm">
                   {statusMessage}
                 </AlertDescription>
                 <Button

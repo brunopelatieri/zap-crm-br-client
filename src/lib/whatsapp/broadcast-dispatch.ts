@@ -93,17 +93,17 @@ import {
   type VariableMapping,
 } from '@/lib/whatsapp/broadcast-variables';
 import type { Contact, MessageTemplate } from '@/types';
+import { MAX_DASHBOARD_RECIPIENTS } from '@/lib/broadcasts/limits';
 
 /**
- * Teto absoluto de destinatários por disparo do painel.
- *
- * Casa com o teto de linhas do parser de planilha (§3.4): uma audiência
- * maior do que isto não consegue nem ser importada, então este número é
- * uma rede de segurança contra um cliente adulterado, não uma regra de
- * produto. A regra de produto é a cota de 24 h da Meta, aplicada logo
- * abaixo.
+ * Teto absoluto de destinatários por disparo do painel. Definido em
+ * `src/lib/broadcasts/limits.ts` — reexportado daqui para não quebrar
+ * quem já importa deste módulo — porque a validação client-safe de
+ * `AudienceConfig` (`parse-audience.ts`, usada em `loadBroadcastDraft`/
+ * `saveBroadcastDraft`, SPEC 070 §3.1) precisa do mesmo número sem
+ * herdar as dependências server-only deste arquivo.
  */
-export const MAX_DASHBOARD_RECIPIENTS = 50_000;
+export { MAX_DASHBOARD_RECIPIENTS };
 
 /**
  * Ritmo do fan-out. 10 envios por segundo é o mesmo par que o laço do
@@ -191,14 +191,31 @@ export interface PlanDashboardBroadcastParams {
   /**
    * Id de um `broadcasts` que já existe e deve ser ADOTADO em vez de um
    * INSERT novo — é assim que o cron da §6.3 retoma uma campanha
-   * `scheduled` que ele acabou de travar em `sending`, sem criar uma
-   * segunda linha ao lado do agendamento que o usuário vê na lista.
+   * `scheduled` que ele acabou de travar em `sending`, e é também como
+   * a rota de disparo direto (SPEC 070 §6.1) reusa o rascunho aberto na
+   * edição, sem criar uma segunda linha ao lado dele.
    *
-   * Quando presente, o UPDATE casa apenas por id: quem garantiu o estado
-   * da linha foi o `claim` do cron. Sem ele, o ramo `staged` continua
-   * adotando o rascunho pelo `draftId`, exigindo `status = 'draft'`.
+   * O UPDATE de adoção casa por id — mas a pré-condição `status =
+   * 'draft'` só é dispensada quando `rowAlreadyClaimed` diz que sim.
    */
   adoptBroadcastId?: string;
+  /**
+   * Achado de code review (SPEC 070) — `true` SÓ quando o CHAMADOR já
+   * garantiu, com seu próprio UPDATE atômico, que esta linha está
+   * exclusivamente sua antes de chamar aqui. Hoje, só o cron faz isso
+   * (`UPDATE … WHERE status = 'scheduled'/'awaiting_check'`, que já
+   * move o status para `sending`): nesse caso o status já não é mais
+   * `draft` quando `materializeArm` roda, então repetir a pré-condição
+   * faria o UPDATE de adoção não casar nada.
+   *
+   * A rota de disparo direto do usuário (`POST /api/broadcasts/send`)
+   * NUNCA passa isto — ela só LÊ o rascunho antes (`resolveAdoptedDraft`,
+   * uma SELECT comum, não um claim), então `materializeArm` continua
+   * exigindo `status = 'draft'` no UPDATE de adoção. É a única defesa
+   * contra duas abas disparando o mesmo rascunho ao mesmo tempo — sem
+   * isto, ambas adotam e enviam a mesma campanha duas vezes.
+   */
+  rowAlreadyClaimed?: boolean;
   /**
    * SPEC 057 D-1 — `canEditSettings(role)` de quem disparou (ou, no cron,
    * de quem agendou). Admin+ cria etiquetas ausentes da planilha; demais
@@ -518,6 +535,8 @@ interface MaterializeArmParams {
   members: EvaluatedContact[];
   /** Ver `PlanDashboardBroadcastParams.adoptBroadcastId`. */
   adoptBroadcastId?: string;
+  /** Ver `PlanDashboardBroadcastParams.rowAlreadyClaimed`. */
+  rowAlreadyClaimed?: boolean;
   /** Ver `PlanDashboardBroadcastParams.partialAppend`. */
   partialAppend?: boolean;
   /** Rótulo do braço no teste A/B (§6.6). Ausente = campanha comum. */
@@ -538,9 +557,28 @@ interface MaterializeArmParams {
  *     `status = 'draft'`. Enviá-lo é um UPDATE desse mesmo rascunho, o
  *     que faz o draftId da triagem virar o id de verdade do disparo em
  *     vez de deixar um rascunho órfão ao lado de um broadcast novo.
- *   • `adoptBroadcastId` — o cron da §6.3 já travou a linha `scheduled`
- *     em `sending` e passa o id dela. Criar uma linha nova aqui daria
- *     ao usuário duas campanhas para o mesmo agendamento.
+ *   • `adoptBroadcastId` — o chamador quer adotar uma linha específica
+ *     em vez de inserir. Dois motivos bem diferentes levam a isto, e é
+ *     por isso que `rowAlreadyClaimed` existe:
+ *
+ *       - o cron (§6.3) já travou a linha antes de chamar aqui — um
+ *         `UPDATE … WHERE status = 'scheduled'/'awaiting_check'` que já
+ *         moveu o status para `sending` e garantiu exclusividade. Repetir
+ *         `status = 'draft'` neste UPDATE não casaria nada (o status já
+ *         não é mais `draft`) — por isso o chamador passa
+ *         `rowAlreadyClaimed: true`, e este UPDATE dispensa a
+ *         pré-condição.
+ *       - a rota de disparo direto do usuário (SPEC 070 §6.1) adota o
+ *         rascunho aberto na edição, mas NUNCA travou a linha antes —
+ *         só leu (`resolveAdoptedDraft`, uma SELECT comum). Sem
+ *         `rowAlreadyClaimed`, este UPDATE precisa continuar exigindo
+ *         `status = 'draft'` — é a ÚNICA defesa contra duas abas
+ *         disparando o mesmo rascunho ao mesmo tempo. Achado de code
+ *         review: antes desta correção, a mera presença de
+ *         `adoptBroadcastId` (não quem o mandou) desligava a
+ *         pré-condição, e a rota de disparo do usuário passou a mandá-lo
+ *         sem nunca ter reivindicado a linha — duas abas conseguiam
+ *         adotar e enviar a MESMA campanha duas vezes.
  */
 async function materializeArm(
   db: SupabaseClient,
@@ -555,6 +593,7 @@ async function materializeArm(
     audience,
     members,
     adoptBroadcastId,
+    rowAlreadyClaimed,
     partialAppend,
     variantLabel,
     parentBroadcastId,
@@ -658,12 +697,19 @@ async function materializeArm(
       .update({ ...row, ...abColumns })
       .eq('id', adoptId);
 
-    // Sem `adoptBroadcastId`, a precondição de estado é parte da defesa:
-    // um rascunho já enviado não pode ser reenviado por uma segunda aba.
-    // COM ele, quem já garantiu a transição de estado (e a exclusividade)
-    // foi o claim do cron — repetir `status = 'draft'` aqui faria o
-    // UPDATE não casar linha nenhuma e o disparo agendado "desaparecer".
-    if (!adoptBroadcastId) update = update.eq('status', 'draft');
+    // A precondição de estado é a defesa contra duas requisições
+    // adotando a mesma linha ao mesmo tempo — um rascunho já enviado (ou
+    // já sendo enviado por OUTRA requisição concorrente) não pode ser
+    // reenviado por uma segunda aba. Só dispensa quando o CHAMADOR já
+    // garantiu a exclusividade sozinho, com o próprio claim atômico
+    // (`rowAlreadyClaimed: true` — hoje, só o cron faz isso, e é por
+    // isso que o status já não é mais `draft` quando ele chega aqui:
+    // repetir a pré-condição faria o UPDATE não casar nada e o disparo
+    // agendado "desaparecer"). A mera presença de `adoptBroadcastId` NÃO
+    // basta — achado de code review: a rota de disparo direto do
+    // usuário (§6.1) também adota uma linha por id, mas nunca a
+    // reivindicou antes (só leu), então PRECISA da mesma pré-condição.
+    if (!rowAlreadyClaimed) update = update.eq('status', 'draft');
 
     const { data: updated, error: updateError } = await update
       .select('id')
@@ -823,6 +869,7 @@ export async function planDashboardBroadcast(
     input,
     batchLimit,
     adoptBroadcastId,
+    rowAlreadyClaimed,
     canCreateTags,
     partialAppend,
   }: PlanDashboardBroadcastParams
@@ -898,6 +945,7 @@ export async function planDashboardBroadcast(
     audience: input.audience,
     members: evaluated,
     adoptBroadcastId,
+    rowAlreadyClaimed,
     partialAppend,
   });
 
@@ -921,6 +969,11 @@ export interface PlanAbTestParams {
   batchLimit: number;
   /** Linha a adotar para a variante A (rascunho staged ou agendamento). */
   adoptBroadcastId?: string;
+  /** Ver `PlanDashboardBroadcastParams.rowAlreadyClaimed` — vale só para
+   *  `adoptBroadcastId` (a variante A). A variante B nunca precisa: ela
+   *  só adota quando `adoptVariantBroadcastId` vem do cron, que já a
+   *  reivindicou pelo mesmo claim da variante A. */
+  rowAlreadyClaimed?: boolean;
   /** Linha a adotar para a variante B — só o cron usa (§6.3 + §6.6). */
   adoptVariantBroadcastId?: string;
   /** Injetável para o teste fixar o sorteio; produção usa `Math.random`. */
@@ -972,6 +1025,7 @@ export async function planAbTestBroadcast(
     splitPercent = AB_DEFAULT_SPLIT_PERCENT,
     batchLimit,
     adoptBroadcastId,
+    rowAlreadyClaimed,
     adoptVariantBroadcastId,
     rng,
     canCreateTags,
@@ -1109,6 +1163,7 @@ export async function planAbTestBroadcast(
     audience: input.audience,
     members: armAMembers,
     adoptBroadcastId,
+    rowAlreadyClaimed,
     variantLabel: 'A',
     abSplitPercent: percent,
   });
@@ -1124,6 +1179,10 @@ export async function planAbTestBroadcast(
     audience: audienceForVariantB(input.audience),
     members: armBMembers,
     adoptBroadcastId: adoptVariantBroadcastId,
+    // Só o cron manda `adoptVariantBroadcastId` (§6.3 + §6.6), e sempre
+    // depois de reivindicar a linha pelo mesmo claim da variante A —
+    // nunca fica ambíguo como o de cima, então não precisa vir de fora.
+    rowAlreadyClaimed: Boolean(adoptVariantBroadcastId),
     variantLabel: 'B',
     parentBroadcastId: variantA.broadcastId,
   });
@@ -1175,6 +1234,20 @@ export interface ScheduleDashboardBroadcastParams {
    */
   variant?: AbVariantInput;
   splitPercent?: number;
+  /**
+   * SPEC 070 §6.2 — linha de `broadcasts` a ADOTAR em vez de inserir.
+   *
+   * Antes desta SPEC, o agendamento só adotava quando a audiência era
+   * `staged` (o rascunho da triagem). Um rascunho cuja audiência foi
+   * TROCADA para etiquetas e depois agendado caía no `else`, fazia
+   * `INSERT` e deixava o rascunho órfão ao lado do agendamento —
+   * exatamente o que a §1.3 proíbe.
+   *
+   * A pré-condição `status = 'draft'` PERMANECE: este parâmetro vem do
+   * cliente (a rota já conferiu conta e estado), e é ela que impede uma
+   * segunda aba de agendar uma campanha que já saiu.
+   */
+  adoptBroadcastId?: string;
 }
 
 export interface ScheduledBroadcast {
@@ -1213,6 +1286,7 @@ export async function scheduleDashboardBroadcast(
     windowOverride,
     variant,
     splitPercent,
+    adoptBroadcastId,
   }: ScheduleDashboardBroadcastParams
 ): Promise<ScheduledBroadcast> {
   const templateLanguage = input.templateLanguage || 'en_US';
@@ -1305,24 +1379,32 @@ export async function scheduleDashboardBroadcast(
   let broadcastId: string;
   let storedScheduledAt: string;
 
-  // `staged` adota o rascunho da triagem, exatamente como o envio
-  // imediato: o agendamento É aquele rascunho, com hora marcada. As
-  // linhas de `broadcast_audience_staging` ficam onde estão — é delas que
-  // o cron vai ler a audiência, e apagá-las agora esvaziaria o disparo.
-  if (input.audience.type === 'staged') {
-    const draftId = input.audience.draftId;
-    if (!draftId) {
-      throw new BroadcastError(
-        'bad_request',
-        "Staged audience is missing 'draftId'.",
-        400
-      );
-    }
+  // Adota o rascunho em vez de inserir, exatamente como o envio
+  // imediato (`materializeArm`, mesma expressão): o agendamento É
+  // aquele rascunho, com hora marcada. As linhas de
+  // `broadcast_audience_staging` ficam onde estão — é delas que o cron
+  // vai ler a audiência, e apagá-las agora esvaziaria o disparo.
+  //
+  // SPEC 070 §6.2 — `adoptBroadcastId` (o rascunho aberto na edição)
+  // manda mesmo quando a audiência deixou de ser `staged`; sem ele,
+  // vale o `draftId` da audiência triada, como antes.
+  const adoptId =
+    adoptBroadcastId ??
+    (input.audience.type === 'staged' ? input.audience.draftId : undefined);
 
+  if (input.audience.type === 'staged' && !adoptId) {
+    throw new BroadcastError(
+      'bad_request',
+      "Staged audience is missing 'draftId'.",
+      400
+    );
+  }
+
+  if (adoptId) {
     const { data: updated, error } = await db
       .from('broadcasts')
       .update(row)
-      .eq('id', draftId)
+      .eq('id', adoptId)
       .eq('status', 'draft')
       .select('id, scheduled_at')
       .single();

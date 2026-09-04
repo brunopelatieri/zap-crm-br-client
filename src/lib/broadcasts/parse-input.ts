@@ -1,8 +1,15 @@
 /**
- * Validação da `AudienceConfig` e do mapa de variáveis vindos de FORA do
- * TypeScript (SPEC 044 §6.1, §6.3).
+ * Validação do corpo de teste A/B vindo de FORA do TypeScript
+ * (SPEC 044 §6.6). `parseAudienceConfig`/`parseVariableMap`/`isRecord`
+ * moraram aqui até a SPEC 070 — foram extraídas para
+ * `parse-audience.ts` porque `draft.ts` (§3.1) precisa delas rodando
+ * no NAVEGADOR, e este arquivo importa `BroadcastError`
+ * (`broadcast-core.ts`) e `AbVariantInput` (`broadcast-dispatch.ts`),
+ * dois módulos server-only que quebram um bundle de cliente. Reexporta
+ * as três abaixo para os consumidores de servidor não precisarem trocar
+ * de import.
  *
- * Dois consumidores, um validador
+ * Dois consumidores, um validador de A/B
  *
  *   1. `POST /api/broadcasts/send` — o corpo veio pela rede e quem posta
  *      pode mandar o que quiser.
@@ -17,126 +24,16 @@
  *   imediato recusou e o agendado deixou passar".
  */
 
-import {
-  type AudienceConfig,
-  type CustomFieldOperator,
-} from '@/lib/audience/estimate';
 import { AB_DEFAULT_SPLIT_PERCENT } from '@/lib/broadcasts/ab-test';
-import { BroadcastError } from '@/lib/whatsapp/broadcast-core';
 import {
-  MAX_DASHBOARD_RECIPIENTS,
-  type AbVariantInput,
-} from '@/lib/whatsapp/broadcast-dispatch';
-import type { VariableMapping } from '@/lib/whatsapp/broadcast-variables';
+  isRecord,
+  parseAudienceConfig,
+  parseVariableMap,
+} from '@/lib/broadcasts/parse-audience';
+import { BroadcastError } from '@/lib/whatsapp/broadcast-core';
+import { type AbVariantInput } from '@/lib/whatsapp/broadcast-dispatch';
 
-const AUDIENCE_TYPES = [
-  'all',
-  'tags',
-  'custom_field',
-  'csv',
-  'staged',
-] as const;
-
-const CUSTOM_FIELD_OPERATORS: CustomFieldOperator[] = [
-  'is',
-  'is_not',
-  'contains',
-];
-
-const VARIABLE_TYPES = ['static', 'field', 'custom_field'] as const;
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const out = value.filter((v): v is string => typeof v === 'string');
-  return out.length > 0 ? out : undefined;
-}
-
-/**
- * Valida uma `AudienceConfig`.
- *
- * Devolve `null` quando a forma não fecha — o chamador responde 400 (ou,
- * no cron, marca o agendamento como falho) em vez de deixar um objeto
- * meio construído chegar ao SQL.
- */
-export function parseAudienceConfig(raw: unknown): AudienceConfig | null {
-  if (!isRecord(raw)) return null;
-
-  const type = raw.type;
-  if (
-    typeof type !== 'string' ||
-    !(AUDIENCE_TYPES as readonly string[]).includes(type)
-  ) {
-    return null;
-  }
-
-  const audience: AudienceConfig = {
-    type: type as AudienceConfig['type'],
-    tagIds: stringArray(raw.tagIds),
-    excludeTagIds: stringArray(raw.excludeTagIds),
-  };
-
-  if (type === 'custom_field') {
-    const cf = raw.customField;
-    if (!isRecord(cf)) return null;
-    if (
-      typeof cf.fieldId !== 'string' ||
-      typeof cf.value !== 'string' ||
-      typeof cf.operator !== 'string' ||
-      !CUSTOM_FIELD_OPERATORS.includes(cf.operator as CustomFieldOperator)
-    ) {
-      return null;
-    }
-    audience.customField = {
-      fieldId: cf.fieldId,
-      operator: cf.operator as CustomFieldOperator,
-      value: cf.value,
-    };
-  }
-
-  if (type === 'csv') {
-    if (!Array.isArray(raw.csvContacts)) return null;
-    // O teto vale já na borda: uma lista maior do que isso é rejeitada
-    // antes de virar milhares de linhas em memória no servidor.
-    if (raw.csvContacts.length > MAX_DASHBOARD_RECIPIENTS) return null;
-
-    const rows: {
-      phone: string;
-      name?: string;
-      email?: string;
-      company?: string;
-      tagNames?: string[];
-    }[] = [];
-    for (const row of raw.csvContacts) {
-      if (!isRecord(row) || typeof row.phone !== 'string') continue;
-      rows.push({
-        phone: row.phone,
-        name: typeof row.name === 'string' ? row.name : undefined,
-        // SPEC 057 F2/F3 — sem isto, um `POST /api/broadcasts/send` (ou
-        // um agendamento persistido) com `audience.type === 'csv'` fora
-        // do fluxo de triagem perdia email/company/tagNames em silêncio,
-        // mesmo já carregando os campos em `AudienceConfig.csvContacts`.
-        email: typeof row.email === 'string' ? row.email : undefined,
-        company: typeof row.company === 'string' ? row.company : undefined,
-        tagNames: stringArray(row.tagNames),
-      });
-    }
-    if (rows.length === 0) return null;
-    audience.csvContacts = rows;
-  }
-
-  if (type === 'tags' && !audience.tagIds) return null;
-
-  if (type === 'staged') {
-    if (typeof raw.draftId !== 'string' || !raw.draftId) return null;
-    audience.draftId = raw.draftId;
-  }
-
-  return audience;
-}
+export { isRecord, parseAudienceConfig, parseVariableMap };
 
 export interface AbTestRequest {
   variant: AbVariantInput;
@@ -213,27 +110,4 @@ export function parseAbTest(raw: unknown): AbTestRequest | null {
     },
     splitPercent,
   };
-}
-
-/** Mesma ideia para o mapeamento de variáveis. `null` = malformado. */
-export function parseVariableMap(
-  raw: unknown
-): Record<string, VariableMapping> | null {
-  if (raw === undefined || raw === null) return {};
-  if (!isRecord(raw)) return null;
-
-  const out: Record<string, VariableMapping> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (!isRecord(value)) return null;
-    const { type, value: v } = value;
-    if (
-      typeof type !== 'string' ||
-      !(VARIABLE_TYPES as readonly string[]).includes(type) ||
-      typeof v !== 'string'
-    ) {
-      return null;
-    }
-    out[key] = { type, value: v } as VariableMapping;
-  }
-  return out;
 }

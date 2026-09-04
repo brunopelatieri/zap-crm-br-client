@@ -1357,7 +1357,10 @@
       },
       "errorLoad": "Falha ao carregar disparos",
       "retry": "Tentar novamente",
-      "variant": "Variante {variant}"
+      "variant": "Variante {variant}",
+      "actions": {
+        "edit": "Editar"
+      }
     },
     "status": {
       "draft": "Rascunho",
@@ -1398,6 +1401,9 @@
       "notFound": "Disparo não encontrado",
       "template": "Template: {name}",
       "createdAt": "Criado {date}",
+      "continueEditing": "Continuar edição",
+      "draftBanner": "Rascunho — esta campanha ainda não foi enviada.",
+      "draftAudience": "Audiência: {count} contatos triados",
       "deletePrompt": "Excluir este disparo?",
       "cancel": "Cancelar",
       "confirm": "Confirmar",
@@ -1601,10 +1607,64 @@
       "toastNotLinked": "Seu perfil não está vinculado a uma conta.",
       "toastFailedDraft": "Falha ao salvar rascunho: {error}",
       "toastDraftSaved": "Rascunho salvo",
+      "toastNoDraftId": "Não foi possível identificar qual rascunho salvar.",
       "channelBlocked": {
         "title": "Disparo em massa não disponível",
         "body": "Disparo em massa só está disponível no WhatsApp Oficial. Instâncias conectadas por QRCode não podem enviar campanhas — é a regra que mais protege o número de banimento.",
         "back": "Voltar para disparos"
+      }
+    },
+    "edit": {
+      "title": "Editar rascunho",
+      "subtitle": "{name} — ainda não enviado",
+      "saved": "Rascunho atualizado",
+      "gone": "Este rascunho não existe mais ou já foi enviado.",
+      "templateMissingWarning": "O template deste rascunho não está mais disponível neste canal. Escolha outro para continuar.",
+      "backToBroadcasts": "Voltar para disparos",
+      "discardChanges": "Descartar alterações não salvas?",
+      "notEditable": {
+        "notFound": {
+          "title": "Rascunho não encontrado",
+          "body": "Este rascunho não existe, já foi enviado, ou pertence a outra conta."
+        },
+        "webhookFunnel": {
+          "title": "Isto é um funil de webhook",
+          "body": "Funis de webhook acumulam contatos continuamente e não têm um passo de audiência para editar."
+        },
+        "abVariant": {
+          "title": "Esta campanha faz parte de um teste A/B",
+          "body": "Variantes de teste A/B não são editadas como um rascunho único."
+        },
+        "status": {
+          "scheduled": {
+            "title": "Esta campanha já está agendada",
+            "body": "Editar uma campanha agendada ainda não é suportado. Cancele-a na lista de disparos para fazer alterações."
+          },
+          "sending": {
+            "title": "Esta campanha está sendo enviada",
+            "body": "Uma campanha que já está sendo enviada não pode ser editada."
+          },
+          "sent": {
+            "title": "Esta campanha já foi enviada",
+            "body": "Uma campanha enviada não pode ser editada — duplique-a se quiser enviá-la novamente."
+          },
+          "failed": {
+            "title": "Esta campanha já foi executada",
+            "body": "Uma campanha que já foi executada, mesmo que tenha falhado, não pode ser editada."
+          },
+          "streaming": {
+            "title": "Esta campanha está em streaming",
+            "body": "Funis de webhook não têm um passo de audiência para editar."
+          },
+          "awaitingCheck": {
+            "title": "Esta campanha está sendo checada antes de disparar",
+            "body": "Aguarde a checagem de números terminar antes de editar esta campanha."
+          },
+          "fallback": {
+            "title": "Esta campanha não pode ser editada",
+            "body": "Só campanhas ainda em rascunho podem ser editadas."
+          }
+        }
       }
     },
     "wizard": {
@@ -1726,6 +1786,8 @@
         "variables": "Variáveis:",
         "variablesMapped": "{count} associada(s)",
         "saveDraft": "Salvar como rascunho",
+        "saveChanges": "Salvar alterações",
+        "abTestNoDraft": "Um rascunho só guarda um template — uma campanha com teste A/B não pode ser salva como rascunho. Você ainda pode agendá-la.",
         "sendNow": "Enviar disparo",
         "sending": "Enviando...",
         "preparing": "Preparando...",
@@ -1838,6 +1900,7 @@
         "too_many_recipients": "Esta audiência é grande demais para um único disparo. Divida em envios menores.",
         "template_malformed": "Este template está dessincronizado. Rode \"Sincronizar com a Meta\" em Ajustes e tente de novo.",
         "draft_not_found": "Este rascunho não existe mais ou já foi enviado. Refaça a seleção de audiência.",
+        "draft_not_editable": "Esta campanha não é mais um rascunho — outra aba pode tê-la disparado ou agendado. Abra-a para ver o que aconteceu.",
         "bad_request": "Algo neste disparo não está válido. Volte e revise a audiência e as variáveis.",
         "rate_limited": "Muitos disparos iniciados seguidos. Aguarde um instante e tente de novo.",
         "internal": "Não foi possível iniciar o disparo. Tente novamente em instantes.",
@@ -1864,7 +1927,23 @@
         "empty_audience": "Nenhum contato corresponde a esta audiência.",
         "bad_request": "Algo nesta audiência não está válido. Volte e revise.",
         "rate_limited": "Muitas tentativas seguidas. Aguarde um instante e tente de novo.",
-        "internal": "Não foi possível preparar esta audiência para triagem. Tente novamente em instantes."
+        "internal": "Não foi possível preparar esta audiência para triagem. Tente novamente em instantes.",
+        "draft_not_found": "Este rascunho não existe mais ou já foi enviado.",
+        "restage_failed": "Não foi possível salvar a nova audiência — a anterior foi perdida. Importe novamente."
+      },
+      "current": {
+        "title": "Audiência atual",
+        "staged": "{selected} de {total} contatos triados",
+        "tags": "Etiquetas: {names}",
+        "customField": "{field} {operator} {value}",
+        "imported": "Planilha importada — {selected} de {total} selecionados",
+        "empty": "Nenhuma audiência escolhida ainda"
+      },
+      "restage": {
+        "button": "Trocar audiência",
+        "reviewTriage": "Rever triagem",
+        "confirmTitle": "Trocar a audiência desta campanha?",
+        "confirmBody": "As {rows} linhas já preparadas e a seleção da triagem serão descartadas. O template, as variáveis e o nome são preservados."
       },
       "triage": {
         "title": "Triagem de audiência",
@@ -1880,6 +1959,11 @@
         "draftAlreadySent": "Este disparo já foi enviado — a audiência não pode mais ser triada.",
         "viewBroadcast": "Ver disparo",
         "backToNew": "Iniciar um novo disparo",
+        "backToBroadcasts": "Voltar para disparos",
+        "cancelRestage": "Cancelar",
+        "cancelRestageConfirmTitle": "Cancelar esta troca de audiência?",
+        "cancelRestageConfirmBody": "A campanha que você estava editando é mantida exatamente como estava — nada aqui é apagado.",
+        "cancelRestageAction": "Voltar à edição",
         "searchPlaceholder": "Buscar por nome ou telefone",
         "selectedSummary": "{selected} selecionado(s)",
         "quotaBlockedHint": "Esta seleção excede a cota disponível nas últimas 24 horas. Remova contatos ou aguarde a janela reabrir.",

@@ -67,6 +67,15 @@ interface Step4Props {
   onChangeChannel?: () => void;
   onSend: (options: SendOptions) => void;
   onSaveDraft?: () => void;
+  /** Rótulo do botão de rascunho — "Salvar rascunho" (create) vs "Salvar
+   *  alterações" (edit, SPEC 070 §4.1). Ausente = rótulo de sempre. */
+  saveDraftLabel?: string;
+  /**
+   * Explica por que o botão de rascunho sumiu quando há teste A/B
+   * (D-8) — em vez de ele simplesmente desaparecer sem contexto.
+   * Só é exibido quando `onSaveDraft` está ausente.
+   */
+  saveDraftHiddenReason?: string;
   onBack: () => void;
   isProcessing: boolean;
   progress: number;
@@ -92,6 +101,8 @@ export function Step4ScheduleSend({
   onChangeChannel,
   onSend,
   onSaveDraft,
+  saveDraftLabel,
+  saveDraftHiddenReason,
   onBack,
   isProcessing,
   progress,
@@ -513,7 +524,7 @@ export function Step4ScheduleSend({
         </Button>
 
         <div className="flex items-center gap-2">
-          {onSaveDraft && (
+          {onSaveDraft ? (
             <Button
               variant="outline"
               onClick={onSaveDraft}
@@ -521,8 +532,14 @@ export function Step4ScheduleSend({
               className="border-border text-muted-foreground hover:bg-muted disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              {t('scheduleSend.saveDraft')}
+              {saveDraftLabel ?? t('scheduleSend.saveDraft')}
             </Button>
+          ) : (
+            saveDraftHiddenReason && (
+              <span className="text-muted-foreground max-w-52 text-xs">
+                {saveDraftHiddenReason}
+              </span>
+            )
           )}
 
           <Dialog open={showConfirm} onOpenChange={handleOpenConfirm}>

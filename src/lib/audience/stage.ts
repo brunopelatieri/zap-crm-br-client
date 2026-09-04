@@ -105,6 +105,17 @@ export interface StageAudienceParams {
    * no disparo).
    */
   channelId?: string | null;
+  /**
+   * SPEC 070 §5.2 (D-5) — TROCAR a audiência de um rascunho que já
+   * existe, em vez de criar outro. Presente, esta função não faz
+   * `INSERT` em `broadcasts`: apaga o staging antigo daquela linha,
+   * grava o novo e faz `UPDATE` — "uma campanha, uma linha" (§1.3).
+   *
+   * Sem ele, trocar "etiqueta Clientes" por uma planilha deixaria dois
+   * rascunhos para a mesma campanha, e o antigo (com a triagem que o
+   * usuário revisou) ficaria órfão na lista.
+   */
+  draftId?: string;
 }
 
 export interface StageAudienceSummary {
@@ -405,8 +416,77 @@ async function buildFilterStagingRows(
 }
 
 /**
+ * Grava as linhas staged em blocos de {@link INSERT_CHUNK}.
+ *
+ * O tratamento de falha é do CHAMADOR (`onFailure`) porque as duas
+ * situações pedem coisas opostas: um rascunho recém-criado que falha no
+ * meio vira `failed` (não deixa fantasma na lista); um rascunho que já
+ * existia e está TROCANDO de audiência não pode virar `failed` por
+ * causa disso — a campanha do usuário continua válida, só ficou sem
+ * audiência (SPEC 070 §5.2).
+ */
+async function insertStagingRows(
+  db: SupabaseClient,
+  rows: StagingInsertRow[],
+  draftId: string,
+  handling: {
+    onFailure: () => Promise<void>;
+    errorCode: string;
+    errorMessage: string;
+  }
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+    const chunk = rows
+      .slice(i, i + INSERT_CHUNK)
+      .map((r) => ({ ...r, broadcast_id: draftId }));
+    const { error } = await db.from('broadcast_audience_staging').insert(chunk);
+
+    if (error) {
+      await handling.onFailure();
+      console.error('[stage-audience] insert staging rows error:', error);
+      throw new BroadcastError(handling.errorCode, handling.errorMessage, 500);
+    }
+  }
+}
+
+/**
+ * Achado de code review (SPEC 070) — o `audience_filter` da CRIAÇÃO
+ * (nunca do restage, que colapsa de propósito §5.2). D-3 manda gravar a
+ * origem verdadeira para a edição poder mostrar "Etiquetas: Clientes"
+ * em vez do genérico "N de M contatos triados" — e este é o ÚNICO
+ * momento em que a origem existe ainda não colapsada: por baixo do
+ * "todo rascunho é um rascunho de triagem" (§Contexto), o resto do
+ * assistente (retomada de triagem, `handleSaveDraft`) sempre lê
+ * `audience` já como `{type:'staged'}`, nunca como o filtro vivo — se
+ * ninguém gravar aqui, `hydrateAudienceConfig` nunca teria de onde ler
+ * `tags`/`custom_field` de volta, e os ramos que os mostram na tela
+ * ficam mortos.
+ *
+ * `csv` grava só o marcador de D-4 (`importedRows`) — as linhas em si
+ * já vivem em `broadcast_audience_staging`.
+ */
+function initialAudienceFilter(
+  audience: StageAudienceInput,
+  importedRows: number
+): Record<string, unknown> {
+  if (audience.type === 'csv') {
+    return { type: 'csv', importedRows };
+  }
+  return {
+    type: audience.type,
+    tagIds: audience.type === 'tags' ? audience.tagIds : undefined,
+    customField:
+      audience.type === 'custom_field' ? audience.customField : undefined,
+    excludeTagIds: audience.excludeTagIds,
+  };
+}
+
+/**
  * Cria o rascunho + grava a audiência staged. Lança {@link BroadcastError},
  * que a rota mapeia para status + código.
+ *
+ * Com `draftId` (SPEC 070 §5.2), TROCA a audiência de um rascunho que já
+ * existe em vez de criar outro — mesma linha, staging substituído.
  */
 export async function stageAudience(
   db: SupabaseClient,
@@ -420,7 +500,42 @@ export async function stageAudience(
     audience,
     canCreateTags,
     channelId,
+    draftId: restageDraftId,
   } = params;
+
+  // Confere o rascunho ANTES de resolver a audiência (que pode custar
+  // milhares de linhas): trocar a audiência de uma campanha que já saiu
+  // — ou de outra conta — precisa falhar cedo e tipado, nunca com um
+  // UPDATE que não casa nada e devolve "sucesso".
+  //
+  // Cliente de SESSÃO, como o resto desta função: a RLS de `broadcasts`
+  // (017) é a autorização de verdade; o `.eq('account_id')` explícito é
+  // a mesma redundância deliberada de `loadBroadcastDraft`.
+  if (restageDraftId) {
+    const { data: draftRow } = await db
+      .from('broadcasts')
+      .select('id, status, source')
+      .eq('id', restageDraftId)
+      .eq('account_id', accountId)
+      .maybeSingle();
+
+    if (!draftRow || draftRow.status !== 'draft') {
+      throw new BroadcastError(
+        'draft_not_found',
+        'This draft no longer exists or was already sent.',
+        404
+      );
+    }
+    // Um funil de webhook (SPEC 055) acumula contatos sozinho; ele não
+    // tem passo de audiência para trocar.
+    if (draftRow.source === 'webhook') {
+      throw new BroadcastError(
+        'bad_request',
+        'A webhook funnel has no audience step.',
+        400
+      );
+    }
+  }
 
   // Confere que o canal é DESTA conta antes de gravar — um `channelId`
   // forjado (ou de outra conta) é descartado em silêncio, não recusa o
@@ -481,46 +596,126 @@ export async function stageAudience(
       ? await buildCsvStagingRows(db, accountId, audience, canCreateTags)
       : await buildFilterStagingRows(db, accountId, audience);
 
-  // O nome real só é escolhido no passo 4; até lá o nome do template é
-  // um placeholder identificável na lista de disparos.
-  const { data: broadcast, error: broadcastError } = await db
-    .from('broadcasts')
-    .insert({
-      user_id: userId,
-      account_id: accountId,
-      name: templateName,
-      template_name: templateName,
-      template_language: templateLanguage,
-      channel_id: verifiedChannelId,
-      status: 'draft',
-      total_recipients: summary.valid,
-    })
-    .select('id')
-    .single();
+  let draftId: string;
 
-  if (broadcastError || !broadcast) {
-    console.error('[stage-audience] create draft error:', broadcastError);
-    throw new BroadcastError('internal', 'Failed to create draft', 500);
-  }
-  const draftId = broadcast.id as string;
+  if (restageDraftId) {
+    // ── Troca de audiência (SPEC 070 §5.2) ───────────────────────
+    // Apagar antes de inserir deixa uma janela em que o rascunho tem
+    // zero linhas. A alternativa (inserir a nova geração e só então
+    // apagar a antiga) exigiria uma coluna de geração em
+    // `broadcast_audience_staging` — migração para um caso de falha
+    // raro, num rascunho que o usuário está justamente refazendo.
+    draftId = restageDraftId;
 
-  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-    const chunk = rows
-      .slice(i, i + INSERT_CHUNK)
-      .map((r) => ({ ...r, broadcast_id: draftId }));
-    const { error } = await db.from('broadcast_audience_staging').insert(chunk);
-
-    if (error) {
-      // Rascunho sem a audiência inteira é pior do que nenhum — a
-      // triagem mostraria uma foto incompleta sem avisar. Marca como
-      // falho em vez de deixar um draft fantasma na lista.
-      await db
-        .from('broadcasts')
-        .update({ status: 'failed' })
-        .eq('id', draftId);
-      console.error('[stage-audience] insert staging rows error:', error);
-      throw new BroadcastError('internal', 'Failed to stage audience', 500);
+    const { error: purgeError } = await db
+      .from('broadcast_audience_staging')
+      .delete()
+      .eq('broadcast_id', draftId);
+    if (purgeError) {
+      console.error('[stage-audience] restage purge error:', purgeError);
+      throw new BroadcastError(
+        'restage_failed',
+        'Failed to replace the previous audience.',
+        500
+      );
     }
+
+    await insertStagingRows(db, rows, draftId, {
+      onFailure: async () => {
+        // NUNCA marcar `failed` aqui: o rascunho não é novo, e a
+        // campanha do usuário viraria lixo por causa de uma troca de
+        // audiência que falhou. Limpa o que entrou pela metade e diz a
+        // verdade — a audiência anterior já foi embora (acima).
+        await db
+          .from('broadcast_audience_staging')
+          .delete()
+          .eq('broadcast_id', draftId);
+      },
+      errorCode: 'restage_failed',
+      errorMessage:
+        'Failed to stage the new audience; the previous one was lost.',
+    });
+
+    // `total_recipients` acompanha a audiência nova; template e canal
+    // vêm do assistente, que pode tê-los trocado antes de chegar aqui.
+    // `channel_id` só entra quando o cliente MANDOU um — omitido
+    // significa "conta com um canal só" (o assistente manda
+    // `undefined`), e sobrescrever com `null` apagaria a escolha
+    // gravada no rascunho.
+    //
+    // `audience_filter` é reescrito porque a origem MUDOU: deixar o
+    // filtro antigo faria `hydrateAudienceConfig` (§3.2, caso 1)
+    // reabrir o rascunho apontando para uma etiqueta que já não
+    // descreve as linhas que estão no staging. Para importação, grava
+    // o marcador de D-4 (é o que faz o passo 2 dizer "Planilha
+    // importada" em vez de "N contatos já triados"); para as demais
+    // fontes, o marcador `staged`, porque depois desta troca a
+    // audiência de verdade é a triada — quem manda é a seleção da
+    // triagem, não o filtro que a originou.
+    const { data: updated, error: updateError } = await db
+      .from('broadcasts')
+      .update({
+        template_name: templateName,
+        template_language: templateLanguage,
+        ...(channelId === undefined ? {} : { channel_id: verifiedChannelId }),
+        total_recipients: summary.valid,
+        audience_filter:
+          audience.type === 'csv'
+            ? { type: 'csv', importedRows: summary.valid }
+            : { type: 'staged', draftId },
+      })
+      .eq('id', draftId)
+      .eq('account_id', accountId)
+      .eq('status', 'draft')
+      .select('id')
+      .maybeSingle();
+
+    if (updateError || !updated) {
+      console.error('[stage-audience] restage update error:', updateError);
+      throw new BroadcastError(
+        'restage_failed',
+        'Failed to update the draft with the new audience.',
+        500
+      );
+    }
+  } else {
+    // O nome real só é escolhido no passo 4; até lá o nome do template é
+    // um placeholder identificável na lista de disparos.
+    const { data: broadcast, error: broadcastError } = await db
+      .from('broadcasts')
+      .insert({
+        user_id: userId,
+        account_id: accountId,
+        name: templateName,
+        template_name: templateName,
+        template_language: templateLanguage,
+        channel_id: verifiedChannelId,
+        status: 'draft',
+        total_recipients: summary.valid,
+        audience_filter: initialAudienceFilter(audience, summary.valid),
+      })
+      .select('id')
+      .single();
+
+    if (broadcastError || !broadcast) {
+      console.error('[stage-audience] create draft error:', broadcastError);
+      throw new BroadcastError('internal', 'Failed to create draft', 500);
+    }
+    draftId = broadcast.id as string;
+
+    await insertStagingRows(db, rows, draftId, {
+      onFailure: async () => {
+        // Rascunho sem a audiência inteira é pior do que nenhum — a
+        // triagem mostraria uma foto incompleta sem avisar. Marca como
+        // falho em vez de deixar um draft fantasma na lista.
+        await db
+          .from('broadcasts')
+          .update({ status: 'failed' })
+          .eq('id', draftId);
+      },
+      errorCode: 'internal',
+      errorMessage: 'Failed to stage audience',
+    });
   }
 
   // Anti-fadiga (§6.2): quem já recebeu marketing dentro da janela de

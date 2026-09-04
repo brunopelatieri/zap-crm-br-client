@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2 } from 'lucide-react';
+import { Radio, Plus, Loader2, Pencil } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
@@ -311,6 +311,10 @@ export default function BroadcastsPage() {
                 <TableHead className="text-muted-foreground hidden sm:table-cell">
                   {t('table.date')}
                 </TableHead>
+                {/* SPEC 070 §8.1 — coluna própria, só ocupada em linhas
+                    `draft`; nas demais fica vazia, sem cabeçalho, para
+                    não sugerir uma ação que não existe ali. */}
+                <TableHead className="text-muted-foreground w-px" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -393,6 +397,27 @@ export default function BroadcastsPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground hidden sm:table-cell">
                       {new Date(broadcast.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {broadcast.status === 'draft' && (
+                        <GatedButton
+                          canAct={canCreate}
+                          gateReason="edit drafts"
+                          variant="outline"
+                          size="sm"
+                          // A linha inteira já navega para o detalhe
+                          // (onClick acima); sem stopPropagation os
+                          // dois destinos disparariam juntos.
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/broadcasts/${broadcast.id}/edit`);
+                          }}
+                          className="border-border text-muted-foreground hover:bg-muted"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          {t('actions.edit')}
+                        </GatedButton>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

@@ -422,3 +422,358 @@ describe('stageAudience — tags', () => {
     ).rejects.toMatchObject({ code: 'empty_audience' });
   });
 });
+
+describe('stageAudience — audience_filter na criação (achado de code review, SPEC 070 D-3)', () => {
+  // Sem isto, `hydrateAudienceConfig` (draft.ts) nunca tem de onde ler
+  // a origem de volta — este é o ÚNICO momento em que ela existe ainda
+  // não colapsada em `staged` (o resto do assistente, retomada de
+  // triagem incluída, só vê `audience` já como `{type:'staged'}`).
+
+  it('grava o filtro real (tags) no INSERT — não fica null', async () => {
+    let insertPayload: Record<string, unknown> | undefined;
+
+    const mock = createSupabaseMock((table, ops) => {
+      const found = templateFound(table);
+      if (found) return found;
+
+      if (table === 'contact_tags') {
+        // A mesma tabela resolve tagIds E excludeTagIds — precisa
+        // diferenciar pelo `.in('tag_id', …)` de cada chamada, senão a
+        // exclusão devolveria o MESMO contato que a inclusão trouxe.
+        const inArgs = opArgs(ops, 'in');
+        if (inArgs?.[0] === 'tag_id' && (inArgs[1] as string[])[0] === 't-1') {
+          return { data: [{ contact_id: 'c-1' }] };
+        }
+        return { data: [] };
+      }
+      if (table === 'contacts')
+        return { data: [{ id: 'c-1', phone: '+5511999990001' }] };
+      if (table === 'broadcasts') {
+        const args = opArgs(ops, 'insert');
+        if (args) {
+          insertPayload = args[0] as Record<string, unknown>;
+          return { data: { id: 'draft-1' } };
+        }
+        return undefined;
+      }
+      if (table === 'broadcast_audience_staging') return { data: null };
+      return undefined;
+    });
+
+    await stageAudience(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      templateName: TEMPLATE,
+      templateLanguage: LANG,
+      canCreateTags: false,
+      audience: {
+        type: 'tags',
+        tagIds: ['t-1'],
+        excludeTagIds: ['t-vip'],
+      },
+    });
+
+    expect(insertPayload?.audience_filter).toEqual({
+      type: 'tags',
+      tagIds: ['t-1'],
+      customField: undefined,
+      excludeTagIds: ['t-vip'],
+    });
+  });
+
+  it('grava o filtro real (custom_field) no INSERT', async () => {
+    let insertPayload: Record<string, unknown> | undefined;
+
+    const mock = createSupabaseMock((table, ops) => {
+      const found = templateFound(table);
+      if (found) return found;
+      if (table === 'contact_custom_values')
+        return { data: [{ contact_id: 'c-1' }] };
+      if (table === 'contacts')
+        return { data: [{ id: 'c-1', phone: '+5511999990001' }] };
+      if (table === 'broadcasts') {
+        const args = opArgs(ops, 'insert');
+        if (args) {
+          insertPayload = args[0] as Record<string, unknown>;
+          return { data: { id: 'draft-1' } };
+        }
+        return undefined;
+      }
+      if (table === 'broadcast_audience_staging') return { data: null };
+      return undefined;
+    });
+
+    const customField = {
+      fieldId: 'f-1',
+      operator: 'is' as const,
+      value: 'ativo',
+    };
+    await stageAudience(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      templateName: TEMPLATE,
+      templateLanguage: LANG,
+      canCreateTags: false,
+      audience: { type: 'custom_field', customField },
+    });
+
+    expect(insertPayload?.audience_filter).toEqual({
+      type: 'custom_field',
+      tagIds: undefined,
+      customField,
+      excludeTagIds: undefined,
+    });
+  });
+
+  it('csv grava só o marcador de D-4 (importedRows), nunca as linhas', async () => {
+    let insertPayload: Record<string, unknown> | undefined;
+
+    const mock = createSupabaseMock((table, ops) => {
+      const found = templateFound(table);
+      if (found) return found;
+      if (table === 'contacts') return { data: [] };
+      if (table === 'broadcasts') {
+        const args = opArgs(ops, 'insert');
+        if (args) {
+          insertPayload = args[0] as Record<string, unknown>;
+          return { data: { id: 'draft-1' } };
+        }
+        return undefined;
+      }
+      if (table === 'broadcast_audience_staging') return { data: null };
+      return undefined;
+    });
+
+    await stageAudience(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      templateName: TEMPLATE,
+      templateLanguage: LANG,
+      canCreateTags: false,
+      audience: {
+        type: 'csv',
+        rows: [{ phone: '+5511999990001', name: 'Alice', sourceRow: 2 }],
+        invalidRows: [],
+      },
+    });
+
+    expect(insertPayload?.audience_filter).toEqual({
+      type: 'csv',
+      importedRows: 1,
+    });
+  });
+});
+
+// ============================================================
+// SPEC 070 §5.2 — trocar a audiência de um rascunho (F6)
+// ============================================================
+
+const DRAFT = '11111111-2222-4333-8444-555555555555';
+
+/**
+ * Mock do caminho de re-staging: template existe, o rascunho existe e
+ * ainda é `draft`, e o filtro resolve para um contato.
+ *
+ * `broadcastRow` permite o teste trocar o estado da linha (enviada,
+ * funil de webhook, inexistente) sem reescrever o resto.
+ */
+function restageMock(
+  options: {
+    broadcastRow?: Record<string, unknown> | null;
+    stagingInsertError?: unknown;
+    updateResult?: { data?: unknown; error?: unknown };
+  } = {}
+) {
+  const {
+    broadcastRow = { id: DRAFT, status: 'draft', source: 'dashboard' },
+    stagingInsertError,
+    updateResult = { data: { id: DRAFT } },
+  } = options;
+
+  return createSupabaseMock((table, ops) => {
+    const found = templateFound(table);
+    if (found) return found;
+
+    if (table === 'contacts') {
+      return { data: [{ id: 'c-1', phone: '+5511999990001' }] };
+    }
+    if (table === 'contact_tags') {
+      return { data: [{ contact_id: 'c-1' }] };
+    }
+    if (table === 'broadcasts') {
+      if (opArgs(ops, 'update')) return updateResult;
+      // Leitura de pré-condição do rascunho.
+      return { data: broadcastRow };
+    }
+    if (table === 'broadcast_audience_staging') {
+      if (opArgs(ops, 'insert')) {
+        return stagingInsertError
+          ? { error: stagingInsertError }
+          : { data: null };
+      }
+      return { data: null };
+    }
+    return undefined;
+  });
+}
+
+function restageParams() {
+  return {
+    accountId: ACCOUNT,
+    userId: USER,
+    templateName: TEMPLATE,
+    templateLanguage: LANG,
+    canCreateTags: false,
+    audience: { type: 'tags' as const, tagIds: ['t-1'] },
+    draftId: DRAFT,
+  };
+}
+
+describe('stageAudience — troca de audiência (draftId)', () => {
+  it('apaga o staging antigo, insere o novo e ATUALIZA o rascunho — sem INSERT em broadcasts', async () => {
+    const mock = restageMock();
+
+    const result = await stageAudience(mock.db, restageParams());
+
+    expect(result.draftId).toBe(DRAFT);
+
+    // A linha é a mesma: nada de um segundo rascunho ao lado (§1.3).
+    expect(
+      mock.callsFor('broadcasts').some((c) => opArgs(c.ops, 'insert'))
+    ).toBe(false);
+
+    const purge = mock
+      .callsFor('broadcast_audience_staging')
+      .find((c) => c.ops.some((o) => o.fn === 'delete'));
+    expect(purge).toBeDefined();
+    expect(
+      purge?.ops.some(
+        (o) =>
+          o.fn === 'eq' && o.args[0] === 'broadcast_id' && o.args[1] === DRAFT
+      )
+    ).toBe(true);
+
+    const update = mock
+      .callsFor('broadcasts')
+      .find((c) => opArgs(c.ops, 'update'));
+    expect(update).toBeDefined();
+    const payload = opArgs(update!.ops, 'update')?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toMatchObject({
+      template_name: TEMPLATE,
+      template_language: LANG,
+      total_recipients: 1,
+    });
+    // A pré-condição de estado é o que impede sobrescrever uma campanha
+    // que outra aba já disparou.
+    expect(
+      update!.ops.some(
+        (o) => o.fn === 'eq' && o.args[0] === 'status' && o.args[1] === 'draft'
+      )
+    ).toBe(true);
+  });
+
+  it('reescreve audience_filter para a origem nova — o filtro antigo não pode sobreviver à troca', async () => {
+    const mock = restageMock();
+    await stageAudience(mock.db, restageParams());
+
+    const update = mock
+      .callsFor('broadcasts')
+      .find((c) => opArgs(c.ops, 'update'));
+    const payload = opArgs(update!.ops, 'update')?.[0] as Record<
+      string,
+      unknown
+    >;
+    // Depois da troca a audiência de verdade é a TRIADA — quem manda é
+    // a seleção da triagem, não o filtro que a originou.
+    expect(payload.audience_filter).toEqual({ type: 'staged', draftId: DRAFT });
+  });
+
+  it('importação grava o marcador de D-4 (nunca as linhas) em audience_filter', async () => {
+    const mock = restageMock();
+
+    await stageAudience(mock.db, {
+      ...restageParams(),
+      audience: {
+        type: 'csv',
+        rows: [{ phone: '+5511999990001', name: 'Alice', sourceRow: 2 }],
+        invalidRows: [],
+      },
+    });
+
+    const update = mock
+      .callsFor('broadcasts')
+      .find((c) => opArgs(c.ops, 'update'));
+    const payload = opArgs(update!.ops, 'update')?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(payload.audience_filter).toEqual({ type: 'csv', importedRows: 1 });
+  });
+
+  it('não sobrescreve channel_id quando o cliente não mandou canal', async () => {
+    const mock = restageMock();
+    await stageAudience(mock.db, restageParams());
+
+    const update = mock
+      .callsFor('broadcasts')
+      .find((c) => opArgs(c.ops, 'update'));
+    const payload = opArgs(update!.ops, 'update')?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect('channel_id' in payload).toBe(false);
+  });
+
+  it('draft_not_found quando a campanha já saiu de draft — staging antigo intacto', async () => {
+    const mock = restageMock({
+      broadcastRow: { id: DRAFT, status: 'sent', source: 'dashboard' },
+    });
+
+    await expect(stageAudience(mock.db, restageParams())).rejects.toMatchObject(
+      { code: 'draft_not_found' }
+    );
+
+    // Falhou ANTES de tocar no staging: a audiência anterior continua lá.
+    expect(mock.callsFor('broadcast_audience_staging')).toHaveLength(0);
+  });
+
+  it('draft_not_found quando a linha não existe (ou é de outra conta)', async () => {
+    const mock = restageMock({ broadcastRow: null });
+
+    await expect(stageAudience(mock.db, restageParams())).rejects.toMatchObject(
+      { code: 'draft_not_found' }
+    );
+  });
+
+  it('recusa um funil de webhook — ele não tem passo de audiência', async () => {
+    const mock = restageMock({
+      broadcastRow: { id: DRAFT, status: 'draft', source: 'webhook' },
+    });
+
+    await expect(stageAudience(mock.db, restageParams())).rejects.toMatchObject(
+      { code: 'bad_request' }
+    );
+  });
+
+  it('falha ao inserir as linhas novas NÃO marca o rascunho como failed (§5.2)', async () => {
+    const mock = restageMock({ stagingInsertError: { message: 'boom' } });
+
+    await expect(stageAudience(mock.db, restageParams())).rejects.toMatchObject(
+      { code: 'restage_failed' }
+    );
+
+    // O rascunho não é novo: marcá-lo `failed` transformaria a campanha
+    // do usuário em lixo por causa de uma troca que deu errado.
+    const markedFailed = mock
+      .callsFor('broadcasts')
+      .some(
+        (c) =>
+          (opArgs(c.ops, 'update')?.[0] as Record<string, unknown> | undefined)
+            ?.status === 'failed'
+      );
+    expect(markedFailed).toBe(false);
+  });
+});

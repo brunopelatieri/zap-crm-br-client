@@ -10,14 +10,25 @@
  *
  * O wizard em si continua sem gerenciador de estado global (§1.6,
  * compromisso 1): esta página não guarda `template`/`variables`. Ao
- * clicar "Continuar", ela só navega para `/broadcasts/new?draftId=…` —
- * é `new/page.tsx` que reidrata o template a partir do rascunho
- * (`template_name`/`template_language`, já persistidos no stage) e
- * retoma o wizard direto no passo 3.
+ * clicar "Continuar", ela navega de volta para o wizard que a mandou
+ * aqui — é essa outra página que reidrata o template a partir do
+ * rascunho (`template_name`/`template_language`, já persistidos no
+ * stage) e retoma no passo certo.
+ *
+ * `?from=edit` (SPEC 070, achado de code review) — esta página é
+ * compartilhada por DOIS pontos de entrada: a criação normal
+ * (`Step2SelectAudience.handleAnalyze`, sem o parâmetro) e "Trocar
+ * audiência"/"Rever triagem" num rascunho já existente, aberto para
+ * edição (`broadcast-wizard.tsx` mode="edit", com o parâmetro). Sem
+ * distinguir os dois, "Continuar" sempre mandava de volta para
+ * `/broadcasts/new?draftId=…` — tirando o usuário do modo edição no
+ * meio de uma campanha real — e "Descartar rascunho" apagava a
+ * campanha inteira (o `DELETE` abaixo, pensado para um rascunho de
+ * triagem descartável) em vez de só cancelar a troca de audiência.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ArrowRight, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -59,7 +70,11 @@ interface DraftInfo {
 export default function AudienceTriagePage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const draftId = params.draftId as string;
+  // Ver o cabeçalho — distingue "voltar para a criação" de "voltar para
+  // a edição de um rascunho que já existia antes desta sessão".
+  const returnToEdit = searchParams.get('from') === 'edit';
 
   const t = useTranslations('Broadcasts.audience.triage');
   const { batchLimit, refresh: refreshQuota } = useMessagingLimit();
@@ -171,10 +186,27 @@ export default function AudienceTriagePage() {
 
   async function handleContinue() {
     await refreshQuota();
-    router.push(`/broadcasts/new?draftId=${draftId}`);
+    router.push(
+      returnToEdit
+        ? `/broadcasts/${draftId}/edit`
+        : `/broadcasts/new?draftId=${draftId}`
+    );
   }
 
+  /**
+   * Em `returnToEdit`, "descartar" significa "cancelar a troca de
+   * audiência", NUNCA apagar a linha — ao contrário do rascunho de
+   * triagem descartável da criação, aqui `draftId` é uma campanha real
+   * que já existia antes desta sessão de edição. O `DELETE` abaixo é
+   * exclusivo do fluxo de criação.
+   */
   async function handleDiscard() {
+    if (returnToEdit) {
+      setDiscardOpen(false);
+      router.push(`/broadcasts/${draftId}/edit`);
+      return;
+    }
+
     setDiscarding(true);
     const supabase = createClient();
     // CASCADE (045) leva as linhas staged junto.
@@ -205,9 +237,11 @@ export default function AudienceTriagePage() {
         <p className="text-sm text-red-400">{t('draftNotFound')}</p>
         <Button
           variant="outline"
-          onClick={() => router.push('/broadcasts/new')}
+          onClick={() =>
+            router.push(returnToEdit ? '/broadcasts' : '/broadcasts/new')
+          }
         >
-          {t('backToNew')}
+          {returnToEdit ? t('backToBroadcasts') : t('backToNew')}
         </Button>
       </div>
     );
@@ -248,15 +282,19 @@ export default function AudienceTriagePage() {
             }
           >
             <Trash2 className="h-3.5 w-3.5" />
-            {t('backToAudience')}
+            {returnToEdit ? t('cancelRestage') : t('backToAudience')}
           </DialogTrigger>
           <DialogContent className="border-border bg-popover sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-popover-foreground">
-                {t('cancelConfirmTitle')}
+                {returnToEdit
+                  ? t('cancelRestageConfirmTitle')
+                  : t('cancelConfirmTitle')}
               </DialogTitle>
               <DialogDescription className="text-muted-foreground">
-                {t('cancelConfirmBody')}
+                {returnToEdit
+                  ? t('cancelRestageConfirmBody')
+                  : t('cancelConfirmBody')}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -271,12 +309,18 @@ export default function AudienceTriagePage() {
               <Button
                 onClick={handleDiscard}
                 disabled={discarding}
-                className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className={
+                  returnToEdit
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+                    : 'bg-red-600 text-white hover:bg-red-700 disabled:opacity-50'
+                }
               >
                 {discarding ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : null}
-                {t('cancelConfirmAction')}
+                {returnToEdit
+                  ? t('cancelRestageAction')
+                  : t('cancelConfirmAction')}
               </Button>
             </DialogFooter>
           </DialogContent>

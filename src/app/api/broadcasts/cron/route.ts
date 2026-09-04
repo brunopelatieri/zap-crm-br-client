@@ -346,6 +346,11 @@ export async function GET(request: Request) {
           userId: row.user_id,
           batchLimit,
           adoptBroadcastId: row.id,
+          // O `claim` acima já moveu esta linha para `sending` — sem
+          // isto, materializeArm reaplicaria `status = 'draft'` e o
+          // UPDATE de adoção não casaria mais nenhuma linha (achado de
+          // code review, SPEC 070).
+          rowAlreadyClaimed: true,
           adoptVariantBroadcastId: abVariant.id,
           splitPercent: row.ab_split_percent ?? undefined,
           input: {
@@ -420,6 +425,9 @@ export async function GET(request: Request) {
         // criaria um broadcast NOVO e o agendamento ficaria pendurado em
         // `sending` para sempre, ao lado de uma cópia enviada.
         adoptBroadcastId: row.id,
+        // O `claim` acima (status='scheduled' → 'sending') já garantiu
+        // exclusividade — achado de code review, SPEC 070.
+        rowAlreadyClaimed: true,
         input: {
           name: row.name,
           templateName: row.template_name,
@@ -970,6 +978,10 @@ async function dispatchPartialSlice(
     userId: row.user_id,
     batchLimit: state.batchLimit,
     adoptBroadcastId: row.id,
+    // O claim de `dispatchPartialSlice` (status='awaiting_check' →
+    // 'sending', no chamador) já garantiu exclusividade — achado de
+    // code review, SPEC 070.
+    rowAlreadyClaimed: true,
     partialAppend: true,
     canCreateTags,
     input: {

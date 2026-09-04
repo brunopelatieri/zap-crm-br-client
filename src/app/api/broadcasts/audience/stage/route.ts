@@ -16,6 +16,7 @@
 
 import { NextResponse } from 'next/server';
 
+import { isUuid } from '@/lib/api/uuid';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { canEditSettings } from '@/lib/auth/roles';
 import {
@@ -64,6 +65,9 @@ const STATUS_BY_CODE: Record<string, number> = {
   too_many_rows: 400,
   empty_audience: 400,
   bad_request: 400,
+  // SPEC 070 §5.2 — troca de audiência de um rascunho que já existe.
+  draft_not_found: 404,
+  restage_failed: 500,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -214,6 +218,18 @@ export async function POST(request: Request) {
     const channelId =
       typeof body.channelId === 'string' ? body.channelId : undefined;
 
+    // SPEC 070 §5.2 (D-5) — trocar a audiência de um rascunho que já
+    // existe, na MESMA linha. O formato é checado aqui para um id
+    // malformado virar 400 em vez de um 22P02 do Postgres travestido de
+    // 500; a propriedade e o estado (`status = 'draft'`, conta certa)
+    // são conferidos dentro de `stageAudience`, junto do resto da
+    // escrita.
+    const rawDraftId = body.draftId;
+    if (rawDraftId !== undefined && !isUuid(rawDraftId)) {
+      return badRequest("'draftId' must be a UUID");
+    }
+    const draftId = isUuid(rawDraftId) ? rawDraftId : undefined;
+
     const result = await stageAudience(supabase, {
       accountId,
       userId,
@@ -221,6 +237,7 @@ export async function POST(request: Request) {
       templateLanguage,
       audience,
       channelId,
+      draftId,
       // SPEC 057 D-7 — só decide a PROJEÇÃO mostrada na triagem; a
       // criação de verdade (D-1) acontece no envio, com o papel LIDO DE
       // NOVO naquele momento (revisão de código pós-057). Isto é

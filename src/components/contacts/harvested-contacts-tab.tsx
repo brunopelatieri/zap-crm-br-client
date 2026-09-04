@@ -139,7 +139,7 @@ export function HarvestedContactsTab() {
     <div className="space-y-4">
       {/* LGPD — fixa no topo, não em tooltip (SPEC 069 §8, D-3). */}
       <Alert className="border-amber-500/30 bg-amber-500/5">
-        <AlertDescription className="text-sm text-amber-100/80">
+        <AlertDescription className="text-sm">
           {t('lgpdNotice')}
         </AlertDescription>
       </Alert>

@@ -55,6 +55,7 @@ import {
   checkRateLimit,
   rateLimitResponse,
 } from '@/lib/rate-limit';
+import { isUuid } from '@/lib/api/uuid';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { logBroadcastAudit } from '@/lib/broadcasts/audit';
 import {
@@ -81,6 +82,8 @@ import {
   scheduleDashboardBroadcast,
 } from '@/lib/whatsapp/broadcast-dispatch';
 import { loadAccountQuota } from '@/lib/whatsapp/messaging-limit-server';
+import type { AudienceConfig } from '@/lib/audience/estimate';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Teto de tempo do `after()`. Em self-host (o alvo deste projeto) o
@@ -97,6 +100,99 @@ function badRequest(message: string) {
     { error: message, code: 'bad_request' },
     { status: 400 }
   );
+}
+
+/**
+ * Valida o `draftId` do corpo (SPEC 070 §6.1) — o rascunho que este
+ * disparo deve ADOTAR em vez de inserir uma linha nova.
+ *
+ * Por que isto não é redundante com a RLS
+ *
+ *   O planejamento roda com o cliente de sessão, então a RLS já barra um
+ *   id de outra conta. O que ela NÃO faz é distinguir "não é seu" de "já
+ *   foi disparado" — e é essa distinção que separa um erro compreensível
+ *   ("esta campanha já foi enviada") de um `draft_not_found` genérico. A
+ *   pré-condição `status = 'draft'` do UPDATE continua sendo a defesa
+ *   final contra a corrida entre duas abas; esta checagem é a que
+ *   produz a MENSAGEM certa.
+ *
+ * Devolve `{ draftId }` (possivelmente `undefined`, quando o corpo não
+ * traz nenhum) ou `{ response }` já pronto para a rota devolver.
+ */
+async function resolveAdoptedDraft(
+  db: SupabaseClient,
+  params: {
+    accountId: string;
+    raw: unknown;
+    audience: AudienceConfig;
+  }
+): Promise<{ draftId?: string } | { response: NextResponse }> {
+  const { accountId, raw, audience } = params;
+
+  if (raw === undefined || raw === null) return { draftId: undefined };
+  if (!isUuid(raw)) {
+    return { response: badRequest("'draftId' must be a UUID") };
+  }
+
+  // §6.3 — com audiência `staged`, os dois ids descrevem a MESMA linha.
+  // Divergência é erro de programação do cliente, não estado do
+  // sistema: aceitar em silêncio faria o disparo adotar uma linha e ler
+  // a audiência de outra.
+  if (
+    audience.type === 'staged' &&
+    audience.draftId &&
+    audience.draftId !== raw
+  ) {
+    return {
+      response: badRequest("'draftId' does not match 'audience.draftId'"),
+    };
+  }
+
+  const { data: row } = await db
+    .from('broadcasts')
+    .select('id, status, source, variant_label, parent_broadcast_id')
+    .eq('id', raw)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  if (!row) {
+    return {
+      response: NextResponse.json(
+        {
+          error: 'This draft no longer exists or was already sent.',
+          code: 'draft_not_found',
+        },
+        { status: 404 }
+      ),
+    };
+  }
+
+  if (row.status !== 'draft') {
+    // 409, não 404: a campanha existe e o usuário tem direito a ela —
+    // o que mudou foi o estado. O status vai no corpo para a UI poder
+    // dizer o que houve em vez de um "sumiu" que não ajuda ninguém.
+    return {
+      response: NextResponse.json(
+        {
+          error: `This broadcast is '${row.status}' and can no longer be edited.`,
+          code: 'draft_not_editable',
+          status: row.status,
+        },
+        { status: 409 }
+      ),
+    };
+  }
+
+  if (row.source === 'webhook') {
+    return { response: badRequest('A webhook funnel cannot be dispatched.') };
+  }
+  if (row.variant_label || row.parent_broadcast_id) {
+    return {
+      response: badRequest('An A/B variant cannot be dispatched on its own.'),
+    };
+  }
+
+  return { draftId: raw };
 }
 
 /**
@@ -203,6 +299,19 @@ export async function POST(request: Request) {
     // escolhido" na mesma requisição.
     const channelId =
       typeof body.channelId === 'string' ? body.channelId : undefined;
+
+    // ── Rascunho adotado (SPEC 070 §6.1) ───────────────────────────
+    // O disparo (ou agendamento) de um rascunho EDITADO reusa a linha
+    // que já existe em vez de inserir outra — "uma campanha, uma
+    // linha" (§1.3), inclusive quando a audiência deixou de ser
+    // `staged` porque o usuário a trocou.
+    const draftId = await resolveAdoptedDraft(supabase, {
+      accountId,
+      raw: body.draftId,
+      audience,
+    });
+    if ('response' in draftId) return draftId.response;
+
     const input = {
       name,
       templateName,
@@ -272,6 +381,9 @@ export async function POST(request: Request) {
         windowOverride: schedule.override,
         variant: abTest?.variant,
         splitPercent: abTest?.splitPercent,
+        // SPEC 070 §6.2 — agendar um rascunho editado ADOTA a linha,
+        // inclusive quando a audiencia deixou de ser `staged`.
+        adoptBroadcastId: draftId.draftId,
       });
 
       await logBroadcastAudit(supabase, {
@@ -334,6 +446,7 @@ export async function POST(request: Request) {
         variant: abTest.variant,
         splitPercent: abTest.splitPercent,
         canCreateTags,
+        adoptBroadcastId: draftId.draftId,
       });
 
       await logBroadcastAudit(supabase, {
@@ -406,6 +519,7 @@ export async function POST(request: Request) {
       batchLimit,
       input,
       canCreateTags,
+      adoptBroadcastId: draftId.draftId,
     });
 
     // Trilha antes do fan-out: se o processo morrer no meio do envio, o

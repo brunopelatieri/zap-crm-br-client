@@ -81,6 +81,13 @@ interface BroadcastPayload {
    * Ausente = canal Cloud padrão da conta.
    */
   channelId?: string | null;
+  /**
+   * Rascunho a ADOTAR (SPEC 070 §6.1): a campanha já tem uma linha em
+   * `broadcasts` — a da triagem, ou a que o usuario abriu para editar —
+   * e disparar/agendar deve reusá-la em vez de inserir outra ("uma
+   * campanha, uma linha", §1.3). Ausente = disparo novo, como antes.
+   */
+  draftId?: string;
 }
 
 export interface BroadcastStartResult {
@@ -117,6 +124,10 @@ const ERROR_CODES = new Set([
   'template_malformed',
   'template_not_found',
   'draft_not_found',
+  // SPEC 070 §6.1 — o rascunho existe e é seu, mas ja saiu de 'draft'
+  // (outra aba disparou/agendou). Distinto de `draft_not_found`, que
+  // nao diz o que aconteceu.
+  'draft_not_editable',
   'bad_request',
   'internal',
   // Fase 7 (§6.3, §6.8)
@@ -191,6 +202,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             Intl.DateTimeFormat().resolvedOptions().timeZone,
           windowOverride: payload.windowOverride ?? false,
           channelId: payload.channelId ?? undefined,
+          draftId: payload.draftId,
           abTest: payload.abTest
             ? {
                 templateName: payload.abTest.template.name,

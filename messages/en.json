@@ -1357,7 +1357,10 @@
       },
       "errorLoad": "Failed to load broadcasts",
       "retry": "Retry",
-      "variant": "Variant {variant}"
+      "variant": "Variant {variant}",
+      "actions": {
+        "edit": "Edit"
+      }
     },
     "status": {
       "draft": "Draft",
@@ -1398,6 +1401,9 @@
       "notFound": "Broadcast not found",
       "template": "Template: {name}",
       "createdAt": "Created {date}",
+      "continueEditing": "Continue editing",
+      "draftBanner": "Draft — this campaign hasn't been sent yet.",
+      "draftAudience": "Audience: {count} contacts triaged",
       "deletePrompt": "Delete this broadcast?",
       "cancel": "Cancel",
       "confirm": "Confirm",
@@ -1601,10 +1607,64 @@
       "toastNotLinked": "Your profile is not linked to an account.",
       "toastFailedDraft": "Failed to save draft: {error}",
       "toastDraftSaved": "Draft saved",
+      "toastNoDraftId": "Couldn't identify which draft to save.",
       "channelBlocked": {
         "title": "Bulk broadcast is not available",
         "body": "Bulk broadcast is only available on WhatsApp Oficial. QR code instances cannot send campaigns — it's the rule that most protects the number from being banned.",
         "back": "Back to broadcasts"
+      }
+    },
+    "edit": {
+      "title": "Edit draft",
+      "subtitle": "{name} — not sent yet",
+      "saved": "Draft updated",
+      "gone": "This draft no longer exists or was already sent.",
+      "templateMissingWarning": "The template of this draft is no longer available on this channel. Choose another to continue.",
+      "backToBroadcasts": "Back to broadcasts",
+      "discardChanges": "Discard unsaved changes?",
+      "notEditable": {
+        "notFound": {
+          "title": "Draft not found",
+          "body": "This draft doesn't exist, was already sent, or belongs to another account."
+        },
+        "webhookFunnel": {
+          "title": "This is a webhook funnel",
+          "body": "Webhook funnels accumulate contacts continuously and don't have an audience step to edit."
+        },
+        "abVariant": {
+          "title": "This campaign is part of an A/B test",
+          "body": "A/B test variants aren't edited as a single draft."
+        },
+        "status": {
+          "scheduled": {
+            "title": "This campaign is already scheduled",
+            "body": "Editing a scheduled campaign isn't supported yet. Cancel it from the broadcast list to make changes."
+          },
+          "sending": {
+            "title": "This campaign is sending",
+            "body": "A campaign that's already sending can't be edited."
+          },
+          "sent": {
+            "title": "This campaign was already sent",
+            "body": "A sent campaign can't be edited — duplicate it if you want to send it again."
+          },
+          "failed": {
+            "title": "This campaign already ran",
+            "body": "A campaign that already ran, even if it failed, can't be edited."
+          },
+          "streaming": {
+            "title": "This campaign is streaming",
+            "body": "Webhook funnels don't have an audience step to edit."
+          },
+          "awaitingCheck": {
+            "title": "This campaign is being checked before sending",
+            "body": "Wait for the number check to finish before editing this campaign."
+          },
+          "fallback": {
+            "title": "This campaign can't be edited",
+            "body": "Only campaigns still in draft can be edited."
+          }
+        }
       }
     },
     "wizard": {
@@ -1726,6 +1786,8 @@
         "variables": "Variables:",
         "variablesMapped": "{count} mapped",
         "saveDraft": "Save as Draft",
+        "saveChanges": "Save changes",
+        "abTestNoDraft": "A draft can only store one template — a campaign with an A/B test can't be saved as a draft. You can still schedule it.",
         "sendNow": "Send Broadcast",
         "sending": "Sending...",
         "preparing": "Preparing...",
@@ -1838,6 +1900,7 @@
         "too_many_recipients": "This audience is too large for a single broadcast. Split it into smaller sends.",
         "template_malformed": "This template is out of sync. Run \"Sync from Meta\" in Settings and try again.",
         "draft_not_found": "This draft no longer exists or was already sent. Start the audience over.",
+        "draft_not_editable": "This campaign is no longer a draft — another tab may have sent or scheduled it. Open it to see what happened.",
         "bad_request": "Something in this broadcast is not valid. Go back and review the audience and variables.",
         "rate_limited": "Too many broadcasts started in a row. Wait a moment and try again.",
         "internal": "Could not start the broadcast. Try again in a moment.",
@@ -1864,7 +1927,23 @@
         "empty_audience": "No contacts matched this audience.",
         "bad_request": "Something in this audience is not valid. Go back and review it.",
         "rate_limited": "Too many attempts in a row. Wait a moment and try again.",
-        "internal": "Could not stage this audience. Try again in a moment."
+        "internal": "Could not stage this audience. Try again in a moment.",
+        "draft_not_found": "This draft no longer exists or was already sent.",
+        "restage_failed": "Could not save the new audience — the previous one was lost. Import it again."
+      },
+      "current": {
+        "title": "Current audience",
+        "staged": "{selected} of {total} contacts triaged",
+        "tags": "Tags: {names}",
+        "customField": "{field} {operator} {value}",
+        "imported": "Imported spreadsheet — {selected} of {total} selected",
+        "empty": "No audience selected yet"
+      },
+      "restage": {
+        "button": "Change audience",
+        "reviewTriage": "Review triage",
+        "confirmTitle": "Change this campaign's audience?",
+        "confirmBody": "The {rows} rows already staged and the triage selection will be discarded. The template, the variables and the name are kept."
       },
       "triage": {
         "title": "Audience triage",
@@ -1880,6 +1959,11 @@
         "draftAlreadySent": "This broadcast was already sent — the audience can no longer be triaged.",
         "viewBroadcast": "View broadcast",
         "backToNew": "Start a new broadcast",
+        "backToBroadcasts": "Back to broadcasts",
+        "cancelRestage": "Cancel",
+        "cancelRestageConfirmTitle": "Cancel this audience change?",
+        "cancelRestageConfirmBody": "The campaign you were editing is kept exactly as it was — nothing here is deleted.",
+        "cancelRestageAction": "Back to editing",
         "searchPlaceholder": "Search by name or phone",
         "selectedSummary": "{selected} selected",
         "quotaBlockedHint": "This selection exceeds the quota available in the last 24 hours. Remove contacts or wait for the window to reset.",

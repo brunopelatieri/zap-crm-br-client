@@ -34,6 +34,7 @@ import {
   Trash2,
   Copy,
   ScrollText,
+  Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getBroadcastStatus, getRecipientStatus } from '@/lib/broadcast-status';
@@ -46,6 +47,8 @@ import {
 import { VariantComparison } from '@/components/broadcasts/variant-comparison';
 import { RecipientErrorCell } from '@/components/broadcasts/recipient-error-cell';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useCan } from '@/hooks/use-can';
+import { GatedButton } from '@/components/ui/gated-button';
 
 /**
  * Cadência do polling enquanto o disparo roda no servidor. Igual à da
@@ -91,6 +94,7 @@ export default function BroadcastDetailPage() {
   const tStatus = useTranslations('Broadcasts.status');
   const tAwaitingCheck = useTranslations('Broadcasts.awaitingCheck');
   const tWebhook = useTranslations('Broadcasts.webhookFunnel');
+  const canEdit = useCan('send-messages');
   const broadcastId = params.id as string;
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
@@ -423,273 +427,317 @@ export default function BroadcastDetailPage() {
             in flight against this exact broadcast_id at any time, and
             broadcast_recipients cascades on broadcasts.id (migration
             001) — deleting mid-send would silently orphan that update. */}
-        {confirmDelete ? (
-          <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
-            <span className="text-red-300">
-              {/* Apagar a variante A leva a B junto (FK em cascata da
-                  051). Dizer isso ANTES é a diferença entre uma escolha
-                  e uma surpresa. */}
-              {broadcast.variant_label === 'A' && sibling
-                ? t('abTest.deleteCascade')
-                : t('deletePrompt')}
-            </span>
-            <Button
+        <div className="flex items-center gap-2">
+          {/* SPEC 070 §8.2 — só em rascunho: as demais transições
+            (scheduled/sending/sent/…) não têm mais um assistente para
+            reabrir. */}
+          {broadcast.status === 'draft' && (
+            <GatedButton
+              canAct={canEdit}
+              gateReason="edit drafts"
               variant="outline"
               size="sm"
-              onClick={() => setConfirmDelete(false)}
-              disabled={deleting}
-              className="border-border text-muted-foreground hover:bg-muted h-7 bg-transparent"
+              onClick={() => router.push(`/broadcasts/${broadcast.id}/edit`)}
+              className="border-border text-muted-foreground hover:bg-muted"
             >
-              {t('cancel')}
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="h-7 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              {deleting ? t('deleting') : t('confirm')}
-            </Button>
-          </div>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={
-              broadcast.status === 'sending' || broadcast.status === 'streaming'
-            }
-            onClick={() => setConfirmDelete(true)}
-            title={
-              broadcast.status === 'streaming'
-                ? t('cannotDeleteStreaming')
-                : broadcast.status === 'sending'
-                  ? t('cannotDeleteSending')
-                  : t('deleteHover')
-            }
-            className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 disabled:opacity-40"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t('delete')}
-          </Button>
-        )}
-      </div>
-
-      {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard
-          label={t('stats.totalRecipients')}
-          value={broadcast.total_recipients}
-          total={broadcast.total_recipients}
-          icon={<Users className="h-4 w-4" />}
-          color="bg-muted text-muted-foreground"
-        />
-        <StatCard
-          label={t('stats.sent')}
-          value={broadcast.sent_count}
-          total={broadcast.total_recipients}
-          icon={<Send className="h-4 w-4" />}
-          color="bg-primary/10 text-primary"
-        />
-        <StatCard
-          label={t('stats.delivered')}
-          value={broadcast.delivered_count}
-          total={broadcast.total_recipients}
-          icon={<CheckCheck className="h-4 w-4" />}
-          color="bg-teal-500/10 text-teal-400"
-        />
-        <StatCard
-          label={t('stats.read')}
-          value={broadcast.read_count}
-          total={broadcast.total_recipients}
-          icon={<Eye className="h-4 w-4" />}
-          color="bg-blue-500/10 text-blue-400"
-        />
-        <StatCard
-          label={t('stats.replied')}
-          value={broadcast.replied_count}
-          total={broadcast.total_recipients}
-          icon={<MessageCircle className="h-4 w-4" />}
-          color="bg-indigo-500/10 text-indigo-400"
-        />
-        <StatCard
-          label={t('stats.failed')}
-          value={broadcast.failed_count}
-          total={broadcast.total_recipients}
-          icon={<AlertCircle className="h-4 w-4" />}
-          color="bg-red-500/10 text-red-400"
-        />
-      </div>
-
-      {/* Com os dois braços em mãos, a comparação SUBSTITUI o funil
-          único: ela já contém o funil desta campanha, e mostrar os dois
-          faria o mesmo número aparecer duas vezes na mesma tela. */}
-      {broadcast.variant_label && sibling ? (
-        <VariantComparison
-          variantA={broadcast.variant_label === 'A' ? broadcast : sibling}
-          variantB={broadcast.variant_label === 'A' ? sibling : broadcast}
-          currentId={broadcast.id}
-          onOpenVariant={(id) => router.push(`/broadcasts/${id}`)}
-        />
-      ) : (
-        <FunnelChart steps={funnelSteps} title={t('funnel')} />
-      )}
-
-      {/* Recipients Table — TooltipProvider scoped to just this
-            section: it's the only place a Tooltip (RecipientErrorCell)
-            is rendered, so the rest of the page doesn't need to carry
-            the provider. */}
-      <TooltipProvider>
-        <div className="border-border bg-card rounded-xl border">
-          <div className="border-border flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-            <h2 className="text-foreground text-sm font-medium">
-              {statusFilter !== 'all'
-                ? t('recipientsHeader', {
-                    filtered: filteredRecipients.length,
-                    total: recipients.length,
-                  })
-                : t('recipientsHeaderAll', { total: recipients.length })}
-            </h2>
-            <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-border text-muted-foreground hover:bg-muted"
-                    />
-                  }
-                >
-                  <Filter className="h-3.5 w-3.5" />
-                  {statusFilter === 'all'
-                    ? t('allStatuses')
-                    : tStatus(getRecipientStatus(statusFilter).label)}
-                  <ChevronDown className="h-3 w-3" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="border-border bg-popover">
-                  <DropdownMenuItem
-                    onClick={() => setStatusFilter('all')}
-                    className={
-                      statusFilter === 'all'
-                        ? 'text-primary'
-                        : 'text-popover-foreground'
-                    }
-                  >
-                    {t('allStatuses')}
-                  </DropdownMenuItem>
-                  {RECIPIENT_STATUSES.map((s) => (
-                    <DropdownMenuItem
-                      key={s}
-                      onClick={() => setStatusFilter(s)}
-                      className={
-                        statusFilter === s
-                          ? 'text-primary'
-                          : 'text-popover-foreground'
-                      }
-                    >
-                      {tStatus(getRecipientStatus(s).label)}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
+              <Pencil className="h-3.5 w-3.5" />
+              {t('continueEditing')}
+            </GatedButton>
+          )}
+          {confirmDelete ? (
+            <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
+              <span className="text-red-300">
+                {/* Apagar a variante A leva a B junto (FK em cascata da
+                  051). Dizer isso ANTES é a diferença entre uma escolha
+                  e uma surpresa. */}
+                {broadcast.variant_label === 'A' && sibling
+                  ? t('abTest.deleteCascade')
+                  : t('deletePrompt')}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleExport}
-                disabled={recipients.length === 0}
-                className="border-border text-muted-foreground hover:bg-muted"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="border-border text-muted-foreground hover:bg-muted h-7 bg-transparent"
               >
-                <Download className="h-3.5 w-3.5" />
-                {t('exportCsv')}
+                {t('cancel')}
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="h-7 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? t('deleting') : t('confirm')}
               </Button>
             </div>
-          </div>
-
-          {filteredRecipients.length === 0 ? (
-            <div className="flex h-32 items-center justify-center">
-              <p className="text-muted-foreground text-sm">
-                {recipients.length === 0
-                  ? t('noRecipients')
-                  : t('noRecipientsFilter')}
-              </p>
-            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border hover:bg-transparent">
-                    <TableHead className="text-muted-foreground">
-                      {t('table.contact')}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      {t('table.phone')}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      {t('table.status')}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      {t('table.sent')}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      {t('table.delivered')}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      {t('table.read')}
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      {t('table.error')}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredRecipients.map((recipient) => {
-                    const rStatus = getRecipientStatus(recipient.status);
-                    return (
-                      <TableRow key={recipient.id} className="border-border">
-                        <TableCell className="text-foreground font-medium">
-                          {recipient.contact?.name ?? 'Unknown'}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {recipient.contact?.phone ?? '-'}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${rStatus.classes}`}
-                          >
-                            {tStatus(rStatus.label)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {recipient.sent_at
-                            ? new Date(recipient.sent_at).toLocaleString()
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {recipient.delivered_at
-                            ? new Date(recipient.delivered_at).toLocaleString()
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {recipient.read_at
-                            ? new Date(recipient.read_at).toLocaleString()
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="max-w-xs">
-                          <RecipientErrorCell
-                            errorMessage={recipient.error_message}
-                            t={t}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={
+                broadcast.status === 'sending' ||
+                broadcast.status === 'streaming'
+              }
+              onClick={() => setConfirmDelete(true)}
+              title={
+                broadcast.status === 'streaming'
+                  ? t('cannotDeleteStreaming')
+                  : broadcast.status === 'sending'
+                    ? t('cannotDeleteSending')
+                    : t('deleteHover')
+              }
+              className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t('delete')}
+            </Button>
           )}
         </div>
-      </TooltipProvider>
+      </div>
+
+      {broadcast.status === 'draft' ? (
+        // SPEC 070 §8.2 — no lugar dos seis cartões zerados e do funil
+        // vazio (a foto de uma campanha que nunca aconteceu), diz o que
+        // IMPORTA para quem abriu um rascunho: quanto já foi triado, qual
+        // template, e como continuar. Nada de tabela de destinatários —
+        // não existem ainda.
+        <div className="border-border bg-card space-y-1.5 rounded-xl border p-4">
+          <p className="text-foreground text-sm font-medium">
+            {t('draftBanner')}
+          </p>
+          <p className="text-muted-foreground text-sm">
+            {t('draftAudience', { count: broadcast.total_recipients })}
+            {' · '}
+            {t('template', { name: broadcast.template_name })}
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatCard
+              label={t('stats.totalRecipients')}
+              value={broadcast.total_recipients}
+              total={broadcast.total_recipients}
+              icon={<Users className="h-4 w-4" />}
+              color="bg-muted text-muted-foreground"
+            />
+            <StatCard
+              label={t('stats.sent')}
+              value={broadcast.sent_count}
+              total={broadcast.total_recipients}
+              icon={<Send className="h-4 w-4" />}
+              color="bg-primary/10 text-primary"
+            />
+            <StatCard
+              label={t('stats.delivered')}
+              value={broadcast.delivered_count}
+              total={broadcast.total_recipients}
+              icon={<CheckCheck className="h-4 w-4" />}
+              color="bg-teal-500/10 text-teal-400"
+            />
+            <StatCard
+              label={t('stats.read')}
+              value={broadcast.read_count}
+              total={broadcast.total_recipients}
+              icon={<Eye className="h-4 w-4" />}
+              color="bg-blue-500/10 text-blue-400"
+            />
+            <StatCard
+              label={t('stats.replied')}
+              value={broadcast.replied_count}
+              total={broadcast.total_recipients}
+              icon={<MessageCircle className="h-4 w-4" />}
+              color="bg-indigo-500/10 text-indigo-400"
+            />
+            <StatCard
+              label={t('stats.failed')}
+              value={broadcast.failed_count}
+              total={broadcast.total_recipients}
+              icon={<AlertCircle className="h-4 w-4" />}
+              color="bg-red-500/10 text-red-400"
+            />
+          </div>
+
+          {/* Com os dois braços em mãos, a comparação SUBSTITUI o funil
+          único: ela já contém o funil desta campanha, e mostrar os dois
+          faria o mesmo número aparecer duas vezes na mesma tela. */}
+          {broadcast.variant_label && sibling ? (
+            <VariantComparison
+              variantA={broadcast.variant_label === 'A' ? broadcast : sibling}
+              variantB={broadcast.variant_label === 'A' ? sibling : broadcast}
+              currentId={broadcast.id}
+              onOpenVariant={(id) => router.push(`/broadcasts/${id}`)}
+            />
+          ) : (
+            <FunnelChart steps={funnelSteps} title={t('funnel')} />
+          )}
+
+          {/* Recipients Table — TooltipProvider scoped to just this
+            section: it's the only place a Tooltip (RecipientErrorCell)
+            is rendered, so the rest of the page doesn't need to carry
+            the provider. */}
+          <TooltipProvider>
+            <div className="border-border bg-card rounded-xl border">
+              <div className="border-border flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+                <h2 className="text-foreground text-sm font-medium">
+                  {statusFilter !== 'all'
+                    ? t('recipientsHeader', {
+                        filtered: filteredRecipients.length,
+                        total: recipients.length,
+                      })
+                    : t('recipientsHeaderAll', { total: recipients.length })}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-border text-muted-foreground hover:bg-muted"
+                        />
+                      }
+                    >
+                      <Filter className="h-3.5 w-3.5" />
+                      {statusFilter === 'all'
+                        ? t('allStatuses')
+                        : tStatus(getRecipientStatus(statusFilter).label)}
+                      <ChevronDown className="h-3 w-3" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="border-border bg-popover">
+                      <DropdownMenuItem
+                        onClick={() => setStatusFilter('all')}
+                        className={
+                          statusFilter === 'all'
+                            ? 'text-primary'
+                            : 'text-popover-foreground'
+                        }
+                      >
+                        {t('allStatuses')}
+                      </DropdownMenuItem>
+                      {RECIPIENT_STATUSES.map((s) => (
+                        <DropdownMenuItem
+                          key={s}
+                          onClick={() => setStatusFilter(s)}
+                          className={
+                            statusFilter === s
+                              ? 'text-primary'
+                              : 'text-popover-foreground'
+                          }
+                        >
+                          {tStatus(getRecipientStatus(s).label)}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExport}
+                    disabled={recipients.length === 0}
+                    className="border-border text-muted-foreground hover:bg-muted"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {t('exportCsv')}
+                  </Button>
+                </div>
+              </div>
+
+              {filteredRecipients.length === 0 ? (
+                <div className="flex h-32 items-center justify-center">
+                  <p className="text-muted-foreground text-sm">
+                    {recipients.length === 0
+                      ? t('noRecipients')
+                      : t('noRecipientsFilter')}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border hover:bg-transparent">
+                        <TableHead className="text-muted-foreground">
+                          {t('table.contact')}
+                        </TableHead>
+                        <TableHead className="text-muted-foreground">
+                          {t('table.phone')}
+                        </TableHead>
+                        <TableHead className="text-muted-foreground">
+                          {t('table.status')}
+                        </TableHead>
+                        <TableHead className="text-muted-foreground">
+                          {t('table.sent')}
+                        </TableHead>
+                        <TableHead className="text-muted-foreground">
+                          {t('table.delivered')}
+                        </TableHead>
+                        <TableHead className="text-muted-foreground">
+                          {t('table.read')}
+                        </TableHead>
+                        <TableHead className="text-muted-foreground">
+                          {t('table.error')}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRecipients.map((recipient) => {
+                        const rStatus = getRecipientStatus(recipient.status);
+                        return (
+                          <TableRow
+                            key={recipient.id}
+                            className="border-border"
+                          >
+                            <TableCell className="text-foreground font-medium">
+                              {recipient.contact?.name ?? 'Unknown'}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {recipient.contact?.phone ?? '-'}
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${rStatus.classes}`}
+                              >
+                                {tStatus(rStatus.label)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {recipient.sent_at
+                                ? new Date(recipient.sent_at).toLocaleString()
+                                : '-'}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {recipient.delivered_at
+                                ? new Date(
+                                    recipient.delivered_at
+                                  ).toLocaleString()
+                                : '-'}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {recipient.read_at
+                                ? new Date(recipient.read_at).toLocaleString()
+                                : '-'}
+                            </TableCell>
+                            <TableCell className="max-w-xs">
+                              <RecipientErrorCell
+                                errorMessage={recipient.error_message}
+                                t={t}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </TooltipProvider>
+        </>
+      )}
     </div>
   );
 }

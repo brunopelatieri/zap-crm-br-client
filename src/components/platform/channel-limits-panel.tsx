@@ -266,7 +266,7 @@ function ChannelLimitsPanelContent({ accountId }: { accountId: string }) {
                 )}
                 {overrideCount > 0 && (
                   <Alert className="border-amber-500/30 bg-amber-500/5 py-1.5">
-                    <AlertDescription className="text-[11px] text-amber-100/80">
+                    <AlertDescription className="text-[11px]">
                       {t('instanceOverridesWarning', { count: overrideCount })}
                     </AlertDescription>
                   </Alert>

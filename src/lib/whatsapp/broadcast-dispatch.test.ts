@@ -40,6 +40,11 @@ interface Scenario {
   recipientInsertError?: { message: string } | null;
   /** Linhas de `broadcast_audience_staging` do caminho `staged`. */
   stagingRows?: Record<string, unknown>[];
+  /**
+   * SPEC 070 §6.2 — o UPDATE de adoção não casa nenhuma linha: o
+   * rascunho foi apagado, ou já saiu de `draft` (outra aba disparou).
+   */
+  adoptedDraftMissing?: boolean;
 }
 
 const recipientUpdates: { ids: unknown; patch: Record<string, unknown> }[] = [];
@@ -66,6 +71,7 @@ function makeDb(scenario: Scenario) {
     config = CONFIG,
     recipientInsertError = null,
     stagingRows = [],
+    adoptedDraftMissing = false,
   } = scenario;
 
   // Um teste A/B insere DUAS linhas em `broadcasts`; devolver o mesmo id
@@ -182,7 +188,9 @@ function makeDb(scenario: Scenario) {
           // Só um UPDATE que pede a linha de volta (`.select(...)`) é uma
           // ADOÇÃO; os outros (marcar como falho) descartam o retorno.
           if (ops.some((o) => o.fn === 'select')) {
-            return { data: { id: 'bc-1', scheduled_at: SCHEDULED_AT } };
+            return adoptedDraftMissing
+              ? { data: null }
+              : { data: { id: 'bc-1', scheduled_at: SCHEDULED_AT } };
           }
         }
         return { data: null };
@@ -801,6 +809,7 @@ describe('planDashboardBroadcast — adoção pelo cron (§6.3)', () => {
       input: BASE_INPUT,
       batchLimit: 100,
       adoptBroadcastId: 'bc-1',
+      rowAlreadyClaimed: true,
     });
 
     expect(plan.broadcastId).toBe('bc-1');
@@ -808,10 +817,35 @@ describe('planDashboardBroadcast — adoção pelo cron (§6.3)', () => {
     expect(broadcastUpdates[0]).toMatchObject({ status: 'sending' });
   });
 
-  it('não exige status draft ao adotar — o claim do cron já travou', async () => {
+  it('com rowAlreadyClaimed, não exige status draft — o claim do cron já travou', async () => {
     // Repetir `status = 'draft'` aqui faria o UPDATE não casar linha
     // nenhuma (o cron já pôs em `sending`) e o disparo agendado
     // "desapareceria" com um draft_not_found.
+    const mock = makeDb({
+      contacts: [contact('c-1', '+5511999990001')],
+      template: TEMPLATE_ROW,
+    });
+
+    await planDashboardBroadcast(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      input: BASE_INPUT,
+      batchLimit: 100,
+      adoptBroadcastId: 'bc-1',
+      rowAlreadyClaimed: true,
+    });
+
+    const filters = broadcastUpdateFilters[0].map((args) => args[0]);
+    expect(filters).toContain('id');
+    expect(filters).not.toContain('status');
+  });
+
+  it('achado de code review (SPEC 070) — SEM rowAlreadyClaimed, adoptBroadcastId sozinho NÃO dispensa status draft', async () => {
+    // Este é o bug que o disparo direto do usuário expôs: antes da
+    // correção, a mera presença de `adoptBroadcastId` desligava a
+    // pré-condição, mesmo quando quem chamou nunca reivindicou a linha
+    // (só leu). Duas abas conseguiam adotar e enviar a mesma campanha
+    // duas vezes.
     const mock = makeDb({
       contacts: [contact('c-1', '+5511999990001')],
       template: TEMPLATE_ROW,
@@ -827,7 +861,7 @@ describe('planDashboardBroadcast — adoção pelo cron (§6.3)', () => {
 
     const filters = broadcastUpdateFilters[0].map((args) => args[0]);
     expect(filters).toContain('id');
-    expect(filters).not.toContain('status');
+    expect(filters).toContain('status');
   });
 
   it('o ramo staged continua exigindo status draft', async () => {
@@ -1004,6 +1038,108 @@ describe('scheduleDashboardBroadcast (§6.3)', () => {
       .filter((c) => opArgs(c.ops, 'delete'));
     expect(stagingDeletes).toHaveLength(0);
   });
+
+  // ── SPEC 070 §6.2 (F7) ─────────────────────────────────────────
+  // Antes desta SPEC o agendamento só adotava no ramo `staged`. Um
+  // rascunho cuja audiência foi TROCADA para etiquetas caía no `else`,
+  // fazia INSERT e deixava o rascunho órfão ao lado do agendamento.
+
+  it('adoptBroadcastId adota a linha mesmo com audiência tags — UPDATE, nunca INSERT', async () => {
+    const mock = makeDb({
+      contacts: [contact('c-1', '+5511999990001')],
+      template: TEMPLATE_ROW,
+    });
+
+    const result = await scheduleDashboardBroadcast(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      input: {
+        ...BASE_INPUT,
+        audience: { type: 'tags' as const, tagIds: ['t-1'] },
+      },
+      scheduledAt: AT,
+      timeZone: 'America/Sao_Paulo',
+      windowOverride: false,
+      adoptBroadcastId: 'bc-1',
+    });
+
+    expect(result.broadcastId).toBe('bc-1');
+    expect(broadcastInserts).toHaveLength(0);
+    expect(broadcastUpdates[0]).toMatchObject({ status: 'scheduled' });
+  });
+
+  it('a pré-condição status=draft PERMANECE no caminho do cliente', async () => {
+    // É ela que impede uma segunda aba de agendar uma campanha que a
+    // primeira já disparou.
+    const mock = makeDb({
+      contacts: [contact('c-1', '+5511999990001')],
+      template: TEMPLATE_ROW,
+    });
+
+    await scheduleDashboardBroadcast(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      input: {
+        ...BASE_INPUT,
+        audience: { type: 'tags' as const, tagIds: ['t-1'] },
+      },
+      scheduledAt: AT,
+      timeZone: 'America/Sao_Paulo',
+      windowOverride: false,
+      adoptBroadcastId: 'bc-1',
+    });
+
+    const filters = broadcastUpdateFilters[0].map((args) => args[0]);
+    expect(filters).toContain('status');
+  });
+
+  it('rascunho que já saiu de draft vira draft_not_found — sem inserir nada', async () => {
+    const mock = makeDb({
+      contacts: [contact('c-1', '+5511999990001')],
+      template: TEMPLATE_ROW,
+      // O UPDATE não casa linha nenhuma: a pré-condição de estado falhou.
+      adoptedDraftMissing: true,
+    });
+
+    await expect(
+      scheduleDashboardBroadcast(mock.db, {
+        accountId: ACCOUNT,
+        userId: USER,
+        input: {
+          ...BASE_INPUT,
+          audience: { type: 'tags' as const, tagIds: ['t-1'] },
+        },
+        scheduledAt: AT,
+        timeZone: 'America/Sao_Paulo',
+        windowOverride: false,
+        adoptBroadcastId: 'bc-1',
+      })
+    ).rejects.toMatchObject({ code: 'draft_not_found' });
+
+    expect(broadcastInserts).toHaveLength(0);
+  });
+
+  it('sem adoptBroadcastId e com audiência tags, segue INSERINDO (regressão da criação)', async () => {
+    const mock = makeDb({
+      contacts: [contact('c-1', '+5511999990001')],
+      template: TEMPLATE_ROW,
+    });
+
+    await scheduleDashboardBroadcast(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      input: {
+        ...BASE_INPUT,
+        audience: { type: 'tags' as const, tagIds: ['t-1'] },
+      },
+      scheduledAt: AT,
+      timeZone: 'America/Sao_Paulo',
+      windowOverride: false,
+    });
+
+    expect(broadcastInserts).toHaveLength(1);
+    expect(broadcastUpdates).toHaveLength(0);
+  });
 });
 
 // ============================================================
@@ -1141,6 +1277,58 @@ describe('planAbTestBroadcast — divisão', () => {
         .map((r) => r.broadcast_id)
     );
     expect([...broadcastIds].sort()).toEqual(['bc-1', 'bc-2']);
+  });
+});
+
+describe('planAbTestBroadcast — adoção e rowAlreadyClaimed (achado de code review, SPEC 070)', () => {
+  it('SEM rowAlreadyClaimed, adoptBroadcastId sozinho não dispensa status draft na variante A', async () => {
+    // Mesmo bug do disparo simples (materializeArm): a rota de A/B
+    // imediato (`POST /api/broadcasts/send`) também adota a variante A
+    // por `draftId`, sem nunca ter reivindicado a linha antes.
+    const mock = makeDb({
+      contacts: abContacts(10),
+      templatesByName: AB_TEMPLATES,
+    });
+
+    await planAbTestBroadcast(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      input: AB_INPUT,
+      variant: AB_VARIANT,
+      batchLimit: 100,
+      rng: fixedRng,
+      adoptBroadcastId: 'bc-1',
+    });
+
+    const filtersA = broadcastUpdateFilters[0].map((args) => args[0]);
+    expect(filtersA).toContain('status');
+  });
+
+  it('COM rowAlreadyClaimed, o cron continua adotando a variante A sem a pré-condição', async () => {
+    const mock = makeDb({
+      contacts: abContacts(10),
+      templatesByName: AB_TEMPLATES,
+    });
+
+    await planAbTestBroadcast(mock.db, {
+      accountId: ACCOUNT,
+      userId: USER,
+      input: AB_INPUT,
+      variant: AB_VARIANT,
+      batchLimit: 100,
+      rng: fixedRng,
+      adoptBroadcastId: 'bc-1',
+      rowAlreadyClaimed: true,
+      adoptVariantBroadcastId: 'bc-2',
+    });
+
+    const filtersA = broadcastUpdateFilters[0].map((args) => args[0]);
+    const filtersB = broadcastUpdateFilters[1].map((args) => args[0]);
+    expect(filtersA).not.toContain('status');
+    // A variante B nunca precisa vir de fora — ela só adota quando
+    // `adoptVariantBroadcastId` está presente, e isso só acontece
+    // vindo do cron.
+    expect(filtersB).not.toContain('status');
   });
 });
 

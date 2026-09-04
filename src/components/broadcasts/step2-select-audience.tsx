@@ -6,7 +6,14 @@ import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { CustomField, MessageTemplate, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, ArrowRight, Loader2, Users, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Loader2,
+  RefreshCw,
+  Users,
+  X,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import {
@@ -33,7 +40,20 @@ import { toCsvContacts } from '@/lib/audience/normalize';
 import type { NormalizedAudience } from '@/lib/audience/types';
 import { saveStageSummary } from '@/lib/audience/stage-summary-storage';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useCheckInstances } from '@/lib/evolution/use-check-instances';
+import {
+  describeDraftAudience,
+  type DraftAudienceDescription,
+  type DraftAudienceSummary,
+} from '@/lib/broadcasts/draft';
 
 /**
  * Fonte visível na UI (§3.1), mais estreita que `AudienceConfig['type']`:
@@ -49,6 +69,9 @@ const STAGE_ERROR_CODES = new Set([
   'empty_audience',
   'bad_request',
   'internal',
+  // SPEC 070 §5.2 — troca de audiência de um rascunho existente.
+  'draft_not_found',
+  'restage_failed',
 ]);
 
 interface Step2Props {
@@ -66,6 +89,26 @@ interface Step2Props {
   /** SPEC 069 R6 — "checar antes de disparar". */
   checkBeforeSend: boolean;
   onCheckBeforeSendChange: (checked: boolean) => void;
+  /**
+   * SPEC 070 §5.1 — modo EDIÇÃO de um rascunho que já tem audiência
+   * triada. O passo abre em RESUMO ("Audiência atual"), e trocar a
+   * fonte é uma ação explícita, com confirmação (D-6), porque descarta
+   * as linhas importadas e a seleção da triagem.
+   *
+   * Ausente = fluxo de criação, exatamente como antes desta SPEC.
+   * Presente, `handleAnalyze` re-estagia na MESMA linha (`draftId`) em
+   * vez de criar outro rascunho (§1.3).
+   */
+  restage?: {
+    broadcastId: string;
+    summary: DraftAudienceSummary;
+  };
+  /**
+   * Avançar SEM re-estagiar — só existe em modo edição (`restage`): no
+   * fluxo de criação, a única saída para frente é `handleAnalyze`, que
+   * passa obrigatoriamente pela triagem.
+   */
+  onNext?: () => void;
 }
 
 /**
@@ -101,6 +144,59 @@ function initialSource(audience: AudienceConfig): AudienceSourceId {
   return audience.type;
 }
 
+/**
+ * Descritor puro (`describeDraftAudience`, SPEC 070 §3.3) → texto da
+ * tela. A resolução de NOMES (etiqueta, campo personalizado) mora aqui
+ * de propósito: é este componente que já carregou as duas listas, e é o
+ * que mantém a função de `lib/` pura e testável sem i18n nem banco.
+ */
+function currentAudienceLabel(
+  description: DraftAudienceDescription,
+  deps: {
+    tAudience: ReturnType<typeof useTranslations>;
+    tags: Tag[];
+    customFields: CustomField[];
+    operatorLabels: { value: CustomFieldOperator; label: string }[];
+  }
+): string {
+  const { tAudience, tags, customFields, operatorLabels } = deps;
+
+  switch (description.key) {
+    case 'tags': {
+      // Uma etiqueta apagada depois do rascunho não tem nome para
+      // mostrar — o id cru diria menos do que nada, então some da lista.
+      const names = description.tagIds
+        .map((id) => tags.find((tag) => tag.id === id)?.name)
+        .filter((name): name is string => Boolean(name));
+      return tAudience('current.tags', {
+        names: names.length > 0 ? names.join(', ') : '—',
+      });
+    }
+    case 'customField': {
+      const field = customFields.find((f) => f.id === description.fieldId);
+      return tAudience('current.customField', {
+        field: field?.field_name ?? '—',
+        operator:
+          operatorLabels.find((o) => o.value === description.operator)?.label ??
+          description.operator,
+        value: description.value,
+      });
+    }
+    case 'imported':
+      return tAudience('current.imported', {
+        selected: description.selected,
+        total: description.total,
+      });
+    case 'staged':
+      return tAudience('current.staged', {
+        selected: description.selected,
+        total: description.total,
+      });
+    case 'empty':
+      return tAudience('current.empty');
+  }
+}
+
 export function Step2SelectAudience({
   template,
   channelId,
@@ -109,6 +205,8 @@ export function Step2SelectAudience({
   onBack,
   checkBeforeSend,
   onCheckBeforeSendChange,
+  restage,
+  onNext,
 }: Step2Props) {
   const router = useRouter();
   const t = useTranslations('Broadcasts.wizard');
@@ -151,6 +249,13 @@ export function Step2SelectAudience({
   const [sheetsErrorCode, setSheetsErrorCode] = useState<string | null>(null);
   const [staging, setStaging] = useState(false);
 
+  // SPEC 070 §5.1 — enquanto `false`, o passo mostra só o resumo da
+  // audiência atual; `true` revela o seletor de fontes normal. É estado
+  // LOCAL de propósito: cancelar a troca não pode ter mexido em nada no
+  // rascunho, e uma flag no pai daria a impressão de que já mexeu.
+  const [switchingAudience, setSwitchingAudience] = useState(false);
+  const [confirmRestage, setConfirmRestage] = useState(false);
+
   const parser = useSpreadsheetParser();
   const { batchLimit, loading: quotaLoading } = useMessagingLimit();
 
@@ -171,7 +276,10 @@ export function Step2SelectAudience({
   }, []);
 
   useEffect(() => {
-    if (source !== 'custom_field') return;
+    // Em modo edição o resumo pode precisar do NOME do campo mesmo sem
+    // a fonte "campo personalizado" estar escolhida no seletor (que nem
+    // aparece enquanto o passo está em resumo).
+    if (source !== 'custom_field' && audience.type !== 'custom_field') return;
     async function fetchFields() {
       setLoadingFields(true);
       try {
@@ -186,7 +294,7 @@ export function Step2SelectAudience({
       }
     }
     fetchFields();
-  }, [source]);
+  }, [source, audience.type]);
 
   // ── Resultado do parser → estado do wizard ────────────────────
   useEffect(() => {
@@ -368,6 +476,9 @@ export function Step2SelectAudience({
           templateLanguage: template.language ?? 'en_US',
           audience: audienceBody,
           channelId: channelId ?? undefined,
+          // SPEC 070 §5.2 — re-estagia na MESMA linha quando o passo
+          // está editando um rascunho; ausente, cria um rascunho novo.
+          draftId: restage?.broadcastId,
         }),
       });
 
@@ -399,7 +510,15 @@ export function Step2SelectAudience({
         saveStageSummary(data.draftId, data.summary);
       }
 
-      router.push(`/broadcasts/new/${data.draftId}/triage`);
+      // Achado de code review (SPEC 070) — `?from=edit` diz à triagem
+      // para onde voltar. Sem isto, "Continuar" sempre mandava para
+      // `/broadcasts/new?draftId=…` (o fluxo de CRIAÇÃO), tirando o
+      // usuário do modo edição no meio de uma campanha real, e
+      // "Descartar rascunho" apagava essa campanha inteira em vez de só
+      // cancelar a troca de audiência.
+      router.push(
+        `/broadcasts/new/${data.draftId}/triage${restage ? '?from=edit' : ''}`
+      );
     } catch {
       toast.error(tStageError('internal'));
     } finally {
@@ -422,6 +541,141 @@ export function Step2SelectAudience({
   // A cota é bloqueio de UX aqui; o servidor revalida no stage e no envio.
   const canContinue =
     hasAudience && !overQuota && !parser.parsing && !sheetsLoading && !staging;
+
+  // ── Modo edição: resumo da audiência atual (SPEC 070 §5.1) ──────
+  const restageConfirmDialog = restage ? (
+    <Dialog open={confirmRestage} onOpenChange={setConfirmRestage}>
+      <DialogContent className="border-border bg-popover sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-popover-foreground">
+            {tAudience('restage.confirmTitle')}
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            {tAudience('restage.confirmBody', { rows: restage.summary.total })}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setConfirmRestage(false)}
+            className="border-border text-muted-foreground"
+          >
+            {t('cancel')}
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmRestage(false);
+              setSwitchingAudience(true);
+            }}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {tAudience('restage.button')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  ) : null;
+
+  if (restage && !switchingAudience) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-foreground text-lg font-semibold">
+            {t('selectAudience.title')}
+          </h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {t('selectAudience.subtitle')}
+          </p>
+        </div>
+
+        <div className="border-border bg-card/50 space-y-3 rounded-xl border p-4">
+          <p className="text-foreground text-sm font-medium">
+            {tAudience('current.title')}
+          </p>
+          <p className="text-muted-foreground text-sm">
+            {currentAudienceLabel(
+              describeDraftAudience(audience, restage.summary),
+              {
+                tAudience,
+                tags,
+                customFields,
+                operatorLabels: OPERATOR_OPTIONS,
+              }
+            )}
+          </p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  `/broadcasts/new/${restage.broadcastId}/triage?from=edit`
+                )
+              }
+              className="border-border text-muted-foreground"
+            >
+              <Users className="h-4 w-4" />
+              {tAudience('restage.reviewTriage')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmRestage(true)}
+              className="border-border text-muted-foreground"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {tAudience('restage.button')}
+            </Button>
+          </div>
+        </div>
+
+        {/* SPEC 069 R6 — a checagem é decisão desta etapa nos dois
+            modos; trocá-la não exige re-estagiar nada. */}
+        <div className="border-border bg-card/50 space-y-1.5 rounded-xl border p-4">
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="check-before-send-edit"
+              checked={checkBeforeSend}
+              disabled={checkInstancesLoading || checkInstances.length === 0}
+              onCheckedChange={(checked) =>
+                onCheckBeforeSendChange(checked === true)
+              }
+            />
+            <label
+              htmlFor="check-before-send-edit"
+              className="text-foreground text-sm leading-tight"
+            >
+              {tCheck('enqueueLabel')}
+            </label>
+          </div>
+          <p className="text-muted-foreground pl-6 text-xs">
+            {checkInstances.length === 0 && !checkInstancesLoading
+              ? tCheck('enqueueDisabledNoInstance')
+              : tCheck('enqueueHint')}
+          </p>
+        </div>
+
+        <div className="border-border flex items-center justify-between border-t pt-4">
+          <Button
+            variant="outline"
+            onClick={onBack}
+            className="border-border text-muted-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {t('back')}
+          </Button>
+          <Button
+            onClick={onNext}
+            disabled={!onNext}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            <ArrowRight className="h-4 w-4" />
+            {t('next')}
+          </Button>
+        </div>
+
+        {restageConfirmDialog}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
