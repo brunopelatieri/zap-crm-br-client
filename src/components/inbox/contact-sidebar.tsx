@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { useCan } from '@/hooks/use-can';
 import { cn } from '@/lib/utils';
 import { useMediaSrc } from '@/lib/storage/use-media-src';
-import type { Contact, Deal, ContactNote } from '@/types';
+import type { Contact, ContactTag, Deal, ContactNote } from '@/types';
 import {
   Phone,
   Mail,
@@ -16,11 +17,13 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  Pencil,
   MessageCircle,
   QrCode,
   BadgeCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { GatedButton } from '@/components/ui/gated-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format, formatDistanceToNow } from 'date-fns';
 import { useTranslations, useLocale } from 'next-intl';
@@ -32,6 +35,11 @@ import { formatPhoneForDisplay } from '@/lib/phone/br';
 import { useAccountChannels } from '@/lib/channels/use-account-channels';
 import { useTransferChannels } from '@/hooks/use-transfer-channels';
 import { TransferChannelDialog } from './transfer-channel-dialog';
+import {
+  ContactForm,
+  type ContactSavePatch,
+} from '@/components/contacts/contact-form';
+import { toContactTagRowsFromTags } from '@/lib/tags';
 
 interface SiblingThread {
   id: string;
@@ -53,6 +61,14 @@ interface ContactSidebarProps {
   currentChannelId?: string | null;
   /** Abre outra thread do mesmo contato (SPEC 049 §4.4 / SPEC 056 §4.2). */
   onOpenConversation?: (conversationId: string) => void;
+  /**
+   * SPEC 071 §11 (D-4) — `ContactSidebar` não é dona de `contact` (vem
+   * por prop da página). Depois de salvar no `ContactForm`, este
+   * callback devolve o patch pra página aplicar em `activeContact` e
+   * nos dois feeds da lista — mesmo desenho de `handleContactTagsChanged`,
+   * que já existe ali para o tag-picker.
+   */
+  onContactUpdated?: (contactId: string, patch: Partial<Contact>) => void;
 }
 
 export function ContactSidebar({
@@ -60,6 +76,7 @@ export function ContactSidebar({
   conversationId = null,
   currentChannelId = null,
   onOpenConversation,
+  onContactUpdated,
 }: ContactSidebarProps) {
   const tSidebar = useTranslations('Inbox.sidebar');
   const tThread = useTranslations('Inbox.messageThread');
@@ -68,6 +85,8 @@ export function ContactSidebar({
   const dateFnsLocale = getDateFnsLocale(locale);
 
   const { accountId, accountRole } = useAuth();
+  const canEditContact = useCan('send-messages');
+  const [editFormOpen, setEditFormOpen] = useState(false);
   const { open: openTagPicker } = useTagPicker();
   const { open: openDealPicker } = useDealPicker();
   const [copied, setCopied] = useState(false);
@@ -112,6 +131,28 @@ export function ContactSidebar({
   // efeito colateral, isso também elimina uma query por troca de
   // conversa.
   const tags = contact?.tags ?? [];
+
+  // SPEC 071 §11 (D-2, adaptado): `ContactForm` só lê `.tag_id` de cada
+  // `ContactTag` — aqui a fonte é `contact.tags` (Tag[], não
+  // contactTagIds como no Sheet), então a forma sintética monta a
+  // partir dele em vez de round-trip novo ao Supabase.
+  const contactTagsForForm = useMemo<ContactTag[]>(
+    () => toContactTagRowsFromTags(contact?.tags ?? [], contact?.id ?? ''),
+    [contact?.tags, contact?.id]
+  );
+
+  // SPEC 071 §11 (D-4) — `ContactForm` já devolve exatamente o que
+  // gravou (achado #2 do code review: reler o contato aqui era um
+  // round-trip evitável, e um jeito de falhar em silêncio se essa
+  // segunda leitura desse errado depois de um save que já tinha
+  // sucesso). Só repassa o patch pra página, que possui `activeContact`.
+  const handleContactFormSaved = useCallback(
+    (patch: ContactSavePatch) => {
+      if (!contact) return;
+      onContactUpdated?.(contact.id, patch);
+    },
+    [contact, onContactUpdated]
+  );
 
   // A política `deals_insert` (migração 017) exige agent+ — ao
   // contrário das etiquetas, cujo catálogo é admin+. Negócio é dado
@@ -296,6 +337,17 @@ export function ContactSidebar({
             {contact.company && (
               <p className="text-muted-foreground text-xs">{contact.company}</p>
             )}
+            <GatedButton
+              variant="outline"
+              size="sm"
+              canAct={canEditContact}
+              gateReason="edit contacts"
+              onClick={() => setEditFormOpen(true)}
+              className="border-border text-muted-foreground hover:bg-muted mt-2"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              {tSidebar('editContact')}
+            </GatedButton>
           </div>
 
           {/* Phone */}
@@ -585,6 +637,14 @@ export function ContactSidebar({
           onTransferred={(id) => onOpenConversation?.(id)}
         />
       )}
+
+      <ContactForm
+        open={editFormOpen}
+        onOpenChange={setEditFormOpen}
+        contact={contact}
+        contactTags={contactTagsForForm}
+        onSaved={handleContactFormSaved}
+      />
     </div>
   );
 }

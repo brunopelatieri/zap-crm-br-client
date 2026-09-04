@@ -27,6 +27,7 @@ interface AgentColumnProps {
   assignTargets: readonly BoardAssignTarget[];
   onOpenCard: (card: BoardCard) => void;
   onAssignCard: (conversationId: string, targetColumnId: string) => void;
+  onEditContact: (card: BoardCard) => void;
   onLoadMore: (columnId: string) => void;
 }
 
@@ -37,6 +38,7 @@ export function AgentColumn({
   assignTargets,
   onOpenCard,
   onAssignCard,
+  onEditContact,
   onLoadMore,
 }: AgentColumnProps) {
   const t = useTranslations('Inbox.assignmentBoard');
@@ -103,6 +105,7 @@ export function AgentColumn({
               assignTargets={assignTargets}
               onOpen={onOpenCard}
               onAssign={onAssignCard}
+              onEditContact={onEditContact}
             />
           ))
         )}

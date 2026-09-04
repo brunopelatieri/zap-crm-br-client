@@ -28,8 +28,14 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { toast } from 'sonner';
 import { usePresence } from '@/hooks/use-presence';
+import {
+  ContactForm,
+  type ContactSavePatch,
+} from '@/components/contacts/contact-form';
 import type { BoardAssignTarget } from '@/lib/inbox/assignment-board';
+import type { Contact, ContactTag } from '@/types';
 import {
   useAssignmentBoard,
   type BoardCard,
@@ -71,8 +77,49 @@ export function AssignmentBoard() {
     hasNoAssignableMembers,
     loadMore,
     moveConversation,
+    patchCardContact,
+    fetchContactForEdit,
   } = useAssignmentBoard();
   const { getPresence, now: presenceNow } = usePresence();
+
+  // "Editar contato" no menu "⋯" (SPEC 071 §11, D-5 + achado #7 do code
+  // review). O fetch do contato inteiro mora no hook (`fetchContactForEdit`)
+  // — `ConversationCard` é presentational puro, sem rede, e o hook já é
+  // quem fala com o Supabase para o resto deste módulo.
+  const [editContact, setEditContact] = useState<Contact | null>(null);
+  const [editContactTags, setEditContactTags] = useState<ContactTag[]>([]);
+  const [editFormOpen, setEditFormOpen] = useState(false);
+  const [editingConversationId, setEditingConversationId] = useState<
+    string | null
+  >(null);
+
+  const handleEditContact = useCallback(
+    async (card: BoardCard) => {
+      const contactId = card.conversation.contact_id;
+      if (!contactId) return;
+      const result = await fetchContactForEdit(contactId);
+      if (!result) {
+        toast.error(t('editContactLoadFailed'));
+        return;
+      }
+      setEditContact(result.contact);
+      setEditContactTags(result.tags);
+      setEditingConversationId(card.conversation.id);
+      setEditFormOpen(true);
+    },
+    [fetchContactForEdit, t]
+  );
+
+  // SPEC 071 §11, achado #3 do code review: um `patch` local em vez de
+  // `refreshCard` (remove+reinsere o card e refaz notas/deal) — editar
+  // nome/telefone/e-mail/etiquetas não é um evento de atribuição/status,
+  // não precisa dessa reconciliação pesada.
+  const handleContactFormSaved = useCallback(
+    (patch: ContactSavePatch) => {
+      if (editingConversationId) patchCardContact(editingConversationId, patch);
+    },
+    [editingConversationId, patchCardContact]
+  );
 
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   // Coluna de origem observada no início do arrasto — usada APENAS para
@@ -254,6 +301,7 @@ export function AssignmentBoard() {
               assignTargets={assignTargets}
               onOpenCard={handleOpenCard}
               onAssignCard={handleAssignCard}
+              onEditContact={handleEditContact}
               onLoadMore={loadMore}
             />
           ))}
@@ -275,6 +323,7 @@ export function AssignmentBoard() {
                 assignTargets={[]}
                 onOpen={() => {}}
                 onAssign={() => {}}
+                onEditContact={() => {}}
                 isOverlay
               />
             </div>
@@ -315,6 +364,14 @@ export function AssignmentBoard() {
           }
         }
       `}</style>
+
+      <ContactForm
+        open={editFormOpen}
+        onOpenChange={setEditFormOpen}
+        contact={editContact}
+        contactTags={editContactTags}
+        onSaved={handleContactFormSaved}
+      />
     </div>
   );
 }

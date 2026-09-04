@@ -23,7 +23,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Tag } from '@/types';
+import type { ContactTag, Tag } from '@/types';
 
 /**
  * Paleta fixa oferecida ao criar uma etiqueta. Os `name` casam com as
@@ -90,6 +90,50 @@ export async function fetchTags(supabase: SupabaseClient): Promise<Tag[]> {
 // CONVERSATION_SELECT (`contact_tags(tags(*))`). Buscá-las de novo
 // criaria uma segunda fonte de verdade que diverge da primeira depois
 // de cada mutação — foi exatamente o que a ContactSidebar fazia antes.
+
+/**
+ * Sintetiza `ContactTag[]` a partir de ids de etiqueta já em memória —
+ * `ContactForm` só lê `.tag_id` de cada entrada (SPEC 071 §11, D-2),
+ * então isto evita um round-trip só para reconstruir uma forma de
+ * junção que já está implícita no que o chamador já tem.
+ */
+export function toContactTagRows(
+  tagIds: readonly string[],
+  contactId: string
+): ContactTag[] {
+  return tagIds.map((tagId) => ({
+    id: tagId,
+    contact_id: contactId,
+    tag_id: tagId,
+  }));
+}
+
+/** Igual a {@link toContactTagRows}, a partir de `Tag[]` completo em vez de ids soltos. */
+export function toContactTagRowsFromTags(
+  tags: readonly Tag[],
+  contactId: string
+): ContactTag[] {
+  return toContactTagRows(
+    tags.map((t) => t.id),
+    contactId
+  );
+}
+
+/**
+ * Achata o embed `contact_tags(tags(*))` que o PostgREST devolve em
+ * `ContactTag[]` — mesma junção que `normalizeConversation`
+ * (`lib/inbox/conversations.ts`) achata em `Tag[]`, só que aqui o
+ * formato de saída é o que `ContactForm` espera (`.tag_id`).
+ */
+export function flattenContactTagsEmbed(
+  embed: readonly { tags: Tag | null }[] | null | undefined,
+  contactId: string
+): ContactTag[] {
+  const tags = (embed ?? [])
+    .map((row) => row.tags)
+    .filter((t): t is Tag => t != null);
+  return toContactTagRowsFromTags(tags, contactId);
+}
 
 /**
  * Vincula uma etiqueta a um contato.

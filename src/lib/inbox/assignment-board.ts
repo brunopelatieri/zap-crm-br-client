@@ -30,6 +30,7 @@
 
 import { ASSIGNABLE_ACCOUNT_ROLES } from '@/lib/auth/roles';
 import type {
+  Contact,
   Conversation,
   ConversationStatus,
   DealStatus,
@@ -409,6 +410,52 @@ export function removeCard(
       total: Math.max(0, column.total - 1),
     },
   };
+}
+
+/**
+ * Aplica um patch aos campos de `contact` do card de `conversationId`,
+ * onde quer que ele esteja — sem I/O, sem remover/reinserir o card.
+ *
+ * SPEC 071 §11 (achado #3 do code review): editar nome/telefone/e-mail/
+ * empresa/etiquetas pelo modal "Editar contato" não é um evento de
+ * atribuição/status como os que `refetchCardInto` foi desenhada para
+ * reconciliar — reaproveitar aquela função fazia o card sumir e
+ * reaparecer (remove+reinsere) e disparava um refetch de notas/deal que
+ * não mudaram. Este redutor só sobrescreve os campos do patch.
+ */
+export function patchCardContact(
+  state: BoardColumnStateMap,
+  options: { conversationId: string; patch: Partial<Contact> }
+): BoardColumnStateMap {
+  const { conversationId, patch } = options;
+  let changed = false;
+  const next: BoardColumnStateMap = {};
+
+  for (const [columnId, column] of Object.entries(state)) {
+    const index = column.cards.findIndex(
+      (c) => c.conversation.id === conversationId
+    );
+    if (index === -1) {
+      next[columnId] = column;
+      continue;
+    }
+
+    changed = true;
+    const card = column.cards[index];
+    const cards = column.cards.slice();
+    cards[index] = {
+      ...card,
+      conversation: {
+        ...card.conversation,
+        contact: card.conversation.contact
+          ? { ...card.conversation.contact, ...patch }
+          : card.conversation.contact,
+      },
+    };
+    next[columnId] = { ...column, cards };
+  }
+
+  return changed ? next : state;
 }
 
 /** Insere um card no topo da coluna. Idempotente por id. */

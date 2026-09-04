@@ -501,6 +501,8 @@
       "assignMenuLabel": "Ações da conversa com {name}",
       "assignMenuTitle": "Mover para",
       "assignMenuOpen": "Abrir conversa",
+      "editContact": "Editar contato",
+      "editContactLoadFailed": "Falha ao carregar este contato",
       "toastAssigned": "Conversa atribuída a {name}",
       "toastUnassigned": "Conversa devolvida à fila",
       "toastAlreadyClaimed": "Outro agente acabou de assumir esta conversa",
@@ -525,7 +527,12 @@
       "noneYet": "Ainda sem contatos",
       "noneAssigned": "Nenhuma conversa atribuída a você ainda",
       "unnamed": "Sem nome",
-      "pageCount": "Página {page} de {total}"
+      "pageCount": "Página {page} de {total}",
+      "filterByTags": "Filtrar por etiquetas",
+      "filterByChannel": "Filtrar por canal",
+      "channelFilterHint": "Contatos que têm conversa neste canal.",
+      "clearAll": "Limpar tudo",
+      "noTagsYet": "Ainda sem etiquetas."
     },
     "conversationList": {
       "searchPlaceholder": "Buscar conversas...",
@@ -691,6 +698,7 @@
     },
     "sidebar": {
       "contactInfo": "Informações do contato",
+      "editContact": "Editar contato",
       "tags": "Etiquetas",
       "notes": "Notas",
       "deals": "Negócios",
@@ -903,11 +911,7 @@
       },
       "sendTemplateBtn": "Enviar template",
       "sendChannelLabel": "Enviar por",
-      "saveChangesBtn": "Salvar alterações",
       "saveCustomFieldsBtn": "Salvar campos personalizados",
-      "toastPhoneRequired": "O número de telefone é obrigatório",
-      "toastUpdateFailed": "Falha ao atualizar contato",
-      "toastUpdated": "Contato atualizado",
       "toastNotAuthenticated": "Não autenticado",
       "toastNoteAddFailed": "Falha ao adicionar nota",
       "toastNoteAdded": "Nota adicionada",

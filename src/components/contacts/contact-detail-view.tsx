@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
-import { assignTag, unassignTag } from '@/lib/tags';
+import { assignTag, toContactTagRows, unassignTag } from '@/lib/tags';
 import { setContactOptIn } from '@/lib/contacts/consent';
 import { markWhatsappValid } from '@/lib/contacts/whatsapp-status';
 import { formatPhoneForDisplay } from '@/lib/phone/br';
@@ -15,7 +15,6 @@ import type {
   ContactTag,
   ContactNote,
   CustomField,
-  ContactCustomValue,
   Deal,
   MessageTemplate,
 } from '@/types';
@@ -25,6 +24,12 @@ import {
 } from '@/components/inbox/template-picker';
 import { useAccountChannels } from '@/lib/channels/use-account-channels';
 import { can } from '@/lib/channels/capabilities';
+import { useCan } from '@/hooks/use-can';
+import { GatedButton } from '@/components/ui/gated-button';
+import {
+  ContactForm,
+  type ContactSavePatch,
+} from '@/components/contacts/contact-form';
 import {
   Select,
   SelectContent,
@@ -46,8 +51,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useMediaSrc } from '@/lib/storage/use-media-src';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Ban,
   Phone,
@@ -60,9 +63,9 @@ import {
   Plus,
   Trash2,
   Save,
-  X,
   DollarSign,
   LayoutTemplate,
+  Pencil,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -85,6 +88,7 @@ export function ContactDetailView({
   const tCheck = useTranslations('Contacts.check');
   const supabase = createClient();
   const { accountId, defaultCurrency } = useAuth();
+  const canEdit = useCan('send-messages');
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
@@ -130,17 +134,26 @@ export function ContactDetailView({
   const effectiveTemplateChannelId =
     selectedChannelId ?? templateCapableChannels[0]?.id ?? null;
 
-  // Details tab
-  const [editName, setEditName] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editCompany, setEditCompany] = useState('');
-  const [savingDetails, setSavingDetails] = useState(false);
+  // Edit form modal (SPEC 071 F1)
+  const [editFormOpen, setEditFormOpen] = useState(false);
 
   // Tags tab
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [contactTagIds, setContactTagIds] = useState<string[]>([]);
   const [savingTags, setSavingTags] = useState(false);
+  // SPEC 071 §11 (achado #4 do code review): fetchContact/fetchTags
+  // rodam em paralelo ao abrir a Sheet; sem isto, clicar "Editar" antes
+  // de fetchTags resolver abre o ContactForm com contactTagsForForm
+  // vazio (nenhuma etiqueta marcada), mesmo quando o contato tem
+  // etiquetas — o botão fica desabilitado até a busca terminar.
+  const [tagsLoaded, setTagsLoaded] = useState(false);
+
+  // D-2: forma sintética de ContactTag[] a partir do que já está em
+  // memória — ContactForm só lê `.tag_id`, então não há round-trip novo.
+  const contactTagsForForm = useMemo<ContactTag[]>(
+    () => toContactTagRows(contactTagIds, contactId ?? ''),
+    [contactTagIds, contactId]
+  );
 
   // Notes tab
   const [notes, setNotes] = useState<ContactNote[]>([]);
@@ -170,16 +183,13 @@ export function ContactDetailView({
 
     if (data) {
       setContact(data);
-      setEditName(data.name ?? '');
-      setEditPhone(data.phone);
-      setEditEmail(data.email ?? '');
-      setEditCompany(data.company ?? '');
     }
     setLoading(false);
   }, [contactId, supabase]);
 
   const fetchTags = useCallback(async () => {
     if (!contactId) return;
+    setTagsLoaded(false);
 
     const [tagsRes, contactTagsRes] = await Promise.all([
       supabase.from('tags').select('*').order('name'),
@@ -193,6 +203,7 @@ export function ContactDetailView({
     if (contactTagsRes.data) {
       setContactTagIds(contactTagsRes.data.map((ct) => ct.tag_id));
     }
+    setTagsLoaded(true);
   }, [contactId, supabase]);
 
   const fetchNotes = useCallback(async () => {
@@ -269,32 +280,18 @@ export function ContactDetailView({
     setTimeout(() => setCopiedPhone(false), 2000);
   }
 
-  async function saveDetails() {
-    if (!contactId || !editPhone.trim()) {
-      toast.error(t('toastPhoneRequired'));
-      return;
-    }
-
-    setSavingDetails(true);
-    const { error } = await supabase
-      .from('contacts')
-      .update({
-        name: editName.trim() || null,
-        phone: editPhone.trim(),
-        email: editEmail.trim() || null,
-        company: editCompany.trim() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', contactId);
-
-    if (error) {
-      toast.error(t('toastUpdateFailed'));
-    } else {
-      toast.success(t('toastUpdated'));
-      fetchContact();
-      onUpdated();
-    }
-    setSavingDetails(false);
+  /**
+   * `ContactForm` já sabe exatamente o que gravou — aplica o patch
+   * direto no estado local em vez de um `fetchContact()` +
+   * `fetchTags()` (achado #1 do code review: o antigo `onSaved` só
+   * atualizava o contato, nunca `contactTagIds`, deixando a aba
+   * "Etiquetas" e o próximo `contactTagsForForm` com dados velhos
+   * depois de editar etiquetas pelo modal).
+   */
+  function handleContactFormSaved(patch: ContactSavePatch) {
+    setContact((prev) => (prev ? { ...prev, ...patch } : prev));
+    setContactTagIds(patch.tags.map((tag) => tag.id));
+    onUpdated();
   }
 
   /**
@@ -609,6 +606,18 @@ export function ContactDetailView({
                       </SelectContent>
                     </Select>
                   )}
+                  <GatedButton
+                    variant="outline"
+                    size="sm"
+                    canAct={canEdit}
+                    disabled={!tagsLoaded}
+                    gateReason="edit contacts"
+                    onClick={() => setEditFormOpen(true)}
+                    className="border-border text-muted-foreground hover:bg-muted"
+                  >
+                    <Pencil className="size-4" />
+                    {t('actions.edit')}
+                  </GatedButton>
                   <Button
                     size="sm"
                     onClick={() => setTemplatePickerOpen(true)}
@@ -669,59 +678,49 @@ export function ContactDetailView({
                   className="flex-1 overflow-y-auto px-4 py-3"
                 >
                   <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-muted-foreground text-xs">
-                        {t('nameLabel', { fallback: 'Name' })}
-                      </Label>
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="bg-muted border-border text-foreground h-8 text-sm"
-                      />
+                    <div className="space-y-3">
+                      <h3 className="text-foreground text-sm font-medium">
+                        {t('contactInfo')}
+                      </h3>
+                      <dl className="space-y-2 text-sm">
+                        <div>
+                          <dt className="text-muted-foreground text-xs">
+                            {t('nameLabel')}
+                          </dt>
+                          <dd className="text-foreground">
+                            {contact.name || (
+                              <span className="text-muted-foreground italic">
+                                {t('unnamed')}
+                              </span>
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground text-xs">
+                            {t('phone')}
+                          </dt>
+                          <dd className="text-foreground">
+                            {formatPhoneForDisplay(contact.phone)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground text-xs">
+                            {t('email')}
+                          </dt>
+                          <dd className="text-foreground">
+                            {contact.email || '—'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground text-xs">
+                            {t('company')}
+                          </dt>
+                          <dd className="text-foreground">
+                            {contact.company || '—'}
+                          </dd>
+                        </div>
+                      </dl>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-muted-foreground text-xs">
-                        {t('phone')} <span className="text-red-400">*</span>
-                      </Label>
-                      <Input
-                        value={editPhone}
-                        onChange={(e) => setEditPhone(e.target.value)}
-                        className="bg-muted border-border text-foreground h-8 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-muted-foreground text-xs">
-                        {t('email')}
-                      </Label>
-                      <Input
-                        value={editEmail}
-                        onChange={(e) => setEditEmail(e.target.value)}
-                        className="bg-muted border-border text-foreground h-8 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-muted-foreground text-xs">
-                        {t('company')}
-                      </Label>
-                      <Input
-                        value={editCompany}
-                        onChange={(e) => setEditCompany(e.target.value)}
-                        className="bg-muted border-border text-foreground h-8 text-sm"
-                      />
-                    </div>
-                    <Button
-                      onClick={saveDetails}
-                      disabled={savingDetails}
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
-                      size="sm"
-                    >
-                      {savingDetails ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <Save className="size-3.5" />
-                      )}
-                      {t('saveChangesBtn')}
-                    </Button>
 
                     {/* ── Consentimento de marketing (SPEC 044 §6.8) ──
                         Fora do formulário e com botão próprio de
@@ -1110,6 +1109,13 @@ export function ContactDetailView({
         onSelect={handleSendTemplate}
         contact={contact}
         channelId={effectiveTemplateChannelId}
+      />
+      <ContactForm
+        open={editFormOpen}
+        onOpenChange={setEditFormOpen}
+        contact={contact}
+        contactTags={contactTagsForForm}
+        onSaved={handleContactFormSaved}
       />
     </>
   );

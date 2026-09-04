@@ -10,7 +10,13 @@
 
 import { format } from 'date-fns';
 import { useTranslations } from 'next-intl';
-import { Check, Inbox as InboxIcon, Layers, MoreVertical } from 'lucide-react';
+import {
+  Check,
+  Inbox as InboxIcon,
+  Layers,
+  MoreVertical,
+  Pencil,
+} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useMediaSrc } from '@/lib/storage/use-media-src';
+import { useCan } from '@/hooks/use-can';
 import type { BoardAssignTarget } from '@/lib/inbox/assignment-board';
 import type { BoardCard as BoardCardData } from './use-assignment-board';
 
@@ -33,6 +40,10 @@ interface ConversationCardProps {
   assignTargets: readonly BoardAssignTarget[];
   onOpen: (card: BoardCardData) => void;
   onAssign: (conversationId: string, targetColumnId: string) => void;
+  /** "Editar contato" no menu "⋯" (SPEC 071 §11) — abre `ContactForm`
+   *  num `Dialog` que `AssignmentBoard` já possui a busca de rede para
+   *  alimentar (este card é presentational puro, sem rede). */
+  onEditContact: (card: BoardCardData) => void;
   isOverlay?: boolean;
 }
 
@@ -44,12 +55,14 @@ export function ConversationCard({
   assignTargets,
   onOpen,
   onAssign,
+  onEditContact,
   isOverlay,
 }: ConversationCardProps) {
   const t = useTranslations('Inbox.assignmentBoard');
   // Reusa a chave existente do Inbox para "contato sem nome" — mesma
   // label que `conversation-list.tsx` já usa, em vez de duplicar.
   const tList = useTranslations('Inbox.conversationList');
+  const canEditContact = useCan('send-messages');
   const { conversation, latestNote, primaryDeal, hydrated, pending } = card;
   const contact = conversation.contact;
 
@@ -132,8 +145,10 @@ export function ConversationCard({
             cabeçalho da coluna, uma linha acima, e trazê-la para o card
             exigiria injetar a API inteira de `usePresence` num
             componente-folha (chamar o hook aqui abriria um canal
-            realtime POR CARD). */}
-        {!isOverlay && assignTargets.length > 1 && (
+            realtime POR CARD). SPEC 071 §11: o menu agora também é a
+            porta de "Editar contato", então abre com QUALQUER contato,
+            não só quando há mais de um destino de atribuição. */}
+        {!isOverlay && (contact || assignTargets.length > 1) && (
           <DropdownMenu>
             <DropdownMenuTrigger
               // ⚠️ `pointerdown`, não só `click`: o `PointerSensor` do
@@ -171,35 +186,56 @@ export function ConversationCard({
               >
                 {t('assignMenuOpen')}
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-border" />
-              {/* DropdownMenuGroup (base-ui Menu.Group) é OBRIGATÓRIO: o
-                  DropdownMenuLabel abaixo é o Menu.GroupLabel do base-ui,
-                  que exige um Menu.Group ancestral e lança erro sem ele. */}
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-muted-foreground text-xs">
-                  {t('assignMenuTitle')}
-                </DropdownMenuLabel>
-                {assignTargets.map((target) => {
-                  const isCurrent = target.id === columnId;
-                  return (
-                    <DropdownMenuItem
-                      key={target.id}
-                      disabled={isCurrent}
-                      onClick={() => onAssign(conversation.id, target.id)}
-                      className={cn(
-                        'text-sm',
-                        isCurrent ? 'text-primary' : 'text-popover-foreground'
-                      )}
-                    >
-                      {target.isQueue && (
-                        <InboxIcon className="mr-2 h-3 w-3 shrink-0" />
-                      )}
-                      <span className="flex-1 truncate">{target.label}</span>
-                      {isCurrent && <Check className="ml-2 h-3 w-3 shrink-0" />}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuGroup>
+              {contact && (
+                <DropdownMenuItem
+                  disabled={!canEditContact}
+                  onClick={() => onEditContact(card)}
+                  className="text-popover-foreground text-sm"
+                >
+                  <Pencil className="mr-2 h-3 w-3 shrink-0" />
+                  {t('editContact')}
+                </DropdownMenuItem>
+              )}
+              {assignTargets.length > 1 && (
+                <>
+                  <DropdownMenuSeparator className="bg-border" />
+                  {/* DropdownMenuGroup (base-ui Menu.Group) é OBRIGATÓRIO:
+                      o DropdownMenuLabel abaixo é o Menu.GroupLabel do
+                      base-ui, que exige um Menu.Group ancestral e lança
+                      erro sem ele. */}
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel className="text-muted-foreground text-xs">
+                      {t('assignMenuTitle')}
+                    </DropdownMenuLabel>
+                    {assignTargets.map((target) => {
+                      const isCurrent = target.id === columnId;
+                      return (
+                        <DropdownMenuItem
+                          key={target.id}
+                          disabled={isCurrent}
+                          onClick={() => onAssign(conversation.id, target.id)}
+                          className={cn(
+                            'text-sm',
+                            isCurrent
+                              ? 'text-primary'
+                              : 'text-popover-foreground'
+                          )}
+                        >
+                          {target.isQueue && (
+                            <InboxIcon className="mr-2 h-3 w-3 shrink-0" />
+                          )}
+                          <span className="flex-1 truncate">
+                            {target.label}
+                          </span>
+                          {isCurrent && (
+                            <Check className="ml-2 h-3 w-3 shrink-0" />
+                          )}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuGroup>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

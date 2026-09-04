@@ -501,6 +501,8 @@
       "assignMenuLabel": "Actions for the conversation with {name}",
       "assignMenuTitle": "Move to",
       "assignMenuOpen": "Open conversation",
+      "editContact": "Edit contact",
+      "editContactLoadFailed": "Failed to load this contact",
       "toastAssigned": "Conversation assigned to {name}",
       "toastUnassigned": "Conversation returned to the queue",
       "toastAlreadyClaimed": "Another agent has just taken this conversation",
@@ -525,7 +527,12 @@
       "noneYet": "No contacts yet",
       "noneAssigned": "No conversations assigned to you yet",
       "unnamed": "Unnamed",
-      "pageCount": "Page {page} of {total}"
+      "pageCount": "Page {page} of {total}",
+      "filterByTags": "Filter by tags",
+      "filterByChannel": "Filter by channel",
+      "channelFilterHint": "Contacts with a conversation in this channel.",
+      "clearAll": "Clear all",
+      "noTagsYet": "No tags yet."
     },
     "conversationList": {
       "searchPlaceholder": "Search conversations...",
@@ -691,6 +698,7 @@
     },
     "sidebar": {
       "contactInfo": "Contact info",
+      "editContact": "Edit contact",
       "tags": "Tags",
       "notes": "Notes",
       "deals": "Deals",
@@ -903,11 +911,7 @@
       },
       "sendTemplateBtn": "Send template",
       "sendChannelLabel": "Send via",
-      "saveChangesBtn": "Save Changes",
       "saveCustomFieldsBtn": "Save Custom Fields",
-      "toastPhoneRequired": "Phone number is required",
-      "toastUpdateFailed": "Failed to update contact",
-      "toastUpdated": "Contact updated",
       "toastNotAuthenticated": "Not authenticated",
       "toastNoteAddFailed": "Failed to add note",
       "toastNoteAdded": "Note added",

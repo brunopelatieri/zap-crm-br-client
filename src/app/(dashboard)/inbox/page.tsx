@@ -1133,6 +1133,30 @@ export default function InboxPage() {
     [chatFeed.setConversations, openFeed.setConversations]
   );
 
+  /**
+   * Mesma propagação de `handleContactTagsChanged`, para uma edição de
+   * nome/telefone/e-mail/empresa feita pelo `ContactForm` a partir da
+   * `ContactSidebar` (SPEC 071 §11, D-4). `ContactSidebar` não possui
+   * `activeContact` — só recebe por prop — então quem aplica o patch
+   * nos dois feeds e no estado ativo é sempre a página.
+   */
+  const handleContactUpdated = useCallback(
+    (contactId: string, patch: Partial<Contact>) => {
+      const apply = (list: Conversation[]) =>
+        list.map((c) =>
+          c.contact?.id === contactId
+            ? { ...c, contact: { ...c.contact, ...patch } }
+            : c
+        );
+      chatFeed.setConversations(apply);
+      openFeed.setConversations(apply);
+      setActiveContact((prev) =>
+        prev?.id === contactId ? { ...prev, ...patch } : prev
+      );
+    },
+    [chatFeed.setConversations, openFeed.setConversations]
+  );
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops
@@ -1336,6 +1360,7 @@ export default function InboxPage() {
                           activeConversation?.channel_id ?? null
                         }
                         onOpenConversation={handleOpenSiblingConversation}
+                        onContactUpdated={handleContactUpdated}
                       />
                     </div>
                   )}

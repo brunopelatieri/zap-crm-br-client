@@ -45,6 +45,7 @@ import {
   insertCard,
   isBoardEligibleStatus,
   moveCard,
+  patchCardContact,
   pickPrimaryDeal,
   removeCard,
   restoreCard,
@@ -62,7 +63,8 @@ import {
   normalizeConversation,
   normalizeConversations,
 } from '@/lib/inbox/conversations';
-import type { Conversation, Profile } from '@/types';
+import { flattenContactTagsEmbed } from '@/lib/tags';
+import type { Contact, ContactTag, Conversation, Profile, Tag } from '@/types';
 
 // Reexportados por conveniência dos componentes desta pasta, que
 // consomem os dois tipos vindos deste hook.
@@ -87,6 +89,26 @@ export interface UseAssignmentBoardResult {
     sourceColumnId: string,
     targetColumnId: string
   ) => void;
+  /**
+   * Sobrescreve só os campos de `contact` do card de `conversationId`,
+   * sem I/O e sem remover/reinserir o card (SPEC 071 §11, achado #3 do
+   * code review). Editar um contato pelo modal "Editar contato" não é
+   * um evento de atribuição/status — não precisa da reconciliação
+   * pesada de `refetchCardInto`, que é para isso (realtime, 409 do drop).
+   */
+  patchCardContact: (conversationId: string, patch: Partial<Contact>) => void;
+  /**
+   * Busca o contato inteiro (inclusive `email`, ausente de
+   * `BOARD_CONVERSATION_SELECT` por desenho — §6.3 da SPEC) para
+   * alimentar o modal "Editar contato" (SPEC 071 §11, achado #7 do code
+   * review). Antes este fetch vivia em `AssignmentBoard`, fora do hook
+   * que este módulo já documenta como dono de tudo que fala com a rede.
+   * `null` = falhou ou o contato não existe mais; o chamador decide
+   * como avisar o usuário.
+   */
+  fetchContactForEdit: (
+    contactId: string
+  ) => Promise<{ contact: Contact; tags: ContactTag[] } | null>;
 }
 
 /**
@@ -811,6 +833,33 @@ export function useAssignmentBoard(): UseAssignmentBoardResult {
     [userId, handleDropError, settleDrop, rollbackDrop, t, tTabs]
   );
 
+  const patchCardContactState = useCallback(
+    (conversationId: string, patch: Partial<Contact>) => {
+      setColumnsState((prev) =>
+        patchCardContact(prev, { conversationId, patch })
+      );
+    },
+    []
+  );
+
+  const fetchContactForEdit = useCallback(async (contactId: string) => {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('*, contact_tags(tags(*))')
+      .eq('id', contactId)
+      .single();
+    if (error || !data) return null;
+
+    const { contact_tags, ...contact } = data as unknown as Contact & {
+      contact_tags?: { tags: Tag | null }[];
+    };
+    return {
+      contact,
+      tags: flattenContactTagsEmbed(contact_tags, contactId),
+    };
+  }, []);
+
   const columns = useMemo(() => Object.values(columnsState), [columnsState]);
   const hasNoAssignableMembers = !loading && columns.length <= 1;
 
@@ -820,5 +869,7 @@ export function useAssignmentBoard(): UseAssignmentBoardResult {
     hasNoAssignableMembers,
     loadMore,
     moveConversation,
+    patchCardContact: patchCardContactState,
+    fetchContactForEdit,
   };
 }

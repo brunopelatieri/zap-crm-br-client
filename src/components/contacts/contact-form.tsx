@@ -45,12 +45,20 @@ const DOMESTIC_REASONS = new Set<PhoneRejectReason>([
   'missing_country_code',
 ]);
 
+/**
+ * What `onSaved` hands back — exactly the fields `handleSubmit` just
+ * wrote (contact-form.tsx §onSaved), so a caller that doesn't own the
+ * contact (e.g. `ContactSidebar`) can patch its own state directly
+ * instead of re-reading the row it already knows the shape of.
+ */
+export type ContactSavePatch = Partial<Contact> & { tags: Tag[] };
+
 interface ContactFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contact?: Contact | null;
   contactTags?: ContactTag[];
-  onSaved: () => void;
+  onSaved: (patch: ContactSavePatch) => void;
   /** Open an existing contact's detail view — used by the duplicate
    *  notice to jump to the contact that already owns this number. */
   onViewExisting?: (contactId: string) => void;
@@ -96,6 +104,11 @@ export function ContactForm({
 
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  // Snapshot of tag ids as loaded when the form opened. handleSubmit diffs
+  // against this instead of blindly wiping+reinserting every tag, so a
+  // change made elsewhere (e.g. the contact detail Sheet's own Tags tab, in
+  // another session) while this form stayed open isn't silently reverted.
+  const [initialTagIds, setInitialTagIds] = useState<string[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
 
   useEffect(() => {
@@ -106,7 +119,9 @@ export function ContactForm({
       setPhone(contact?.phone ? `+${contact.phone}` : '');
       setEmail(contact?.email ?? '');
       setCompany(contact?.company ?? '');
-      setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
+      const tagIds = contactTags.map((ct) => ct.tag_id);
+      setSelectedTagIds(tagIds);
+      setInitialTagIds(tagIds);
       setDupMatch(null);
       setPhoneError(null);
       setPhoneLegacy(false);
@@ -277,28 +292,52 @@ export function ContactForm({
         contactId = data.id;
       }
 
-      // Sync tags
+      // Sync tags — only the delta between what was loaded and what the
+      // user actually toggled (see `initialTagIds`), never a blanket
+      // delete+reinsert of every tag on the contact.
       if (contactId) {
-        await supabase
-          .from('contact_tags')
-          .delete()
-          .eq('contact_id', contactId);
+        const tagsToAdd = selectedTagIds.filter(
+          (id) => !initialTagIds.includes(id)
+        );
+        const tagsToRemove = initialTagIds.filter(
+          (id) => !selectedTagIds.includes(id)
+        );
 
-        if (selectedTagIds.length > 0) {
-          const tagRows = selectedTagIds.map((tag_id) => ({
+        if (tagsToRemove.length > 0) {
+          const { error: removeError } = await supabase
+            .from('contact_tags')
+            .delete()
+            .eq('contact_id', contactId)
+            .in('tag_id', tagsToRemove);
+          if (removeError) throw removeError;
+        }
+
+        if (tagsToAdd.length > 0) {
+          const tagRows = tagsToAdd.map((tag_id) => ({
             contact_id: contactId!,
             tag_id,
           }));
-          const { error: tagError } = await supabase
+          const { error: addError } = await supabase
             .from('contact_tags')
             .insert(tagRows);
-          if (tagError) throw tagError;
+          if (addError) throw addError;
         }
       }
 
       toast.success(isEdit ? t('toastSuccessEdit') : t('toastSuccessAdd'));
       onOpenChange(false);
-      onSaved();
+      // Hand back exactly what was written — `selectedTagIds` reflects
+      // the post-sync tag set (initialTagIds + tagsToAdd - tagsToRemove)
+      // — so a caller that doesn't own the contact row (ContactSidebar,
+      // the assignment board) can patch its own state directly instead
+      // of re-reading what this function already knows.
+      onSaved({
+        name: name.trim() || undefined,
+        phone: normalizedPhone,
+        email: email.trim() || undefined,
+        company: company.trim() || undefined,
+        tags: tags.filter((t) => selectedTagIds.includes(t.id)),
+      });
     } catch (err: unknown) {
       // The unique index (migration 022) rejects a duplicate phone that
       // slipped past the on-blur check (race, or a format that

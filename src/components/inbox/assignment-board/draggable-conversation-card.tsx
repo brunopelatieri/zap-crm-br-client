@@ -17,6 +17,7 @@ interface DraggableConversationCardProps {
   assignTargets: readonly BoardAssignTarget[];
   onOpen: (card: BoardCardData) => void;
   onAssign: (conversationId: string, targetColumnId: string) => void;
+  onEditContact: (card: BoardCardData) => void;
 }
 
 export function DraggableConversationCard({
@@ -25,6 +26,7 @@ export function DraggableConversationCard({
   assignTargets,
   onOpen,
   onAssign,
+  onEditContact,
 }: DraggableConversationCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: card.conversation.id,
@@ -47,6 +49,7 @@ export function DraggableConversationCard({
         assignTargets={assignTargets}
         onOpen={onOpen}
         onAssign={onAssign}
+        onEditContact={onEditContact}
       />
     </div>
   );

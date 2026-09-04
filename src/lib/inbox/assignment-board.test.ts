@@ -11,6 +11,7 @@ import {
   insertCard,
   isBoardEligibleStatus,
   moveCard,
+  patchCardContact,
   pickPrimaryDeal,
   removeCard,
   restoreCard,
@@ -21,7 +22,7 @@ import {
   type BoardColumnStateMap,
   type BoardDealRow,
 } from './assignment-board';
-import type { Conversation, Profile } from '@/types';
+import type { Contact, Conversation, Profile } from '@/types';
 
 function makeProfile(overrides: Partial<Profile>): Profile {
   return {
@@ -526,6 +527,76 @@ describe('removeCard / insertCard', () => {
     const state = makeState({ [ANA]: { ids: ['c1'], total: 0 } });
     const next = removeCard(state, { conversationId: 'c1', columnId: ANA });
     expect(next[ANA].total).toBe(0);
+  });
+});
+
+describe('patchCardContact', () => {
+  const baseContact: Contact = {
+    id: 'contact-c1',
+    user_id: 'user-1',
+    account_id: 'account-1',
+    phone: '5511999999999',
+    name: 'Old Name',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+  };
+
+  function makeCardWithContact(id: string, contact: Contact | undefined) {
+    return makeCard(id, { conversation: { ...makeConversation(id), contact } });
+  }
+
+  it('sobrescreve só os campos do patch, preservando o resto do contact', () => {
+    const state = makeState({ [ANA]: { ids: [] } });
+    state[ANA].cards = [makeCardWithContact('c1', baseContact)];
+    state[ANA].total = 1;
+
+    const next = patchCardContact(state, {
+      conversationId: 'c1',
+      patch: { name: 'New Name', phone: '5511888888888' },
+    });
+
+    expect(next[ANA].cards[0].conversation.contact).toEqual({
+      ...baseContact,
+      name: 'New Name',
+      phone: '5511888888888',
+    });
+  });
+
+  it('card sem contact embarcado não é tocado', () => {
+    const state = makeState({ [ANA]: { ids: [] } });
+    state[ANA].cards = [makeCardWithContact('c1', undefined)];
+
+    const next = patchCardContact(state, {
+      conversationId: 'c1',
+      patch: { name: 'New Name' },
+    });
+
+    expect(next[ANA].cards[0].conversation.contact).toBeUndefined();
+  });
+
+  it('conversationId inexistente é no-op — mesma referência', () => {
+    const state = makeState({ [ANA]: { ids: ['c1'] } });
+    expect(
+      patchCardContact(state, {
+        conversationId: 'fantasma',
+        patch: { name: 'x' },
+      })
+    ).toBe(state);
+  });
+
+  it('procura o card em todas as colunas, e não mexe nas que não têm ele', () => {
+    const state = makeState({ [QUEUE]: { ids: [] }, [ANA]: { ids: [] } });
+    state[ANA].cards = [makeCardWithContact('c1', baseContact)];
+    state[ANA].total = 1;
+    const queueBefore = state[QUEUE];
+
+    const next = patchCardContact(state, {
+      conversationId: 'c1',
+      patch: { name: 'New Name' },
+    });
+
+    expect(next[ANA].cards[0].conversation.contact?.name).toBe('New Name');
+    expect(next[QUEUE]).toBe(queueBefore);
   });
 });
 
