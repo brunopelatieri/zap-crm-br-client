@@ -48,6 +48,24 @@ export function checkDeleteGuards(input: {
   return { ok: true };
 }
 
+/**
+ * Guarda da exclusão disparada pelo CONSOLE do proprietário da
+ * plataforma (`/admin/accounts/[id]`) — não pelo titular. Sem checagem
+ * de papel (quem chama não é membro da conta-alvo) nem de
+ * "conta do proprietário" (o proprietário optou por não proteger essa
+ * combinação aqui: bloquear já cobre o caso "não deveria mexer nesta
+ * conta"). Só o nome digitado, mesma régua sensível a maiúsculas.
+ */
+export function checkAdminDeleteGuard(input: {
+  accountName: string;
+  typedName: string;
+}): { ok: true } | { ok: false; reason: 'name_mismatch' } {
+  if (input.typedName.trim() !== input.accountName.trim()) {
+    return { ok: false, reason: 'name_mismatch' };
+  }
+  return { ok: true };
+}
+
 /** Os quatro prefixos da §3.3 (o cascade do Postgres não toca em Storage). */
 export function storagePrefixesFor(
   accountId: string,

@@ -3688,6 +3688,18 @@
       "blockFailed": "Não foi possível salvar a mudança",
       "networkError": "Não foi possível falar com o servidor"
     },
+    "deleteAccount": {
+      "button": "Excluir conta",
+      "dialogTitle": "Excluir {name} para sempre",
+      "irreversible": "Isso apaga todo contato, conversa, negócio, disparo e canal, e não pode ser desfeito. O login do titular é removido; os demais membros da equipe mantêm o login numa conta pessoal nova e vazia.",
+      "ownerLabel": "Titular: {email}",
+      "confirmNameLabel": "Digite <bold>{name}</bold> para confirmar",
+      "cancel": "Cancelar",
+      "deleting": "Excluindo…",
+      "success": "{name} excluída.",
+      "failed": "Não foi possível excluir a conta.",
+      "networkError": "Não foi possível falar com o servidor"
+    },
     "plans": {
       "title": "Planos",
       "description": "Catálogo comercial completo - inclusive planos privados e inativos.",

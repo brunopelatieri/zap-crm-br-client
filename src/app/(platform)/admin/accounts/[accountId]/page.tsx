@@ -10,7 +10,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -30,6 +30,7 @@ import {
 import { RequirePlatformOwner } from '@/components/platform/require-platform-owner';
 import { PlanUsageBars } from '@/components/plan/plan-usage-bars';
 import { BlockToggle } from '@/components/platform/block-toggle';
+import { DeleteAccountButton } from '@/components/platform/delete-account-button';
 import { ChangePlanDialog } from '@/components/platform/change-plan-dialog';
 import { AccountRetentionPanel } from '@/components/retention/retention-panel';
 import { ChannelLimitsPanel } from '@/components/platform/channel-limits-panel';
@@ -76,6 +77,7 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
   const tPlan = useTranslations('Plan');
   const tBlock = useTranslations('Platform.block');
   const locale = useLocale();
+  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AccountDetailResponse | null>(null);
@@ -122,6 +124,7 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
   }
 
   const { account, usage, events, self } = data;
+  const owner = account.members.find((m) => m.role === 'owner') ?? null;
 
   return (
     <div className="space-y-6">
@@ -159,6 +162,12 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
             self.isOwnAccount ? tBlock('selfBlockDisabled') : null
           }
           onChanged={load}
+        />
+        <DeleteAccountButton
+          accountId={account.accountId}
+          accountName={account.accountName}
+          ownerEmail={owner?.email ?? null}
+          onDeleted={() => router.push('/admin/accounts')}
         />
       </div>
       {account.blockedReason ? (

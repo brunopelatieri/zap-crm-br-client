@@ -3688,6 +3688,18 @@
       "blockFailed": "The change could not be saved",
       "networkError": "Could not reach the server"
     },
+    "deleteAccount": {
+      "button": "Delete account",
+      "dialogTitle": "Delete {name} permanently",
+      "irreversible": "This deletes every contact, conversation, deal, broadcast and channel, and cannot be undone. The account owner's login is removed; other team members keep their login in a new empty personal account.",
+      "ownerLabel": "Owner: {email}",
+      "confirmNameLabel": "Type <bold>{name}</bold> to confirm",
+      "cancel": "Cancel",
+      "deleting": "Deleting…",
+      "success": "{name} deleted.",
+      "failed": "Could not delete the account.",
+      "networkError": "Could not reach the server"
+    },
     "plans": {
       "title": "Plans",
       "description": "Full commercial catalog - including private and inactive plans.",

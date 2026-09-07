@@ -10,11 +10,19 @@
 // Depois do DELETE de accounts o client de sessão está morto (o
 // profiles do titular foi junto) — por isso as etapas 5-7 usam
 // SEMPRE supabaseAdmin(), nunca ctx.supabase.
+//
+// A leitura de inventário, a varredura de Storage e a limpeza da VPS
+// vêm de `@/lib/account/delete-engine` — compartilhadas com a
+// exclusão administrativa (`/api/platform/accounts/[accountId]/delete`,
+// extensão do console do proprietário). O que É específico desta rota:
+// reautenticação por SENHA do titular e a RPC `remove_account_member`
+// via client de SESSÃO (o console não tem a senha do titular nem é
+// membro da conta-alvo — usa `platform_remove_account_member`, sem
+// essa checagem, restrita a service_role).
 // ============================================================
 
 import { NextResponse } from 'next/server';
 import { createClient as createIsolatedClient } from '@supabase/supabase-js';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
   getCurrentAccount,
@@ -25,106 +33,28 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { isPlatformOwnerEmail } from '@/lib/platform/owner';
 import { writePlatformAudit } from '@/lib/platform/audit';
 import { emitSystemEvent } from '@/lib/notifications/emit';
-import { chunkArray } from '@/lib/array';
 import {
   buildDeletionTombstone,
   checkDeleteGuards,
-  storagePrefixesFor,
 } from '@/lib/account/delete';
+import {
+  cleanupEvolutionInstances,
+  loadDeletionCounts,
+  loadMemberIds,
+  removeAllStoragePrefixes,
+} from '@/lib/account/delete-engine';
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
-import { readEvolutionConfig } from '@/lib/evolution/config';
-import { deleteInstanceOnVpsByRemoteId } from '@/lib/evolution/instances';
-
-const STORAGE_LIST_PAGE = 100;
-const STORAGE_REMOVE_BATCH = 100;
-const MESSAGE_COUNT_CHUNK = 500;
-
-// ------------------------------------------------------------
-// GET preview — só as contagens, requireRole('owner').
-// ------------------------------------------------------------
-
-/**
- * `profiles.user_id` dos membros NÃO-DONOS da conta — a mesma query
- * serve dois propósitos (contagem no inventário e a lista real a
- * desligar na etapa 3 do POST), então só roda uma vez por request em
- * vez de duas.
- */
-async function loadMemberIds(
-  db: SupabaseClient,
-  accountId: string
-): Promise<string[]> {
-  const { data } = await db
-    .from('profiles')
-    .select('user_id')
-    .eq('account_id', accountId)
-    .neq('account_role', 'owner');
-  return (data ?? []).map((r) => r.user_id as string);
-}
-
-async function loadCounts(
-  db: SupabaseClient,
-  accountId: string,
-  memberIds: string[]
-): Promise<Record<string, number>> {
-  const [
-    { count: contacts },
-    { count: conversations },
-    { count: broadcasts },
-    { count: channels },
-    { data: convRows },
-  ] = await Promise.all([
-    db
-      .from('contacts')
-      .select('id', { count: 'exact', head: true })
-      .eq('account_id', accountId),
-    db
-      .from('conversations')
-      .select('id', { count: 'exact', head: true })
-      .eq('account_id', accountId),
-    db
-      .from('broadcasts')
-      .select('id', { count: 'exact', head: true })
-      .eq('account_id', accountId),
-    db
-      .from('channels')
-      .select('id', { count: 'exact', head: true })
-      .eq('account_id', accountId),
-    db.from('conversations').select('id').eq('account_id', accountId),
-  ]);
-
-  const conversationIds = (convRows ?? []).map((r) => r.id as string);
-  let messages = 0;
-  for (const chunk of chunkArray(conversationIds, MESSAGE_COUNT_CHUNK)) {
-    const { count } = await db
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .in('conversation_id', chunk);
-    messages += count ?? 0;
-  }
-
-  return {
-    contacts: contacts ?? 0,
-    conversations: conversations ?? 0,
-    messages,
-    broadcasts: broadcasts ?? 0,
-    channels: channels ?? 0,
-    // Membros NÃO-DONOS — é o que a UI/e-mail descrevem ("perdem acesso",
-    // "desligados"); o titular não é contado aqui (ele não é desligado,
-    // é apagado).
-    members: memberIds.length,
-  };
-}
 
 export async function GET() {
   try {
     const ctx = await requireRole('owner');
     const db = supabaseAdmin();
     const memberIds = await loadMemberIds(db, ctx.accountId);
-    const counts = await loadCounts(db, ctx.accountId, memberIds);
+    const counts = await loadDeletionCounts(db, ctx.accountId, memberIds);
     return NextResponse.json({ counts });
   } catch (err) {
     return toErrorResponse(err);
@@ -150,44 +80,6 @@ async function reauthenticate(
     password,
   });
   return !error;
-}
-
-async function removeStoragePrefix(
-  db: SupabaseClient,
-  bucket: string,
-  prefix: string
-): Promise<{ removed: number; error: string | null }> {
-  try {
-    // Lista TODAS as páginas primeiro, sem apagar no meio — apagar antes
-    // de terminar de listar encolhe o bucket, e `offset` sobre uma lista
-    // que está encolhendo pula itens (achado de code review). Só depois
-    // de ter o conjunto completo é que os lotes são removidos.
-    const allPaths: string[] = [];
-    let offset = 0;
-    for (;;) {
-      const { data: entries, error: listErr } = await db.storage
-        .from(bucket)
-        .list(prefix, { limit: STORAGE_LIST_PAGE, offset });
-      if (listErr) return { removed: 0, error: listErr.message };
-      if (!entries || entries.length === 0) break;
-      allPaths.push(...entries.map((e) => `${prefix}${e.name}`));
-      if (entries.length < STORAGE_LIST_PAGE) break;
-      offset += STORAGE_LIST_PAGE;
-    }
-
-    let removed = 0;
-    for (const batch of chunkArray(allPaths, STORAGE_REMOVE_BATCH)) {
-      const { error: removeErr } = await db.storage.from(bucket).remove(batch);
-      if (removeErr) return { removed, error: removeErr.message };
-      removed += batch.length;
-    }
-    return { removed, error: null };
-  } catch (err) {
-    return {
-      removed: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
 }
 
 export async function POST(request: Request) {
@@ -275,7 +167,7 @@ export async function POST(request: Request) {
     // resultado serve a contagem do inventário/tombstone E a lista real
     // desligada na etapa 3.
     const nonOwnerMemberIds = await loadMemberIds(db, accountId);
-    const counts = await loadCounts(db, accountId, nonOwnerMemberIds);
+    const counts = await loadDeletionCounts(db, accountId, nonOwnerMemberIds);
 
     const { data: instanceRows } = await db
       .from('evolution_instances')
@@ -340,45 +232,11 @@ export async function POST(request: Request) {
       leftovers.push(`login do titular não removido: ${deleteUserErr.message}`);
     }
 
-    // Etapa 6a: Storage, melhor esforço, os quatro prefixos da §3.3.
-    const storageRemoved: Record<string, number> = {};
-    for (const { bucket, prefix } of storagePrefixesFor(
-      accountId,
-      ownerUserId
-    )) {
-      const result = await removeStoragePrefix(db, bucket, prefix);
-      storageRemoved[bucket] = result.removed;
-      if (result.error) {
-        leftovers.push(`Storage ${bucket}/${prefix}: ${result.error}`);
-      }
-    }
-
-    // Etapa 6b: instâncias Evolution na VPS, melhor esforço. Cada chamada
-    // é um round-trip HTTP independente, sem ordem a preservar entre
-    // instâncias — rodam em paralelo.
-    const evolutionConfig = readEvolutionConfig();
-    if (instances.length > 0) {
-      if (!evolutionConfig) {
-        leftovers.push(
-          `Evolution não configurada — ${instances.length} instância(s) não removida(s) da VPS`
-        );
-      } else {
-        const remoteIds = instances
-          .map((instance) => instance.remote_instance_id as string | null)
-          .filter((id): id is string => id !== null);
-        const results = await Promise.all(
-          remoteIds.map(async (remoteId) => ({
-            remoteId,
-            err: await deleteInstanceOnVpsByRemoteId(evolutionConfig, remoteId),
-          }))
-        );
-        for (const { remoteId, err } of results) {
-          if (err) {
-            leftovers.push(`instância ${remoteId} não apagada na VPS: ${err}`);
-          }
-        }
-      }
-    }
+    // Etapa 6: melhor esforço — Storage e VPS Evolution.
+    const { storageRemoved, leftovers: storageLeftovers } =
+      await removeAllStoragePrefixes(db, accountId, ownerUserId);
+    leftovers.push(...storageLeftovers);
+    leftovers.push(...(await cleanupEvolutionInstances(instances)));
 
     // Etapa 7: rastro. Nunca lança — uma ação sem rastro é ruim, uma
     // ação que falha por causa do rastro é pior.
