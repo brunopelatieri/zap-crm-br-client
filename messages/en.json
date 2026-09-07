@@ -3303,7 +3303,8 @@
       "members": "Team members",
       "api": "API keys",
       "webhook-log": "Webhook log",
-      "retention": "Retention"
+      "retention": "Retention",
+      "danger": "Danger zone"
     },
     "groups": {
       "account": "Account",
@@ -3551,6 +3552,35 @@
       "reindex": "Reindex",
       "reindexTooltip": "Re-embed all documents (e.g. after adding an embeddings key)",
       "loading": "Loading…"
+    },
+    "danger": {
+      "title": "Danger zone",
+      "description": "Permanently delete this account — every contact, conversation, deal, broadcast and channel. Only the account owner can do this, and it cannot be undone.",
+      "inventoryTitle": "What will be deleted",
+      "contacts": "Contacts",
+      "conversations": "Conversations",
+      "messages": "Messages",
+      "broadcasts": "Broadcasts",
+      "channels": "Channels",
+      "members": "Team members",
+      "exportHint": "Deletion does not wait for an export. Grab anything you need first.",
+      "exportContacts": "Export contacts",
+      "exportConversations": "Export a conversation",
+      "exportedAck": "I've already exported what I needed.",
+      "membersWarning": "{count} {count, plural, =1 {person} other {people}} will lose access to this account and keep their login, in a new empty personal account.",
+      "confirmNameLabel": "Type <bold>{name}</bold> to confirm",
+      "passwordLabel": "Your password",
+      "irreversible": "This action is immediate and cannot be undone.",
+      "cancel": "Cancel",
+      "button": "Delete account",
+      "dialogTitle": "Delete this account permanently",
+      "deleting": "Deleting…",
+      "success": "Account deleted.",
+      "errorNameMismatch": "The account name you typed doesn't match.",
+      "errorBadPassword": "Incorrect password.",
+      "errorNotOwner": "Only the account owner can delete the account.",
+      "errorGeneric": "Could not delete the account. Try again.",
+      "leftovers": "Some cleanup could not be completed automatically and was logged for the operator."
     }
   },
   "Platform": {

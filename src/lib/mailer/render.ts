@@ -194,6 +194,39 @@ function renderAccountCreated(): Rendered {
   return { actionSubject: 'fez o primeiro acesso', lines: [] };
 }
 
+function renderAccountDeleted(p: SystemEventPayload): Rendered {
+  const deletion = (p.deletion ?? {}) as Record<string, unknown>;
+  const counts = (deletion.counts ?? {}) as Record<string, unknown>;
+  // `detachedMembers.length`, não `counts.members` — o titular NÃO é um
+  // membro desligado (ele é apagado, não movido para conta pessoal), e
+  // `counts.members` conta só os não-donos desde o achado de code review
+  // (route.ts:loadMemberIds), mas o dado mais direto para "quantos foram
+  // desligados de fato" é a lista que a etapa 3 já produziu.
+  const detachedCount = Array.isArray(deletion.detachedMembers)
+    ? (deletion.detachedMembers as unknown[]).length
+    : (counts.members ?? 0);
+  const leftovers = Array.isArray(deletion.leftovers)
+    ? (deletion.leftovers as unknown[]).map(String)
+    : [];
+  return {
+    actionSubject: 'foi excluída pelo titular',
+    lines: [
+      // Exceção documentada à regra de privacidade do arquivo (mesmo
+      // espírito de member.blocked/unblocked): SPEC 073 §5.4 pede
+      // explicitamente o e-mail do titular no corpo deste evento — é a
+      // única forma de identificar QUAL conta foi apagada quando o nome
+      // não é único, e a conta em si já não existe mais para consultar.
+      `Titular: ${p.account?.ownerEmail ?? '?'}`,
+      `Contatos: ${counts.contacts ?? 0}`,
+      `Conversas: ${counts.conversations ?? 0}`,
+      `Mensagens: ${counts.messages ?? 0}`,
+      `Canais: ${counts.channels ?? 0}`,
+      `Membros desligados: ${detachedCount}`,
+      ...(leftovers.length > 0 ? [`Pendências: ${leftovers.join('; ')}`] : []),
+    ],
+  };
+}
+
 const RENDERERS: Record<
   SystemEventPayload['type'],
   (p: SystemEventPayload) => Rendered
@@ -213,6 +246,7 @@ const RENDERERS: Record<
   'member.blocked': renderMemberBlocked,
   'member.unblocked': renderMemberUnblocked,
   'quota.exceeded': renderQuotaExceeded,
+  'account.deleted': renderAccountDeleted,
 };
 
 function escapeHtml(value: string): string {
@@ -229,7 +263,12 @@ export function renderSystemEmail(payload: SystemEventPayload): RenderedEmail {
   const { actionSubject, lines } = renderer(payload);
 
   const subject = `[ZAP CRM BR] ${accountName} — ${actionSubject}`;
-  const link = consoleLink(accountId);
+  // `account.deleted` dispara DEPOIS de `DELETE FROM accounts` — a conta
+  // já não existe quando este e-mail é montado, então o link do console
+  // seria sempre morto (achado de code review). Nenhum outro tipo de
+  // evento tem essa característica.
+  const link =
+    payload.type === 'account.deleted' ? null : consoleLink(accountId);
 
   const textLines = [
     `Conta: ${accountName}`,

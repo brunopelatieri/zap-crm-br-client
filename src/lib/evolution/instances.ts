@@ -76,6 +76,37 @@ function requireConfig(): EvolutionConfig {
 }
 
 /**
+ * `DELETE /instance/delete/:id` na VPS, tratando 404 (`kind === 'not_found'`)
+ * como sucesso — já não existe lá, que é o estado desejado. Não depende de
+ * nenhuma linha do nosso banco, só do `remoteInstanceId` já conhecido pelo
+ * chamador — por isso serve tanto o ciclo de vida normal
+ * (`cleanupOrphanedVpsInstance` abaixo) quanto a exclusão de conta (SPEC
+ * 073, `src/app/api/account/delete/route.ts`), que roda depois que
+ * `evolution_instances` já cascateou junto com `accounts` e não tem mais
+ * linha nenhuma para reconsultar.
+ *
+ * Devolve a mensagem de erro (string) em vez de lançar — o chamador decide
+ * se isso vira log, item de `leftovers`, ou outra coisa.
+ */
+export async function deleteInstanceOnVpsByRemoteId(
+  config: EvolutionConfig,
+  remoteInstanceId: string
+): Promise<string | null> {
+  try {
+    await evolutionRequest(config, `/instance/delete/${remoteInstanceId}`, {
+      method: 'DELETE',
+      key: config.globalApiKey,
+    });
+    return null;
+  } catch (err) {
+    if (err instanceof EvolutionApiError && err.kind === 'not_found') {
+      return null;
+    }
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+/**
  * Best-effort: apaga na VPS uma instância que acabamos de criar mas
  * que uma escrita no NOSSO banco impediu de ficar utilizável (ver os
  * três pontos de falha em `createEvolutionInstance`). Nunca lança —
@@ -87,12 +118,8 @@ async function cleanupOrphanedVpsInstance(
   remoteInstanceId: string | null
 ): Promise<void> {
   if (!remoteInstanceId) return;
-  try {
-    await evolutionRequest(config, `/instance/delete/${remoteInstanceId}`, {
-      method: 'DELETE',
-      key: config.globalApiKey,
-    });
-  } catch (err) {
+  const err = await deleteInstanceOnVpsByRemoteId(config, remoteInstanceId);
+  if (err) {
     console.error(
       `[evolution] failed to clean up orphaned VPS instance ${remoteInstanceId}:`,
       err

@@ -3303,7 +3303,8 @@
       "members": "Membros da equipe",
       "api": "Chaves de API",
       "webhook-log": "Log de webhook",
-      "retention": "Retenção"
+      "retention": "Retenção",
+      "danger": "Zona de risco"
     },
     "groups": {
       "account": "Conta",
@@ -3551,6 +3552,35 @@
       "reindex": "Reindexar",
       "reindexTooltip": "Reprocessar embeddings de todos os documentos (ex.: após adicionar uma chave de embeddings)",
       "loading": "Carregando…"
+    },
+    "danger": {
+      "title": "Zona de risco",
+      "description": "Exclui esta conta para sempre — todo contato, conversa, negócio, disparo e canal. Só o titular da conta pode fazer isso, e não há como desfazer.",
+      "inventoryTitle": "O que será apagado",
+      "contacts": "Contatos",
+      "conversations": "Conversas",
+      "messages": "Mensagens",
+      "broadcasts": "Disparos",
+      "channels": "Canais",
+      "members": "Membros da equipe",
+      "exportHint": "A exclusão não espera por uma exportação. Baixe o que precisar antes.",
+      "exportContacts": "Exportar contatos",
+      "exportConversations": "Exportar uma conversa",
+      "exportedAck": "Já exportei o que precisava.",
+      "membersWarning": "{count} {count, plural, =1 {pessoa perderá} other {pessoas perderão}} o acesso a esta conta e continuará(ão) com o login, em uma conta pessoal vazia.",
+      "confirmNameLabel": "Digite <bold>{name}</bold> para confirmar",
+      "passwordLabel": "Sua senha",
+      "irreversible": "Esta ação é imediata e não pode ser desfeita.",
+      "cancel": "Cancelar",
+      "button": "Excluir conta",
+      "dialogTitle": "Excluir esta conta para sempre",
+      "deleting": "Excluindo…",
+      "success": "Conta excluída.",
+      "errorNameMismatch": "O nome digitado não confere com o nome da conta.",
+      "errorBadPassword": "Senha incorreta.",
+      "errorNotOwner": "Só o titular da conta pode excluí-la.",
+      "errorGeneric": "Não foi possível excluir a conta. Tente novamente.",
+      "leftovers": "Algumas limpezas não puderam ser concluídas automaticamente e foram registradas para o operador."
     }
   },
   "Platform": {

@@ -9,6 +9,7 @@ import {
   ScrollText,
   Shield,
   Tags,
+  TriangleAlert,
   User,
   UsersRound,
   Zap,
@@ -38,6 +39,7 @@ export const SETTINGS_SECTIONS = [
   'members',
   'api',
   'webhook-log',
+  'danger',
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -135,6 +137,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     label: 'Webhook log',
     icon: ScrollText,
     group: 'workspace',
+  },
+  danger: {
+    id: 'danger',
+    label: 'Danger zone',
+    icon: TriangleAlert,
+    group: 'workspace',
+    minRole: 'owner',
   },
 };
 

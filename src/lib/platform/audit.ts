@@ -41,7 +41,12 @@ export type PlatformAuditAction =
   | 'notification.resend'
   // SPEC 069 F10 — o editor de limites de segurança (nível 1a/1b) do
   // ChannelLimitsPanel.
-  | 'channel_limits.update';
+  | 'channel_limits.update'
+  // SPEC 073 — o titular excluiu a própria conta pela "Zona de risco"
+  // em /settings. `accountId`/`targetUserId` vão sempre `null`: a
+  // conta e o login do titular já não existem quando esta linha é
+  // gravada (ver `payload` para os dados preservados).
+  | 'account.delete';
 
 export function consoleActorTag(ownerEmail: string): string {
   return `console:${ownerEmail}`;

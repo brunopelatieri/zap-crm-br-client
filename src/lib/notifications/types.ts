@@ -22,6 +22,11 @@ export const SYSTEM_EVENT_TYPES = [
   'member.blocked',
   'member.unblocked',
   'quota.exceeded',
+  // SPEC 073 — o titular excluiu a própria conta. Evento pontual, sem
+  // dedupe (ver `dedupeKeyFor`), emitido com `accountId: null` porque
+  // `system_notifications.account_id` vai a NULL de qualquer forma
+  // (a conta já foi apagada quando a linha é gravada).
+  'account.deleted',
 ] as const;
 
 export type SystemEventType = (typeof SYSTEM_EVENT_TYPES)[number];

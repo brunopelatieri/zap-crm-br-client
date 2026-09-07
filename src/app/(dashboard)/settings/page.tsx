@@ -20,6 +20,7 @@ import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { WebhookLogSettings } from '@/components/settings/webhook-log-settings';
+import { DangerZone } from '@/components/settings/danger-zone';
 import {
   resolveSection,
   type SettingsSection,
@@ -82,6 +83,7 @@ export default function SettingsPage() {
     'webhook-log': (
       <WebhookLogSettings initialWebhookId={searchParams.get('webhook_id')} />
     ),
+    danger: <DangerZone />,
   };
 
   return (

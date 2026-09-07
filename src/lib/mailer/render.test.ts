@@ -150,3 +150,48 @@ describe('renderSystemEmail — um caso por tipo de evento (§7.1)', () => {
     expect(html).not.toMatch(/https?:\/\/(?!app\.zapcrmbr\.com)/i);
   });
 });
+
+describe('renderSystemEmail — account.deleted (SPEC 073 §5.4, um caso à parte)', () => {
+  // Foge do loop genérico acima em dois pontos: o e-mail do titular é a
+  // EXCEÇÃO deliberada à regra de privacidade (§5.4 pede explicitamente
+  // "nome, e-mail, contagens" — é a única forma de identificar qual conta
+  // foi apagada quando o nome não é único), e o link do console é sempre
+  // omitido, porque a conta já não existe quando este e-mail é montado.
+  const payload = buildEventPayload(
+    {
+      type: 'account.deleted',
+      accountId: null,
+      account,
+      data: {
+        deletion: {
+          counts: { contacts: 3, conversations: 1, messages: 12, channels: 1 },
+          detachedMembers: [
+            { userId: 'user-2', newAccountId: 'acct-personal-2' },
+          ],
+          leftovers: ['instância X não apagada na VPS'],
+        },
+      },
+    },
+    now
+  );
+  const email = renderSystemEmail(payload);
+
+  it('assunto contém a conta', () => {
+    expect(email.subject).toContain('Acme Ltda');
+    expect(email.subject.startsWith('[ZAP CRM BR]')).toBe(true);
+  });
+
+  it('corpo contém o e-mail do titular (exceção documentada)', () => {
+    expect(email.text).toContain('ana@acme.com');
+    expect(email.html).toContain('ana@acme.com');
+  });
+
+  it('corpo conta membros DESLIGADOS (detachedMembers.length), não o total de members', () => {
+    expect(email.text).toContain('Membros desligados: 1');
+  });
+
+  it('não tem link para o console — a conta já não existe', () => {
+    expect(email.text).not.toContain('/admin/accounts/');
+    expect(email.html).not.toContain('/admin/accounts/');
+  });
+});
