@@ -21,21 +21,40 @@ const STORAGE_LIST_PAGE = 100;
 const STORAGE_REMOVE_BATCH = 100;
 const MESSAGE_COUNT_CHUNK = 500;
 
+export interface AccountProfileRow {
+  userId: string;
+  email: string;
+  role: string;
+}
+
 /**
- * `profiles.user_id` dos membros NÃO-DONOS da conta — a mesma query
- * serve dois propósitos (contagem no inventário e a lista real a
- * desligar), então só roda uma vez por request em vez de duas.
+ * Todos os perfis da conta (dono incluso) numa query só — serve tanto
+ * `loadMemberIds` (filtra não-donos) quanto a rota administrativa, que
+ * precisa também do e-mail do titular. Antes eram duas idas separadas
+ * à mesma tabela (achado de code review); agora é uma.
  */
+export async function loadAccountProfiles(
+  db: SupabaseClient,
+  accountId: string
+): Promise<AccountProfileRow[]> {
+  const { data } = await db
+    .from('profiles')
+    .select('user_id, email, account_role')
+    .eq('account_id', accountId);
+  return (data ?? []).map((r) => ({
+    userId: r.user_id as string,
+    email: r.email as string,
+    role: r.account_role as string,
+  }));
+}
+
+/** `profiles.user_id` dos membros NÃO-DONOS da conta. */
 export async function loadMemberIds(
   db: SupabaseClient,
   accountId: string
 ): Promise<string[]> {
-  const { data } = await db
-    .from('profiles')
-    .select('user_id')
-    .eq('account_id', accountId)
-    .neq('account_role', 'owner');
-  return (data ?? []).map((r) => r.user_id as string);
+  const profiles = await loadAccountProfiles(db, accountId);
+  return profiles.filter((p) => p.role !== 'owner').map((p) => p.userId);
 }
 
 export async function loadDeletionCounts(

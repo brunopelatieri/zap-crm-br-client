@@ -51,10 +51,12 @@ export function checkDeleteGuards(input: {
 /**
  * Guarda da exclusão disparada pelo CONSOLE do proprietário da
  * plataforma (`/admin/accounts/[id]`) — não pelo titular. Sem checagem
- * de papel (quem chama não é membro da conta-alvo) nem de
- * "conta do proprietário" (o proprietário optou por não proteger essa
- * combinação aqui: bloquear já cobre o caso "não deveria mexer nesta
- * conta"). Só o nome digitado, mesma régua sensível a maiúsculas.
+ * de papel (quem chama não é membro da conta-alvo) nem de "conta do
+ * proprietário": decisão deliberada do mantenedor, não porque bloquear
+ * "já cubra o caso" (bloquear e excluir são rotas independentes — uma
+ * não impede a outra). O proprietário optou conscientemente por não
+ * ter essa segunda trava aqui; ver docs/guia-console-do-proprietario.md.
+ * Só o nome digitado, mesma régua sensível a maiúsculas.
  */
 export function checkAdminDeleteGuard(input: {
   accountName: string;
@@ -64,6 +66,20 @@ export function checkAdminDeleteGuard(input: {
     return { ok: false, reason: 'name_mismatch' };
   }
   return { ok: true };
+}
+
+/**
+ * Mapeia o SQLSTATE de `remove_account_member`/`platform_remove_account_member`
+ * para o status HTTP certo — mesmo padrão de `rpcErrorToResponse` em
+ * `src/app/api/account/members/[userId]/route.ts`. `42501` (papel
+ * insuficiente/não-membro) → 403; `22023` (alvo não encontrado/é dono)
+ * → 400; qualquer outro código é erro de servidor de verdade → 500, sem
+ * expor a mensagem crua do banco.
+ */
+export function detachMemberErrorStatus(code: string | undefined): number {
+  if (code === '42501') return 403;
+  if (code === '22023') return 400;
+  return 500;
 }
 
 /** Os quatro prefixos da §3.3 (o cascade do Postgres não toca em Storage). */

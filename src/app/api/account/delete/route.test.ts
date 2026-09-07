@@ -71,9 +71,11 @@ vi.mock('@/lib/evolution/config', () => ({
 const calls: string[] = [];
 let deleteAccountError: { message: string } | null = null;
 let deleteUserError: { message: string } | null = null;
-let memberRows: { user_id: string }[] = [];
+// Perfis da conta (dono incluso) — `loadAccountProfiles` não filtra mais
+// no servidor, filtra em JS; o fake db devolve a lista crua.
+let profileRows: { user_id: string; email: string; account_role: string }[] =
+  [];
 let instanceRows: { id: string; remote_instance_id: string | null }[] = [];
-const removedPaths: Record<string, string[]> = {};
 
 function makeAdminDb() {
   return {
@@ -89,14 +91,7 @@ function makeAdminDb() {
         filters[k] = v;
         return chain;
       };
-      chain.neq = (k: string, v: unknown) => {
-        filters[`neq_${k}`] = v;
-        return chain;
-      };
-      chain.in = (k: string, v: unknown) => {
-        filters[`in_${k}`] = v;
-        return chain;
-      };
+      chain.in = () => chain;
       chain.delete = () => {
         filters.__delete = true;
         return chain;
@@ -106,10 +101,8 @@ function makeAdminDb() {
         if (table === 'accounts' && filters.__delete) {
           calls.push('delete:accounts');
           result = { error: deleteAccountError };
-        } else if (table === 'profiles' && filters.neq_account_role) {
-          result = { data: memberRows, error: null };
         } else if (table === 'profiles') {
-          result = { count: 0, data: null, error: null };
+          result = { data: profileRows, error: null };
         } else if (table === 'conversations' && opts?.count) {
           result = { count: 0, data: null, error: null };
         } else if (table === 'conversations') {
@@ -137,12 +130,9 @@ function makeAdminDb() {
       },
     },
     storage: {
-      from: (bucket: string) => ({
+      from: () => ({
         list: () => Promise.resolve({ data: [], error: null }),
-        remove: (paths: string[]) => {
-          removedPaths[bucket] = paths;
-          return Promise.resolve({ error: null });
-        },
+        remove: () => Promise.resolve({ error: null }),
       }),
     },
   };
@@ -187,7 +177,7 @@ beforeEach(() => {
   calls.length = 0;
   deleteAccountError = null;
   deleteUserError = null;
-  memberRows = [];
+  profileRows = [];
   instanceRows = [];
   evolutionConfigured = true;
   writePlatformAudit.mockResolvedValue(undefined);
@@ -234,7 +224,10 @@ describe('POST /api/account/delete', () => {
   });
 
   it('caminho feliz → ordem exata: membros → DELETE accounts → deleteUser', async () => {
-    memberRows = [{ user_id: 'user-2' }];
+    profileRows = [
+      { user_id: 'user-1', email: 'dono@example.com', account_role: 'owner' },
+      { user_id: 'user-2', email: 'colega@example.com', account_role: 'agent' },
+    ];
     const res = await POST(
       makeRequest({ confirmName: 'Conta X', password: 'certa' })
     );
@@ -251,9 +244,31 @@ describe('POST /api/account/delete', () => {
       expect.objectContaining({ action: 'account.delete', accountId: null })
     );
     expect(emitSystemEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'account.deleted', accountId: null }),
+      expect.objectContaining({
+        type: 'account.deleted',
+        accountId: null,
+        actor: 'self-service:dono@example.com',
+      }),
       expect.anything()
     );
+  });
+
+  it('RPC de desligar membro falha com 22023 → 400 com a mensagem do banco', async () => {
+    profileRows = [
+      { user_id: 'user-1', email: 'dono@example.com', account_role: 'owner' },
+      { user_id: 'user-2', email: 'colega@example.com', account_role: 'agent' },
+    ];
+    sessionRpc.mockResolvedValue({
+      data: null,
+      error: { code: '22023', message: 'Target user not found' },
+    });
+    const res = await POST(
+      makeRequest({ confirmName: 'Conta X', password: 'certa' })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe('Target user not found');
+    expect(calls).toEqual(['rpc:remove_account_member']);
   });
 
   it('VPS fora do ar → 200 com a instância listada em leftovers', async () => {

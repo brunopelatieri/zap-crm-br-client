@@ -53,20 +53,22 @@ vi.mock('@/lib/evolution/config', () => ({
 // ------------------------------------------------------------
 
 const calls: string[] = [];
-let accountRow: { id: string; name: string; owner_user_id: string } | null = {
-  id: 'acct-1',
+let accountRow: { name: string; owner_user_id: string } | null = {
   name: 'Conta X',
   owner_user_id: 'user-1',
 };
-let ownerProfile: { email: string } | null = { email: 'dono@example.com' };
+// Perfis da conta (dono incluso) — `loadAccountProfiles` não filtra mais
+// no servidor, filtra em JS; o fake db devolve a lista crua.
+let profileRows: { user_id: string; email: string; account_role: string }[] =
+  [];
 let deleteAccountError: { message: string } | null = null;
 let deleteUserError: { message: string } | null = null;
-let memberRows: { user_id: string }[] = [];
 let instanceRows: { id: string; remote_instance_id: string | null }[] = [];
-let rpcResult: { data: unknown; error: { message: string } | null } = {
-  data: 'acct-new',
-  error: null,
-};
+let rpcResult: {
+  data: unknown;
+  error: { code?: string; message: string } | null;
+} = { data: 'acct-new', error: null };
+let rpcShouldThrow = false;
 
 function makeAdminDb() {
   return {
@@ -78,10 +80,6 @@ function makeAdminDb() {
         filters[k] = v;
         return chain;
       };
-      chain.neq = (k: string, v: unknown) => {
-        filters[`neq_${k}`] = v;
-        return chain;
-      };
       chain.in = () => chain;
       chain.delete = () => {
         filters.__delete = true;
@@ -89,8 +87,6 @@ function makeAdminDb() {
       };
       chain.maybeSingle = () => {
         if (table === 'accounts') return Promise.resolve({ data: accountRow });
-        if (table === 'profiles')
-          return Promise.resolve({ data: ownerProfile });
         return Promise.resolve({ data: null });
       };
       chain.then = (resolve: (v: unknown) => unknown) => {
@@ -98,8 +94,8 @@ function makeAdminDb() {
         if (table === 'accounts' && filters.__delete) {
           calls.push('delete:accounts');
           result = { error: deleteAccountError };
-        } else if (table === 'profiles' && filters.neq_account_role) {
-          result = { data: memberRows, error: null };
+        } else if (table === 'profiles') {
+          result = { data: profileRows, error: null };
         } else if (table === 'conversations') {
           result = { data: [], error: null };
         } else if (table === 'evolution_instances') {
@@ -113,6 +109,7 @@ function makeAdminDb() {
     },
     rpc: (fn: string) => {
       calls.push(`rpc:${fn}`);
+      if (rpcShouldThrow) throw new Error('network blip');
       return Promise.resolve(rpcResult);
     },
     auth: {
@@ -149,11 +146,10 @@ const PARAMS = { params: Promise.resolve({ accountId: 'acct-1' }) };
 beforeEach(() => {
   vi.clearAllMocks();
   calls.length = 0;
-  accountRow = { id: 'acct-1', name: 'Conta X', owner_user_id: 'user-1' };
-  ownerProfile = { email: 'dono@example.com' };
+  accountRow = { name: 'Conta X', owner_user_id: 'user-1' };
+  profileRows = [];
   deleteAccountError = null;
   deleteUserError = null;
-  memberRows = [];
   instanceRows = [];
   evolutionConfigured = true;
   writePlatformAudit.mockResolvedValue(undefined);
@@ -164,6 +160,7 @@ beforeEach(() => {
     userId: 'platform-owner-user',
   });
   rpcResult = { data: 'acct-new', error: null };
+  rpcShouldThrow = false;
 });
 
 describe('POST /api/platform/accounts/[accountId]/delete', () => {
@@ -189,8 +186,11 @@ describe('POST /api/platform/accounts/[accountId]/delete', () => {
     expect(calls).toEqual([]);
   });
 
-  it('caminho feliz → ordem exata e actor do console', async () => {
-    memberRows = [{ user_id: 'user-2' }];
+  it('caminho feliz → ordem exata, actor do console e e-mail do titular resolvido', async () => {
+    profileRows = [
+      { user_id: 'user-1', email: 'dono@example.com', account_role: 'owner' },
+      { user_id: 'user-2', email: 'colega@example.com', account_role: 'agent' },
+    ];
     const res = await POST(makeRequest({ confirmName: 'Conta X' }), PARAMS);
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -207,14 +207,76 @@ describe('POST /api/platform/accounts/[accountId]/delete', () => {
         actor: 'console:operador@zapcrmbr.com',
       })
     );
+    expect(emitSystemEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'account.deleted',
+        actor: 'console:operador@zapcrmbr.com',
+        account: expect.objectContaining({ ownerEmail: 'dono@example.com' }),
+      }),
+      expect.anything()
+    );
   });
 
-  it('membro não desligado → 500, DELETE FROM accounts nunca roda', async () => {
-    memberRows = [{ user_id: 'user-2' }];
+  it('titular sem linha em profiles → ownerEmail null, exclusão segue', async () => {
+    profileRows = [];
+    const res = await POST(makeRequest({ confirmName: 'Conta X' }), PARAMS);
+    expect(res.status).toBe(200);
+    expect(emitSystemEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: expect.objectContaining({ ownerEmail: null }),
+      }),
+      expect.anything()
+    );
+  });
+
+  it('membro não desligado (erro genérico) → 500, DELETE FROM accounts nunca roda', async () => {
+    profileRows = [
+      { user_id: 'user-1', email: 'dono@example.com', account_role: 'owner' },
+      { user_id: 'user-2', email: 'colega@example.com', account_role: 'agent' },
+    ];
     rpcResult = { data: null, error: { message: 'boom' } };
     const res = await POST(makeRequest({ confirmName: 'Conta X' }), PARAMS);
     expect(res.status).toBe(500);
     expect(calls).toEqual(['rpc:platform_remove_account_member']);
+  });
+
+  it('RPC de desligar membro falha com 22023 → 400 com a mensagem do banco', async () => {
+    profileRows = [
+      { user_id: 'user-1', email: 'dono@example.com', account_role: 'owner' },
+      { user_id: 'user-2', email: 'colega@example.com', account_role: 'agent' },
+    ];
+    rpcResult = {
+      data: null,
+      error: { code: '22023', message: 'Target user not found' },
+    };
+    const res = await POST(makeRequest({ confirmName: 'Conta X' }), PARAMS);
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe('Target user not found');
+  });
+
+  it('login do titular não removido → 200, sobra em leftovers', async () => {
+    deleteUserError = { message: 'auth admin unreachable' };
+    const res = await POST(makeRequest({ confirmName: 'Conta X' }), PARAMS);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(
+      json.deleted.leftovers.some((l: string) =>
+        l.includes('auth admin unreachable')
+      )
+    ).toBe(true);
+  });
+
+  it('exceção inesperada depois das guardas → 500 limpo, não crash cru', async () => {
+    profileRows = [
+      { user_id: 'user-1', email: 'dono@example.com', account_role: 'owner' },
+      { user_id: 'user-2', email: 'colega@example.com', account_role: 'agent' },
+    ];
+    rpcShouldThrow = true;
+    const res = await POST(makeRequest({ confirmName: 'Conta X' }), PARAMS);
+    const json = await res.json();
+    expect(res.status).toBe(500);
+    expect(typeof json.error).toBe('string');
   });
 
   it('VPS fora do ar → 200 com a instância listada em leftovers', async () => {

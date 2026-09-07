@@ -194,4 +194,37 @@ describe('renderSystemEmail — account.deleted (SPEC 073 §5.4, um caso à part
     expect(email.text).not.toContain('/admin/accounts/');
     expect(email.html).not.toContain('/admin/accounts/');
   });
+
+  it('assunto diz "pelo titular" quando o actor é self-service (ou ausente)', () => {
+    const selfServicePayload = buildEventPayload(
+      {
+        type: 'account.deleted',
+        accountId: null,
+        account,
+        actor: 'self-service:ana@acme.com',
+        data: { deletion: { counts: {}, leftovers: [] } },
+      },
+      now
+    );
+    expect(renderSystemEmail(selfServicePayload).subject).toContain(
+      'foi excluída pelo titular'
+    );
+    expect(email.subject).toContain('foi excluída pelo titular');
+  });
+
+  it('assunto diz "pelo console do proprietário" quando o actor é console:<email>', () => {
+    const adminPayload = buildEventPayload(
+      {
+        type: 'account.deleted',
+        accountId: null,
+        account,
+        actor: 'console:bruno@zapcrmbr.com',
+        data: { deletion: { counts: {}, leftovers: [] } },
+      },
+      now
+    );
+    expect(renderSystemEmail(adminPayload).subject).toContain(
+      'foi excluída pelo console do proprietário'
+    );
+  });
 });

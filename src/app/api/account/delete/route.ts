@@ -36,6 +36,7 @@ import { emitSystemEvent } from '@/lib/notifications/emit';
 import {
   buildDeletionTombstone,
   checkDeleteGuards,
+  detachMemberErrorStatus,
 } from '@/lib/account/delete';
 import {
   cleanupEvolutionInstances,
@@ -189,9 +190,15 @@ export async function POST(request: Request) {
           memberId,
           message: error.message,
         });
+        const status = detachMemberErrorStatus(error.code);
         return NextResponse.json(
-          { error: 'Failed to detach a team member before deletion' },
-          { status: 500 }
+          {
+            error:
+              status === 500
+                ? 'Failed to detach a team member before deletion'
+                : error.message,
+          },
+          { status }
         );
       }
       detachedMembers.push({
@@ -263,7 +270,12 @@ export async function POST(request: Request) {
       {
         type: 'account.deleted',
         accountId: null,
-        account: { id: accountId, name: accountName, ownerEmail },
+        account: {
+          id: accountId,
+          name: accountName,
+          ownerEmail: ownerEmail || null,
+        },
+        actor: `self-service:${ownerEmail}`,
         data: { deletion: { counts, detachedMembers, leftovers } },
       },
       db

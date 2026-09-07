@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildDeletionTombstone,
+  checkAdminDeleteGuard,
   checkDeleteGuards,
+  detachMemberErrorStatus,
   storagePrefixesFor,
 } from './delete';
 
@@ -52,6 +54,52 @@ describe('checkDeleteGuards', () => {
       reason: 'name_mismatch',
     });
   });
+});
+
+describe('checkAdminDeleteGuard', () => {
+  it('ok quando o nome bate', () => {
+    expect(
+      checkAdminDeleteGuard({
+        accountName: 'Minha Empresa',
+        typedName: 'Minha Empresa',
+      })
+    ).toEqual({ ok: true });
+  });
+
+  it('tolera espaço sobrando nas pontas', () => {
+    expect(
+      checkAdminDeleteGuard({
+        accountName: 'Minha Empresa',
+        typedName: '  Minha Empresa  ',
+      })
+    ).toEqual({ ok: true });
+  });
+
+  it('name_mismatch com caixa trocada', () => {
+    expect(
+      checkAdminDeleteGuard({
+        accountName: 'Minha Empresa',
+        typedName: 'minha empresa',
+      })
+    ).toEqual({ ok: false, reason: 'name_mismatch' });
+  });
+});
+
+describe('detachMemberErrorStatus', () => {
+  it('42501 (papel insuficiente/não-membro) → 403', () => {
+    expect(detachMemberErrorStatus('42501')).toBe(403);
+  });
+
+  it('22023 (alvo não encontrado/é dono) → 400', () => {
+    expect(detachMemberErrorStatus('22023')).toBe(400);
+  });
+
+  it.each([undefined, '', '23505', 'XX000'])(
+    'código desconhecido (%s) → 500',
+    (code) => {
+      expect(detachMemberErrorStatus(code)).toBe(500);
+    }
+  );
 });
 
 describe('storagePrefixesFor', () => {

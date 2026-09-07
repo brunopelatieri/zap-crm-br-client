@@ -208,8 +208,17 @@ function renderAccountDeleted(p: SystemEventPayload): Rendered {
   const leftovers = Array.isArray(deletion.leftovers)
     ? (deletion.leftovers as unknown[]).map(String)
     : [];
+  // A rota administrativa (`/api/platform/accounts/[id]/delete`) grava
+  // `actor: consoleActorTag(email)` = `console:<email>`; a self-service
+  // grava `self-service:<email>`. Achado de code review: esta função
+  // ignorava `p.actor` e sempre dizia "pelo titular", mesmo quando quem
+  // apagou foi o proprietário da plataforma pelo console.
+  const byConsole =
+    typeof p.actor === 'string' && p.actor.startsWith('console:');
   return {
-    actionSubject: 'foi excluída pelo titular',
+    actionSubject: byConsole
+      ? 'foi excluída pelo console do proprietário'
+      : 'foi excluída pelo titular',
     lines: [
       // Exceção documentada à regra de privacidade do arquivo (mesmo
       // espírito de member.blocked/unblocked): SPEC 073 §5.4 pede
