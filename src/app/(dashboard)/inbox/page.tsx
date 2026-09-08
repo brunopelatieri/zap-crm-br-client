@@ -230,6 +230,7 @@ export default function InboxPage() {
       if (tab === 'chat') chatFeed.setConversations(updater);
       else openFeed.setConversations(updater);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatFeed.setConversations, openFeed.setConversations]
   );
 
@@ -782,7 +783,6 @@ export default function InboxPage() {
     // Depende SÓ de `resyncToken` de propósito — `activeConversation` é
     // lido via ref para este efeito não refazer o fetch a cada seleção
     // de conversa (só nos gatilhos de resync: reconexão/visibilidade).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resyncToken, fetchConversationById, router, t]);
 
   const handleTabChange = useCallback(
@@ -1130,6 +1130,7 @@ export default function InboxPage() {
         prev?.id === contactId ? { ...prev, tags: tagsList } : prev
       );
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatFeed.setConversations, openFeed.setConversations]
   );
 
@@ -1154,6 +1155,7 @@ export default function InboxPage() {
         prev?.id === contactId ? { ...prev, ...patch } : prev
       );
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatFeed.setConversations, openFeed.setConversations]
   );
 

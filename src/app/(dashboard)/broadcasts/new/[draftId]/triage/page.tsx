@@ -172,7 +172,7 @@ export default function AudienceTriagePage() {
   useEffect(() => {
     // setSelectedCount só roda depois do `await` dentro de
     // refreshSelectedCount — não é o cascade síncrono que a regra evita.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     refreshSelectedCount();
   }, [refreshSelectedCount]);
 

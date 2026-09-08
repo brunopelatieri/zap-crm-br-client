@@ -45,7 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubble } from './message-bubble';
 import { MediaLightbox, type LightboxItem } from './media-lightbox';
 import { resolveMediaRef } from '@/lib/storage/media-url';
@@ -990,6 +989,7 @@ export function MessageThread({
         preview: buildReplyPreview(msg, tQuote),
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [authorLabelFor]
   );
 

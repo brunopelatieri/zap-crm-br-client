@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { Reply, ExternalLink, Phone, Copy, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { TemplatePreviewPayload, TemplateButton } from '@/types';
@@ -46,9 +47,16 @@ function HeaderMedia({
   switch (media.type) {
     case 'image':
       return (
-        <img
+        // `src` vem de useMediaSrc: pode ser URL assinada, blob: de proxy
+        // ou URL externa colada pelo usuário no header do template — o
+        // otimizador do next/image só aceita hosts em
+        // `images.remotePatterns`.
+        <Image
           src={src}
           alt="Template header"
+          width={260}
+          height={192}
+          unoptimized
           className="max-h-48 w-full object-cover"
         />
       );

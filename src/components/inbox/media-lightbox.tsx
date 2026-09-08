@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Image from 'next/image';
 import { useCallback, useEffect } from 'react';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { ChevronLeft, ChevronRight, ImageOff, X } from 'lucide-react';
@@ -63,9 +64,15 @@ function LightboxImage({
   }
 
   return (
-    <img
+    // `src` vem de useMediaSrc: pode ser URL assinada, blob: de proxy ou
+    // URL externa arbitrária — o otimizador do next/image só aceita
+    // hosts em `images.remotePatterns`.
+    <Image
       src={src}
       alt={alt}
+      width={1920}
+      height={1080}
+      unoptimized
       className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain"
     />
   );

@@ -26,7 +26,7 @@ const SPECIAL_CHAR_PATTERN = /[!@#$%^&*()_+\-=[\]{}:;,.?/~]/;
 // (U+0000) in a text column outright ("invalid byte sequence"); the
 // rest are just never something a human types into a password field on
 // purpose. See SPEC 054 D-5.
-// eslint-disable-next-line no-control-regex
+
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/;
 
 export interface PasswordRuleResult {

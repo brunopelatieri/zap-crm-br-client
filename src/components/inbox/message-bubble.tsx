@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { Message, MessageReaction } from '@/types';
@@ -180,9 +181,15 @@ function MediaImage({
   }
 
   return (
-    <img
+    // `src` vem de useMediaSrc: pode ser URL assinada, blob: de proxy ou
+    // URL externa arbitrária — o otimizador do next/image só aceita
+    // hosts em `images.remotePatterns`.
+    <Image
       src={src ?? ''}
       alt={alt}
+      width={240}
+      height={256}
+      unoptimized
       className="max-h-64 max-w-60 rounded-lg object-cover"
       onError={() => setRenderError(true)}
     />

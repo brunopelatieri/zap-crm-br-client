@@ -45,7 +45,7 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
         e.stopPropagation();
         onEdit(deal);
       }}
-      className={`group border-border/50 bg-muted/70 relative w-full cursor-pointer rounded-xl border py-3 pr-3 pl-4 text-left shadow-sm transition-all ${
+      className={`group border-border/50 bg-muted/70 relative w-full cursor-pointer overflow-hidden rounded-xl border py-3 pr-3 pl-4 text-left shadow-sm transition-all ${
         isOverlay
           ? 'shadow-xl'
           : 'hover:border-border hover:bg-muted hover:-translate-y-0.5 hover:shadow-lg'

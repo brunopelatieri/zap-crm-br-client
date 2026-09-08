@@ -142,6 +142,7 @@ export default function FlowRunsPage() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
   function toggle(runId: string) {

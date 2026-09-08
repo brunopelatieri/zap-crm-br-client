@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { matchesContactFilters } from '@/lib/inbox/conversations';
@@ -677,10 +678,16 @@ function ConversationItem({
       {/* Avatar */}
       <div className="bg-muted text-foreground flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium">
         {avatarSrc ? (
-          <img
+          // `avatarSrc` pode ser URL assinada, blob: de proxy ou URL
+          // externa arbitrária (useMediaSrc) — o otimizador do next/image
+          // só aceita hosts em `images.remotePatterns`.
+          <Image
             src={avatarSrc}
             alt={displayName}
-            className="h-10 w-10 rounded-full object-cover"
+            width={40}
+            height={40}
+            unoptimized
+            className="rounded-full object-cover"
           />
         ) : (
           initials

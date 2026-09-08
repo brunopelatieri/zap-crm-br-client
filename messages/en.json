@@ -1350,6 +1350,15 @@
       "newBroadcast": "New Broadcast",
       "noBroadcastsYet": "No broadcasts yet",
       "createFirst": "Create your first broadcast to reach your contacts at scale.",
+      "filter": {
+        "channel": "Channel",
+        "allChannels": "All channels",
+        "template": "Template",
+        "allTemplates": "All templates",
+        "date": "Date",
+        "allDates": "All dates",
+        "noResults": "No broadcasts match these filters."
+      },
       "table": {
         "name": "Name",
         "template": "Template",

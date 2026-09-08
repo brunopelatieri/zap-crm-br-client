@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2, Pencil } from 'lucide-react';
+import { Radio, Plus, Loader2, Pencil, FileText } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
@@ -31,6 +31,24 @@ const POLL_INTERVAL_MS = 5_000;
 function percent(numerator: number, denominator: number): number {
   if (!denominator) return 0;
   return Math.round((numerator / denominator) * 100);
+}
+
+/**
+ * Chave de calendário LOCAL (não UTC) para agrupar/filtrar por dia.
+ * `toISOString().split('T')[0]` bucketaria pelo dia em UTC — para o
+ * fuso do Brasil (negativo), um disparo feito à tarde podia cair num
+ * dia diferente do que a própria coluna "Data" da tabela mostra
+ * (`toLocaleDateString()` na mesma linha, mais abaixo).
+ */
+function localDateKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Reconstrói `localDateKey()` como data LOCAL (não meia-noite UTC) para exibir. */
+function formatDateKey(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString();
 }
 
 function RateCell({
@@ -81,6 +99,9 @@ export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filterChannel, setFilterChannel] = useState<string>('');
+  const [filterTemplate, setFilterTemplate] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<string>('');
 
   // Used to kick off polling only while something is actively sending.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -110,6 +131,7 @@ export default function BroadcastsPage() {
   useEffect(() => {
     setLoading(true);
     void fetchBroadcasts(view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
   // Um funil de webhook fica em 'streaming' para sempre (SPEC 055
@@ -127,6 +149,33 @@ export default function BroadcastsPage() {
     () =>
       broadcasts.some(
         (b) => b.status === 'sending' || b.status === 'awaiting_check'
+      ),
+    [broadcasts]
+  );
+
+  const filteredBroadcasts = useMemo(() => {
+    return broadcasts.filter((b) => {
+      if (filterChannel && b.channel_id !== filterChannel) return false;
+      if (filterTemplate && b.template_name !== filterTemplate) return false;
+      if (filterDate) {
+        if (localDateKey(b.created_at) !== filterDate) return false;
+      }
+      return true;
+    });
+  }, [broadcasts, filterChannel, filterTemplate, filterDate]);
+
+  const uniqueTemplates = useMemo(
+    () =>
+      [
+        ...new Set(broadcasts.map((b) => b.template_name).filter(Boolean)),
+      ].sort(),
+    [broadcasts]
+  );
+
+  const uniqueDates = useMemo(
+    () =>
+      [...new Set(broadcasts.map((b) => localDateKey(b.created_at)))].sort(
+        (a, b) => b.localeCompare(a)
       ),
     [broadcasts]
   );
@@ -168,6 +217,7 @@ export default function BroadcastsPage() {
       stopPolling();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anySending, view]);
 
   if (loading) {
@@ -277,155 +327,244 @@ export default function BroadcastsPage() {
           )}
         </div>
       ) : (
-        <div className="border-border bg-card overflow-x-auto rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="text-muted-foreground">
-                  {t('table.name')}
-                </TableHead>
-                <TableHead className="text-muted-foreground hidden md:table-cell">
-                  {view === 'webhooks'
-                    ? tSource('webhookId')
-                    : t('table.template')}
-                </TableHead>
-                {view === 'webhooks' && (
-                  <TableHead className="text-muted-foreground hidden text-right sm:table-cell">
-                    {tSource('ingested')}
-                  </TableHead>
-                )}
-                <TableHead className="text-muted-foreground hidden text-right sm:table-cell">
-                  {view === 'webhooks'
-                    ? tSource('recipientsSent')
-                    : t('table.recipients')}
-                </TableHead>
-                <TableHead className="text-muted-foreground hidden lg:table-cell">
-                  {t('table.delivery')}
-                </TableHead>
-                <TableHead className="text-muted-foreground hidden lg:table-cell">
-                  {t('table.read')}
-                </TableHead>
-                <TableHead className="text-muted-foreground">
-                  {t('table.status')}
-                </TableHead>
-                <TableHead className="text-muted-foreground hidden sm:table-cell">
-                  {t('table.date')}
-                </TableHead>
-                {/* SPEC 070 §8.1 — coluna própria, só ocupada em linhas
+        <>
+          <div className="broadcasts-page-filters grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-muted-foreground text-xs font-medium">
+                {t('filter.channel')}
+              </label>
+              <select
+                value={filterChannel}
+                onChange={(e) => setFilterChannel(e.target.value)}
+                className="border-border bg-card text-foreground rounded-md border px-3 py-2 text-sm"
+              >
+                <option value="">{t('filter.allChannels')}</option>
+                {Array.from(channels.byId.values()).map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    {channel.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-muted-foreground text-xs font-medium">
+                {t('filter.template')}
+              </label>
+              <select
+                value={filterTemplate}
+                onChange={(e) => setFilterTemplate(e.target.value)}
+                className="border-border bg-card text-foreground rounded-md border px-3 py-2 text-sm"
+              >
+                <option value="">{t('filter.allTemplates')}</option>
+                {uniqueTemplates.map((template) => (
+                  <option key={template} value={template}>
+                    {template}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-muted-foreground text-xs font-medium">
+                {t('filter.date')}
+              </label>
+              <select
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                className="border-border bg-card text-foreground rounded-md border px-3 py-2 text-sm"
+              >
+                <option value="">{t('filter.allDates')}</option>
+                {uniqueDates.map((date) => (
+                  <option key={date} value={date}>
+                    {formatDateKey(date)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {filteredBroadcasts.length === 0 ? (
+            <div className="border-border bg-card flex h-32 items-center justify-center rounded-xl border">
+              <p className="text-muted-foreground text-sm">
+                {t('filter.noResults')}
+              </p>
+            </div>
+          ) : (
+            <div className="border-border bg-card overflow-x-auto rounded-xl border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border hover:bg-transparent">
+                    <TableHead className="text-muted-foreground">
+                      {t('table.name')}
+                    </TableHead>
+                    {view === 'webhooks' && (
+                      <TableHead className="text-muted-foreground hidden text-right sm:table-cell">
+                        {tSource('ingested')}
+                      </TableHead>
+                    )}
+                    <TableHead className="text-muted-foreground hidden text-right sm:table-cell">
+                      {view === 'webhooks'
+                        ? tSource('recipientsSent')
+                        : t('table.recipients')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground hidden lg:table-cell">
+                      {t('table.delivery')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground hidden lg:table-cell">
+                      {t('table.read')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">
+                      {t('table.status')}
+                    </TableHead>
+                    <TableHead className="text-muted-foreground hidden sm:table-cell">
+                      {t('table.date')}
+                    </TableHead>
+                    {/* SPEC 070 §8.1 — coluna própria, só ocupada em linhas
                     `draft`; nas demais fica vazia, sem cabeçalho, para
                     não sugerir uma ação que não existe ali. */}
-                <TableHead className="text-muted-foreground w-px" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {broadcasts.map((broadcast) => {
-                const status = getBroadcastStatus(broadcast.status);
-                return (
-                  <TableRow
-                    key={broadcast.id}
-                    className="border-border hover:bg-muted/50 cursor-pointer"
-                    onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
-                  >
-                    <TableCell className="text-foreground font-medium">
-                      <span className="flex items-center gap-2">
-                        {broadcast.name}
-                        {/* Teste A/B (§6.6): os dois braços têm o mesmo
-                            nome de propósito — é uma campanha só, com
-                            dois textos. O rótulo é o que os distingue. */}
-                        {broadcast.variant_label && (
-                          <span className="border-primary/30 bg-primary/10 text-primary inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
-                            {t('variant', { variant: broadcast.variant_label })}
-                          </span>
-                        )}
-                        {channels.count > 1 && broadcast.channel_id && (
-                          <ChannelBadge
-                            channel={channels.byId.get(broadcast.channel_id)}
-                          />
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground hidden font-mono text-xs md:table-cell">
-                      {view === 'webhooks'
-                        ? broadcast.webhook_id
-                        : broadcast.template_name}
-                    </TableCell>
-                    {view === 'webhooks' && (
-                      <TableCell className="text-muted-foreground hidden text-right tabular-nums sm:table-cell">
-                        {broadcast.ingested_count ?? 0}
-                      </TableCell>
-                    )}
-                    <TableCell className="text-muted-foreground hidden text-right tabular-nums sm:table-cell">
-                      {broadcast.total_recipients}
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <RateCell
-                        value={broadcast.delivered_count}
-                        total={broadcast.total_recipients}
-                        color="bg-primary"
-                      />
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <RateCell
-                        value={broadcast.read_count}
-                        total={broadcast.total_recipients}
-                        color="bg-blue-500"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${status.classes}`}
+                    <TableHead className="text-muted-foreground w-px" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredBroadcasts.map((broadcast) => {
+                    const status = getBroadcastStatus(broadcast.status);
+                    return (
+                      <TableRow
+                        key={broadcast.id}
+                        className="border-border hover:bg-muted/50 cursor-pointer"
+                        onClick={() =>
+                          router.push(`/broadcasts/${broadcast.id}`)
+                        }
                       >
-                        {status.pulse && (
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-400 opacity-75" />
-                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-yellow-400" />
-                          </span>
+                        <TableCell className="text-foreground font-medium">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span>{broadcast.name}</span>
+                              {broadcast.variant_label && (
+                                <span className="border-primary/30 bg-primary/10 text-primary inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium">
+                                  {t('variant', {
+                                    variant: broadcast.variant_label,
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                            {channels.count > 1 && broadcast.channel_id && (
+                              <div className="flex items-center gap-1.5">
+                                <ChannelBadge
+                                  channel={channels.byId.get(
+                                    broadcast.channel_id
+                                  )}
+                                />
+                              </div>
+                            )}
+                            {(view !== 'webhooks' ||
+                              broadcast.template_name) && (
+                              <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                                <FileText className="h-3.5 w-3.5" />
+                                <span className="font-mono">
+                                  {view === 'webhooks'
+                                    ? broadcast.webhook_id
+                                    : broadcast.template_name}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        {view === 'webhooks' && (
+                          <TableCell className="text-muted-foreground hidden text-right tabular-nums sm:table-cell">
+                            {broadcast.ingested_count ?? 0}
+                          </TableCell>
                         )}
-                        {tStatus(status.label)}
-                      </span>
-                      {/* SPEC 069 R6 — o progresso é o que distingue uma
+                        <TableCell className="text-muted-foreground hidden text-right tabular-nums sm:table-cell">
+                          {broadcast.total_recipients}
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <RateCell
+                            value={broadcast.delivered_count}
+                            total={broadcast.total_recipients}
+                            color="bg-primary"
+                          />
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <RateCell
+                            value={broadcast.read_count}
+                            total={broadcast.total_recipients}
+                            color="bg-blue-500"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${status.classes}`}
+                          >
+                            {status.pulse && (
+                              <span className="relative flex h-1.5 w-1.5">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-400 opacity-75" />
+                                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-yellow-400" />
+                              </span>
+                            )}
+                            {tStatus(status.label)}
+                          </span>
+                          {/* SPEC 069 R6 — o progresso é o que distingue uma
                           campanha parada de propósito (esperando cota
                           de checagem) de uma parecida presa por erro. */}
-                      {broadcast.status === 'awaiting_check' && (
-                        <p className="text-muted-foreground mt-1 text-[10px]">
-                          {tAwaitingCheck('progress', {
-                            checked: broadcast.checked_count ?? 0,
-                            total: broadcast.total_recipients,
-                          })}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground hidden sm:table-cell">
-                      {new Date(broadcast.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {broadcast.status === 'draft' && (
-                        <GatedButton
-                          canAct={canCreate}
-                          gateReason="edit drafts"
-                          variant="outline"
-                          size="sm"
-                          // A linha inteira já navega para o detalhe
-                          // (onClick acima); sem stopPropagation os
-                          // dois destinos disparariam juntos.
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            router.push(`/broadcasts/${broadcast.id}/edit`);
-                          }}
-                          className="border-border text-muted-foreground hover:bg-muted"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          {t('actions.edit')}
-                        </GatedButton>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                          {broadcast.status === 'awaiting_check' && (
+                            <p className="text-muted-foreground mt-1 text-[10px]">
+                              {tAwaitingCheck('progress', {
+                                checked: broadcast.checked_count ?? 0,
+                                total: broadcast.total_recipients,
+                              })}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground hidden sm:table-cell">
+                          {new Date(broadcast.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {broadcast.status === 'draft' && (
+                            <GatedButton
+                              canAct={canCreate}
+                              gateReason="edit drafts"
+                              variant="outline"
+                              size="sm"
+                              // A linha inteira já navega para o detalhe
+                              // (onClick acima); sem stopPropagation os
+                              // dois destinos disparariam juntos.
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/broadcasts/${broadcast.id}/edit`);
+                              }}
+                              className="border-border text-muted-foreground hover:bg-muted"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              {t('actions.edit')}
+                            </GatedButton>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </>
       )}
+
+      {/* Seletor prefixado por `.broadcasts-page-filters` — um bare
+          `select, select option` aqui vazaria para QUALQUER <select> da
+          página, não só os 3 filtros acima. Não dá para usar
+          `<style jsx>` (styled-jsx só aceita um por componente; o outro
+          já está no bloco `anySending` acima). */}
+      <style>{`
+        .broadcasts-page-filters select,
+        .broadcasts-page-filters select option {
+          font-size: 0.875rem !important;
+          padding: 6px 8px;
+          line-height: 1.5;
+          font-family: inherit;
+        }
+      `}</style>
     </div>
   );
 }

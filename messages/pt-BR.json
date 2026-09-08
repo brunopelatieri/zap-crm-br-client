@@ -1350,10 +1350,19 @@
       "newBroadcast": "Novo disparo",
       "noBroadcastsYet": "Ainda sem disparos",
       "createFirst": "Crie seu primeiro disparo para alcançar seus contatos em escala.",
+      "filter": {
+        "channel": "Canal",
+        "allChannels": "Todos os canais",
+        "template": "Template",
+        "allTemplates": "Todos os templates",
+        "date": "Data",
+        "allDates": "Todas as datas",
+        "noResults": "Nenhum disparo corresponde a esses filtros."
+      },
       "table": {
         "name": "Nome",
         "template": "Template",
-        "recipients": "Destinatários",
+        "recipients": "Contatos",
         "delivery": "Entrega",
         "read": "Lida",
         "status": "Status",

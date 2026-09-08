@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -12,7 +13,6 @@ import {
   Mail,
   Copy,
   Check,
-  User,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
@@ -322,10 +322,16 @@ export function ContactSidebar({
           <div className="flex flex-col items-center text-center">
             <div className="bg-muted text-foreground flex h-16 w-16 items-center justify-center rounded-full text-lg font-semibold">
               {avatarSrc ? (
-                <img
+                // `avatarSrc` pode ser URL assinada, blob: de proxy ou URL
+                // externa arbitrária (useMediaSrc) — o otimizador do
+                // next/image só aceita hosts em `images.remotePatterns`.
+                <Image
                   src={avatarSrc}
                   alt={displayName}
-                  className="h-16 w-16 rounded-full object-cover"
+                  width={64}
+                  height={64}
+                  unoptimized
+                  className="rounded-full object-cover"
                 />
               ) : (
                 initials

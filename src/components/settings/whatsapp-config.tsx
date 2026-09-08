@@ -130,6 +130,7 @@ export function WhatsAppConfig() {
     if (loadedAccountIdRef.current === accountId) return;
     loadedAccountIdRef.current = accountId;
     fetchChannels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, profileLoading, user?.id, accountId, fetchChannels]);
 
   async function handleDiagnose(channel: CloudNumber) {

@@ -70,6 +70,15 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+      },
+    ],
+  },
+
   /**
    * Fontes da exportação de conversa (SPEC 067 §6).
    *

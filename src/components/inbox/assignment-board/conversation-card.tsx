@@ -8,6 +8,7 @@
 // `DragOverlay` precisa renderizar o card SEM os listeners de arrasto.
 // ============================================================
 
+import Image from 'next/image';
 import { format } from 'date-fns';
 import { useTranslations } from 'next-intl';
 import {
@@ -112,10 +113,16 @@ export function ConversationCard({
       <div className="flex items-center gap-2">
         <span className="bg-muted text-foreground flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold">
           {avatarSrc ? (
-            <img
+            // `avatarSrc` pode ser URL assinada, blob: de proxy ou URL
+            // externa arbitrária (useMediaSrc) — o otimizador do
+            // next/image só aceita hosts em `images.remotePatterns`.
+            <Image
               src={avatarSrc}
               alt=""
-              className="h-7 w-7 rounded-full object-cover"
+              width={28}
+              height={28}
+              unoptimized
+              className="rounded-full object-cover"
             />
           ) : (
             initial

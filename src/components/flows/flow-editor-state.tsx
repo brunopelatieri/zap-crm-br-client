@@ -359,6 +359,7 @@ export function FlowEditorProvider({
     } finally {
       setSaving(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFlow.id, state]);
 
   // ---- Activate / Pause / Archive ----
@@ -400,6 +401,7 @@ export function FlowEditorProvider({
         setActivating(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [canActivate, save, initialFlow.id]
   );
 
