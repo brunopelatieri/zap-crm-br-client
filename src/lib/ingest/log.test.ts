@@ -1,7 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const recordActivityMock = vi.fn(async () => undefined);
+vi.mock('@/lib/activity/record', () => ({
+  recordActivity: (...args: unknown[]) => recordActivityMock(...(args as [])),
+}));
+
 import { logIngestEvent } from './log';
+
+beforeEach(() => {
+  recordActivityMock.mockClear();
+});
 
 const BASE_PARAMS = {
   accountId: 'acc-1',
@@ -120,5 +129,35 @@ describe('logIngestEvent', () => {
       broadcast_id: null,
       payload: null,
     });
+  });
+});
+
+// SPEC 075 F4 — ponte com account_activity_log.
+describe('logIngestEvent — feed de atividade (SPEC 075)', () => {
+  function makeDb() {
+    return {
+      from: () => ({ insert: () => Promise.resolve({ error: null }) }),
+    } as unknown as SupabaseClient;
+  }
+
+  it('level "error" registra webhook.ingest_failed', async () => {
+    await logIngestEvent(makeDb(), BASE_PARAMS);
+
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        accountId: 'acc-1',
+        resourceType: 'webhook',
+        action: 'webhook.ingest_failed',
+        actor: { kind: 'api', keyId: 'key-1' },
+      })
+    );
+  });
+
+  it('level "warning" NÃO registra nada (fora do catálogo v1)', async () => {
+    await logIngestEvent(makeDb(), { ...BASE_PARAMS, level: 'warning' });
+
+    expect(recordActivityMock).not.toHaveBeenCalled();
   });
 });

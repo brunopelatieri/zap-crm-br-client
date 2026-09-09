@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { markRevokedByContact } from './revoke-by-contact';
+
+const recordActivityMock = vi.fn(async () => undefined);
+vi.mock('@/lib/activity/record', () => ({
+  recordActivity: (...args: unknown[]) => recordActivityMock(...(args as [])),
+}));
 
 type Resp = { data?: unknown; error?: { message: string } | null };
 
@@ -62,7 +67,11 @@ describe('markRevokedByContact', () => {
             media_path: null,
             created_at: '2026-09-01T00:00:00.000Z',
             deleted_at: null,
-            conversations: { account_id: 'acct-1', channel_id: 'chan-1' },
+            conversations: {
+              account_id: 'acct-1',
+              channel_id: 'chan-1',
+              contact_id: 'contact-9',
+            },
           },
         ],
         error: null,
@@ -91,6 +100,23 @@ describe('markRevokedByContact', () => {
       channel_type: 'whatsapp_qr',
       content_preview: 'oi, apago isso',
     });
+
+    // SPEC 075 F3 — o único caso do catálogo com actor.kind === 'contact'.
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        accountId: 'acct-1',
+        resourceType: 'message',
+        action: 'message.deleted_by_contact',
+        resourceId: 'msg-1',
+        actor: { kind: 'contact', contactId: 'contact-9' },
+        channelId: 'chan-1',
+        channelType: 'whatsapp_qr',
+        conversationId: 'conv-1',
+        contactId: 'contact-9',
+      })
+    );
   });
 
   it('pula linha ja marcada (guarda §9.3.1 — a primeira gravacao vence)', async () => {

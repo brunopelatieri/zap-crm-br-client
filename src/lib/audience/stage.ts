@@ -48,6 +48,7 @@ import {
 import { contactsByIds, fetchAllContacts } from './resolve';
 import type { InvalidReason } from './types';
 import { MAX_AUDIENCE_ROWS } from '@/lib/spreadsheet/types';
+import { recordActivity } from '@/lib/activity/record';
 
 /** Linhas por INSERT em `broadcast_audience_staging`. */
 const INSERT_CHUNK = 200;
@@ -715,6 +716,19 @@ export async function stageAudience(
       },
       errorCode: 'internal',
       errorMessage: 'Failed to stage audience',
+    });
+
+    // SPEC 075 F4 — só a CRIAÇÃO do rascunho entra no catálogo (§4); o
+    // reaproveitamento de um draftId existente (branch `if` acima) não é
+    // uma criação nova.
+    await recordActivity(db, {
+      accountId,
+      resourceType: 'broadcast',
+      action: 'broadcast.created',
+      resourceId: draftId,
+      resourceLabel: templateName,
+      actor: { kind: 'user', userId },
+      source: { table: 'broadcasts', id: draftId },
     });
   }
 

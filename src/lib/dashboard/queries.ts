@@ -8,7 +8,6 @@ import {
   startOfLocalDay,
 } from './date-utils';
 import type {
-  ActivityItem,
   ConversationsSeriesPoint,
   MetricsBundle,
   PipelineDonutData,
@@ -16,6 +15,8 @@ import type {
   ResponseTimeBucket,
   ResponseTimeSummary,
 } from './types';
+import { queryActivity } from '@/lib/activity/query';
+import { toFeedEntry, type ActivityFeedEntry } from '@/lib/activity/feed';
 
 // ------------------------------------------------------------
 // Agregação no cliente. A RLS escopa cada query — MAS, desde a
@@ -303,157 +304,61 @@ export async function loadResponseTime(
 
 // --- 5. Activity feed --------------------------------------------------
 
+/**
+ * O feed "Atividade recente" (SPEC 075 F6).
+ *
+ * ## Era cinco consultas ao vivo; virou uma leitura de log
+ *
+ * Até a SPEC 075 esta função disparava cinco consultas em paralelo
+ * (mensagens, contatos, negócios, disparos, execuções de automação) e
+ * intercalava o resultado por timestamp. O problema não era o custo —
+ * era o significado: das cinco fontes, só `automation_logs` era um log.
+ * As outras quatro eram o ESTADO PRESENTE das tabelas disfarçado de
+ * linha do tempo (§1.1 da SPEC).
+ *
+ * O caso que expõe isso: `deals` entrava por `updated_at` e o texto
+ * mostrava o estágio ATUAL. Mover o mesmo negócio de novo não criava
+ * histórico — reescrevia a linha. E contato editado, conversa
+ * reatribuída e mensagem apagada não apareciam de jeito nenhum, porque
+ * nenhum `SELECT` recupera um valor que nunca foi gravado.
+ *
+ * Agora é UMA consulta em `account_activity_log`, onde cada linha foi
+ * gravada no instante em que o evento aconteceu.
+ *
+ * ## O que a RLS faz aqui, e por que isso basta
+ *
+ * Nenhum filtro de ator neste código: a policy `account_activity_log_select`
+ * (migração 084) já entrega a conta inteira para admin/owner e SÓ as
+ * linhas do próprio usuário para um agente (D-5). O widget renderiza o
+ * que voltar — o corte de privacidade do §9 é do banco, não daqui.
+ */
 export async function loadActivity(
   db: DB,
   accountId: string,
   limit = 20
-): Promise<ActivityItem[]> {
-  // Pull ~10 from each source (plenty of headroom after merge-sort),
-  // then interleave by timestamp. The individual per-table limits
-  // keep the payload small; the final limit is enforced after sort.
-  const [msgs, contacts, deals, broadcasts, autoLogs] = await Promise.all([
-    // Via RPC, e não só por causa da RLS: o embed do PostgREST
-    // (`conversations(contact_id, contacts(...))`) é um LEFT JOIN, então
-    // uma conversa invisível não removeria a mensagem do feed — ela
-    // apareceria como "Unknown", com link para uma thread que o usuário
-    // não consegue abrir. A RPC faz o join do lado do servidor e só
-    // devolve o que é da conta.
-    db.rpc('dashboard_recent_inbound', {
-      p_account_id: accountId,
-      p_limit: 10,
-    }),
-    db
-      .from('contacts')
-      .select('id, name, phone, created_at')
-      .order('created_at', { ascending: false })
-      .limit(10),
-    db
-      .from('deals')
-      .select('id, title, updated_at, stage:pipeline_stages(name)')
-      .order('updated_at', { ascending: false })
-      .limit(10),
-    db
-      .from('broadcasts')
-      .select('id, name, status, total_recipients, created_at')
-      // SPEC 055: exclui funis de webhook (source='webhook') — `name`
-      // ali é texto livre informado por quem chama a API pública, e
-      // `status` fica sempre 'streaming'. Sem este filtro, a primeira
-      // ingestão de um `webhook_id` novo aparece no feed "atividade
-      // recente" com um rótulo externo, indistinguível de uma campanha
-      // de verdade.
-      .neq('source', 'webhook')
-      .order('created_at', { ascending: false })
-      .limit(5),
-    db
-      .from('automation_logs')
-      .select(
-        'id, trigger_event, status, created_at, automation:automations(name), contact:contacts(name, phone)'
-      )
-      .order('created_at', { ascending: false })
-      .limit(10),
-  ]);
+): Promise<ActivityFeedEntry[]> {
+  // Janela explícita de 90 dias em vez dos 30 padrão de `queryActivity`:
+  // o widget é a primeira coisa que alguém vê depois de uma semana sem
+  // abrir o CRM, e um feed vazio ali se lê como "nada aconteceu", não
+  // como "nada aconteceu NO ÚLTIMO MÊS".
+  const from = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
-  const items: ActivityItem[] = [];
+  const result = await queryActivity(
+    db as unknown as SupabaseClient,
+    accountId,
+    {
+      from,
+      limit,
+    }
+  );
 
-  // A RPC devolve o contato já achatado, então o desembrulho em dois
-  // níveis de array que o embed do PostgREST exigia deixou de existir.
-  for (const m of (msgs.data ?? []) as Array<{
-    id: string;
-    content_text: string | null;
-    created_at: string;
-    conversation_id: string;
-    contact_name: string | null;
-    contact_phone: string | null;
-  }>) {
-    const who = m.contact_name || m.contact_phone || 'Unknown';
-    items.push({
-      id: `msg-${m.id}`,
-      kind: 'message',
-      text: `Nova msg de ${who}`,
-      at: m.created_at,
-      href: `/inbox?c=${m.conversation_id}`,
-    });
+  // `ActivityQueryError` só acontece por filtro inválido, e os dois
+  // filtros aqui são gerados por este próprio código — se acontecer, é
+  // bug nosso, não entrada do usuário.
+  if ('error' in result) {
+    console.error('[dashboard] activity query rejected filters:', result);
+    return [];
   }
 
-  for (const c of (contacts.data ?? []) as Array<{
-    id: string;
-    name: string | null;
-    phone: string;
-    created_at: string;
-  }>) {
-    items.push({
-      id: `contact-${c.id}`,
-      kind: 'contact',
-      text: `Novo contato: ${c.name || c.phone}`,
-      at: c.created_at,
-      href: '/contacts',
-    });
-  }
-
-  for (const d of (deals.data ?? []) as unknown as Array<{
-    id: string;
-    title: string;
-    updated_at: string;
-    stage: { name: string }[] | { name: string } | null;
-  }>) {
-    const stage = Array.isArray(d.stage) ? d.stage[0] : d.stage;
-    items.push({
-      id: `deal-${d.id}`,
-      kind: 'deal',
-      text: stage?.name
-        ? `Negócio "${d.title}" - ${stage.name}`
-        : `Negócio "${d.title}" atualizado`,
-      at: d.updated_at,
-      href: '/pipelines',
-    });
-  }
-
-  for (const b of (broadcasts.data ?? []) as Array<{
-    id: string;
-    name: string;
-    status: string;
-    total_recipients: number;
-    created_at: string;
-  }>) {
-    const label =
-      b.status === 'sent'
-        ? `enviado para ${b.total_recipients} contatos`
-        : `${b.status} (${b.total_recipients} destinatários)`;
-    items.push({
-      id: `broadcast-${b.id}`,
-      kind: 'broadcast',
-      text: `Broadcast "${b.name}" ${label}`,
-      at: b.created_at,
-      href: '/broadcasts',
-    });
-  }
-
-  for (const l of (autoLogs.data ?? []) as unknown as Array<{
-    id: string;
-    trigger_event: string;
-    status: string;
-    created_at: string;
-    automation: { name: string }[] | { name: string } | null;
-    contact:
-      | { name: string | null; phone: string }[]
-      | { name: string | null; phone: string }
-      | null;
-  }>) {
-    const automation = Array.isArray(l.automation)
-      ? l.automation[0]
-      : l.automation;
-    const contact = Array.isArray(l.contact) ? l.contact[0] : l.contact;
-    const who = contact?.name || contact?.phone || 'a contact';
-    const autoName = automation?.name || 'Automation';
-    items.push({
-      id: `auto-${l.id}`,
-      kind: 'automation',
-      text: `Automação "${autoName}" ${l.status === 'failed' ? 'falhou para' : 'acionada para'} ${who}`,
-      at: l.created_at,
-    });
-  }
-
-  return items
-    .sort((a, b) => (a.at > b.at ? -1 : a.at < b.at ? 1 : 0))
-    .slice(0, limit);
+  return result.items.map(toFeedEntry);
 }

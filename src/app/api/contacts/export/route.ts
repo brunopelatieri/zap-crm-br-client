@@ -5,6 +5,7 @@ import type { SheetData } from 'write-excel-file/node';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { recordActivity } from '@/lib/activity/record';
 import {
   isContactExportFieldId,
   sortContactExportFields,
@@ -262,6 +263,27 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error('[contacts/export] audit insert failed:', err);
   }
+
+  // SPEC 075 F3 — exportação em lote, não de UM contato: `resourceId`
+  // fica nulo de propósito (não há um único contato a apontar). A
+  // quantidade vai em `metadata.count`, não em `resourceLabel` — um
+  // rótulo fixo em texto quebraria a localização da mensagem (mesmo
+  // espírito de `contact.imported`, §3.4 da 084).
+  void recordActivity(ctx.supabase, {
+    accountId: ctx.accountId,
+    resourceType: 'contact',
+    action: 'contact.exported',
+    actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+    // Sem `source`: o INSERT acima não devolve o id da linha de
+    // `contact_exports` (não faz `.select()`), e apontar `source_id`
+    // para outra coisa que não seja o PK real seria pior que omitir.
+    metadata: {
+      format: fileFormat,
+      scope: scope.mode,
+      row_count: rows.length,
+      count: rows.length,
+    },
+  });
 
   return new NextResponse(fileBody, {
     status: 200,

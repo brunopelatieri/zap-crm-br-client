@@ -139,6 +139,11 @@ vi.mock('@/lib/whatsapp/send-message', async (importOriginal) => {
   return { ...actual, sendMessageToConversation };
 });
 
+const recordActivityMock = vi.fn(async () => undefined);
+vi.mock('@/lib/activity/record', () => ({
+  recordActivity: (...args: unknown[]) => recordActivityMock(...(args as [])),
+}));
+
 import { POST } from './route';
 
 function post(overrides: Record<string, unknown> = {}) {
@@ -164,6 +169,7 @@ beforeEach(() => {
   targetThread = null;
   supabaseMock = makeSupabaseMock();
   sendMessageToConversation.mockClear();
+  recordActivityMock.mockClear();
 });
 
 describe('POST transfer — caminho feliz (Cloud → QRCode)', () => {
@@ -194,6 +200,22 @@ describe('POST transfer — caminho feliz (Cloud → QRCode)', () => {
     expect(params.senderId).toBe('user-1');
     // A ação é o vetor de envio frio mais provável do sistema.
     expect(params.coldSendOrigin).toBe('human');
+
+    // SPEC 075 F3 — registra na thread de DESTINO, não na de origem.
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        accountId: 'acct-1',
+        resourceType: 'conversation',
+        action: 'conversation.transferred',
+        resourceId: 'conv-qr-new',
+        conversationId: 'conv-qr-new',
+        contactId: 'contact-1',
+        channelId: 'chan-qr',
+        actor: { kind: 'user', userId: 'user-1' },
+      })
+    );
   });
 
   it('reaproveita a thread de destino existente em vez de criar uma segunda', async () => {

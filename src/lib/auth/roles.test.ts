@@ -8,6 +8,7 @@ import {
   canOverrideCooldown,
   canSendMessages,
   canTransferOwnership,
+  canViewAccountActivity,
   canViewOnly,
   hasMinRole,
   isAccountRole,
@@ -127,6 +128,13 @@ describe('capability predicates', () => {
     expect(canTransferOwnership('admin')).toBe(false);
     expect(canTransferOwnership('agent')).toBe(false);
     expect(canTransferOwnership('viewer')).toBe(false);
+  });
+
+  it('canViewAccountActivity: admin+ only (SPEC 075 D-5)', () => {
+    expect(canViewAccountActivity('owner')).toBe(true);
+    expect(canViewAccountActivity('admin')).toBe(true);
+    expect(canViewAccountActivity('agent')).toBe(false);
+    expect(canViewAccountActivity('viewer')).toBe(false);
   });
 
   it('canOverrideCooldown: admin+ only', () => {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
+import { recordActivity } from '@/lib/activity/record';
 
 export async function POST(
   _request: Request,
@@ -87,6 +88,17 @@ export async function POST(
     if (insErr)
       return NextResponse.json({ error: insErr.message }, { status: 500 });
   }
+
+  // SPEC 075 F4 — duplicar É criar; mesmo `action` de POST /api/automations.
+  void recordActivity(admin, {
+    accountId: original.account_id as string,
+    resourceType: 'automation',
+    action: 'automation.created',
+    resourceId: copy.id,
+    resourceLabel: copy.name as string,
+    actor: { kind: 'user', userId },
+    metadata: { duplicated_from: id },
+  });
 
   return NextResponse.json({ automation: copy }, { status: 201 });
 }

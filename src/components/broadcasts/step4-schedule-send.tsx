@@ -32,7 +32,7 @@ import { QuotaMeter, exceedsQuota } from './quota-meter';
 import { useMessagingLimit } from './messaging-limit-provider';
 import { estimateAudience } from '@/lib/audience/estimate';
 import type { AudienceConfig } from '@/lib/audience/estimate';
-import { excludesOptedOut } from '@/lib/contacts/consent';
+import { excludesOptedOut } from '@/lib/contacts/consent-rules';
 import {
   describeSendWindow,
   isWithinSendWindow,

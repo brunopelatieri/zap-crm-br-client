@@ -438,6 +438,7 @@ export async function ingestInbound(
         source: 'inbound_keyword',
         keyword: optOutKeyword,
         whatsappMessageId: event.providerMessageId,
+        accountId,
       });
     } catch (err) {
       console.error('[ingest] opt-out registration failed:', err);

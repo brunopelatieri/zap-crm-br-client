@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
 import { assignTag, toContactTagRows, unassignTag } from '@/lib/tags';
-import { setContactOptIn } from '@/lib/contacts/consent';
 import { markWhatsappValid } from '@/lib/contacts/whatsapp-status';
 import { formatPhoneForDisplay } from '@/lib/phone/br';
 import { toast } from 'sonner';
@@ -297,20 +296,29 @@ export function ContactDetailView({
   /**
    * Muda o consentimento de marketing (SPEC 044 §6.8).
    *
-   * Vai pela RPC `set_contact_opt_in` e não por um UPDATE em `contacts`:
-   * é ela que grava o evento na trilha na mesma transação. Um UPDATE
-   * direto aqui mudaria o estado e deixaria a trilha sem o registro —
-   * exatamente o que precisa ser demonstrável depois.
+   * Vai por `PATCH /api/contacts/[id]/consent`, não por `setContactOptIn`
+   * direto contra o cliente de sessão: aquela função grava a atividade
+   * (SPEC 075 F4) via `recordActivity`, que precisa de `supabaseAdmin()`
+   * — service_role não roda no browser (AGENTS.md). A rota chama a RPC
+   * `set_contact_opt_in` pelo cliente de SESSÃO do servidor, então a RLS
+   * de `contacts` continua sendo quem decide se este contato pode ser
+   * alterado; um UPDATE direto aqui mudaria o estado e deixaria a
+   * trilha sem o registro — exatamente o que precisa ser demonstrável
+   * depois.
    */
   async function updateConsent(status: 'opted_in' | 'opted_out') {
     if (!contactId) return;
     setSavingConsent(true);
     try {
-      await setContactOptIn(supabase, {
-        contactId,
-        status,
-        source: 'manual',
+      const res = await fetch(`/api/contacts/${contactId}/consent`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
+      }
       toast.success(tConsent('saved'));
       fetchContact();
       onUpdated();

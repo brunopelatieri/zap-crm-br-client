@@ -13,8 +13,8 @@ import {
   loadPipelineDonut,
   loadResponseTime,
 } from '@/lib/dashboard/queries';
+import type { ActivityFeedEntry } from '@/lib/activity/feed';
 import type {
-  ActivityItem,
   ConversationsSeriesPoint,
   MetricsBundle,
   PipelineDonutData,
@@ -63,7 +63,7 @@ export default function DashboardPage() {
   );
   const [responseTimeLoading, setResponseTimeLoading] = useState(true);
 
-  const [activity, setActivity] = useState<ActivityItem[] | null>(null);
+  const [activity, setActivity] = useState<ActivityFeedEntry[] | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
 
   const loadAll = useCallback((account: string) => {

@@ -190,7 +190,23 @@ describe('runMessageRetention — padrão global do console (SPEC 062 §5.3)', (
     // O padrão global do console NUNCA liga a varredura sozinho (§3.8
     // ponto 3, D-13). `adminState.client` fica `undefined` de propósito:
     // se a função tocar o banco aqui, o teste explode.
+    //
+    // A retenção de ATIVIDADE (SPEC 075 F8) roda mesmo assim — mas
+    // com o mesmo `undefined` como `db` e `ACTIVITY_LOG_RETENTION_DAYS`
+    // ausente, `sweepActivityLog` sai antes de tocar `db` (regra 1 dela,
+    // espelhando a regra 1 daqui): o teste também prova isso, não só a
+    // retenção de mensagens.
     const outcome = await runMessageRetention(new Date('2026-08-27T12:00:00Z'));
-    expect(outcome).toEqual({ ran: false, skippedReason: 'disabled' });
+    expect(outcome).toEqual({
+      ran: false,
+      skippedReason: 'disabled',
+      activityLog: {
+        enabled: false,
+        cutoff: null,
+        deleted: 0,
+        candidates: 0,
+        dryRun: false,
+      },
+    });
   });
 });

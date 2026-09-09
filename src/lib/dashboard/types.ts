@@ -48,16 +48,13 @@ export interface ResponseTimeSummary {
   lastWeekAvg: number | null;
 }
 
-export type ActivityKind =
-  'message' | 'deal' | 'broadcast' | 'automation' | 'contact';
-
-export interface ActivityItem {
-  id: string;
-  kind: ActivityKind;
-  /** Primary line of text rendered in the feed. Pre-formatted. */
-  text: string;
-  /** ISO timestamp the item happened at, drives relative-time + sort. */
-  at: string;
-  /** Optional deep-link for the whole row (not all items have a target). */
-  href?: string;
-}
+// `ActivityKind` / `ActivityItem` moraram aqui até a SPEC 075 F6.
+//
+// Eles descreviam um item com o `text` JÁ MONTADO — e montado em
+// português cru dentro de `queries.ts`, fora do i18n (§7.1 da SPEC
+// nomeia esse furo). O feed agora lê `account_activity_log` e o item
+// carrega a AÇÃO, não a frase: quem traduz é o componente.
+//
+// O tipo que os substitui é `ActivityFeedEntry`
+// (`@/lib/activity/feed.ts`), compartilhado com a página `/activity` —
+// dois consumidores da mesma linha não podem ter dois tipos.

@@ -18,6 +18,7 @@ import {
   LogOut,
   MessageSquare,
   Radio,
+  ScrollText,
   Settings,
   Shield,
   User,
@@ -28,7 +29,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import type { AccountRole } from '@/lib/auth/roles';
+import { canViewAccountActivity, type AccountRole } from '@/lib/auth/roles';
 
 // Per-role chip metadata used in the sidebar's account strip + the
 // Members tab roster. Keeping this near both consumers in a single
@@ -83,6 +84,11 @@ interface NavItem {
   beta?: boolean;
 }
 
+/**
+ * Itens que TODO papel vê. O que depende de papel ou de configuração
+ * entra em `visibleNavItems` abaixo, não aqui — um item que aparece e
+ * leva a um "sem acesso" é pior que item nenhum.
+ */
 const navItems: NavItem[] = [
   { href: '/dashboard', labelKey: 'dashboard', icon: LayoutDashboard },
   { href: '/inbox', labelKey: 'inbox', icon: MessageSquare },
@@ -122,6 +128,26 @@ export function Sidebar({
   );
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+
+  /**
+   * SPEC 075 D-5/§7.5 — "Atividade" só para admin+, e depois de
+   * `/dashboard`: o feed do painel é a porta de entrada dela.
+   *
+   * Enquanto `profileLoading`, o item NÃO aparece (`accountRole` é
+   * undefined): falhar fechado evita o item piscar para um agente e
+   * sumir meio segundo depois — o mesmo critério do `RequireRole`.
+   */
+  const visibleNavItems: NavItem[] = useMemo(() => {
+    if (!accountRole || !canViewAccountActivity(accountRole)) return navItems;
+    const withActivity = [...navItems];
+    withActivity.splice(1, 0, {
+      href: '/activity',
+      labelKey: 'activity',
+      icon: ScrollText,
+    });
+    return withActivity;
+  }, [accountRole]);
+
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   // Only surface the account-name strip when it actually carries
@@ -219,7 +245,7 @@ export function Sidebar({
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== '/dashboard' && pathname.startsWith(item.href));

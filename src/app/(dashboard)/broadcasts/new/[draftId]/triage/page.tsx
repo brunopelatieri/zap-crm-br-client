@@ -52,7 +52,7 @@ import { TriageToolbar } from '@/components/broadcasts/audience/triage/triage-to
 import { EngagementDashboard } from '@/components/broadcasts/audience/triage/engagement-dashboard';
 import { StageSummaryBanner } from '@/components/broadcasts/audience/triage/data-save-notice';
 import { estimateAudience } from '@/lib/audience/estimate';
-import { excludesOptedOut } from '@/lib/contacts/consent';
+import { excludesOptedOut } from '@/lib/contacts/consent-rules';
 import type { TriageFilter } from '@/lib/audience/triage';
 import { takeStageSummary } from '@/lib/audience/stage-summary-storage';
 import type { StageAudienceSummary } from '@/lib/audience/stage';

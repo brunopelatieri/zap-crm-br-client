@@ -23,6 +23,7 @@ import { writePlatformAudit } from '@/lib/platform/audit';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { emitSystemEvent } from '@/lib/notifications/emit';
 import { renewAccountPlan } from '@/lib/plans/billing-renew';
+import { recordActivity } from '@/lib/activity/record';
 
 interface RenewBody {
   paymentRef?: unknown;
@@ -115,6 +116,19 @@ export async function POST(
     accountId,
     payload: { paymentRef: body.paymentRef, periods, externalRef, note },
   });
+
+  // SPEC 075 F4 — distinto de `writePlatformAudit` acima: aquele é "o
+  // que o proprietário da plataforma fez" (fora de escopo desta SPEC,
+  // §14); este é "o que aconteceu com a MINHA conta", visível ao
+  // próprio cliente em `/activity`.
+  void recordActivity(db, {
+    accountId,
+    resourceType: 'plan',
+    action: 'plan.renewed',
+    actor: { kind: 'system', name: 'billing' },
+    metadata: { payment_ref: body.paymentRef, periods },
+  });
+
   await dispatchWebhookEvent(db, accountId, 'plan.renewed', {
     paymentRef: body.paymentRef,
     periods,

@@ -823,13 +823,19 @@ export async function POST(request: Request) {
       }
 
       try {
-        await updateCloudChannelOnSave(supabase, accountId, channelId, {
-          identifier,
-          status: 'connected',
-          statusDetail: registrationError,
-          connectedAt: now,
-          name: explicitName,
-        });
+        await updateCloudChannelOnSave(
+          supabase,
+          accountId,
+          channelId,
+          {
+            identifier,
+            status: 'connected',
+            statusDetail: registrationError,
+            connectedAt: now,
+            name: explicitName,
+          },
+          user.id
+        );
       } catch (err) {
         const quota = parseQuotaError(err);
         channelError = quota
@@ -949,7 +955,8 @@ export async function DELETE(request: Request) {
         supabase,
         accountId,
         channelId,
-        'Número removido pelo operador — credenciais apagadas, histórico preservado.'
+        'Número removido pelo operador — credenciais apagadas, histórico preservado.',
+        user.id
       );
     } catch (err) {
       if (err instanceof CloudChannelError) {

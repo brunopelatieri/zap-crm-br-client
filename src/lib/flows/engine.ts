@@ -47,6 +47,7 @@ import { isAssignableMember } from '@/lib/inbox/assignment';
 import { isAccountBlocked } from '@/lib/platform/blocked';
 import { can } from '@/lib/channels/capabilities';
 import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-channel';
+import { recordActivity } from '@/lib/activity/record';
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -644,7 +645,7 @@ async function executeHandoff(
     assigned_to: assignedTo,
     requested_assign_to: cfg.assign_to ?? null,
   });
-  await endRun(db, run.id, 'handed_off', 'handoff_node');
+  await endRun(db, run, 'handed_off', 'handoff_node');
 }
 
 /**
@@ -720,7 +721,7 @@ function interpolateVars(
 
 async function endRun(
   db: AdminClient,
-  runId: string,
+  run: FlowRunRow,
   status: 'completed' | 'handed_off' | 'timed_out' | 'failed',
   reason: string
 ): Promise<void> {
@@ -731,7 +732,32 @@ async function endRun(
       ended_at: new Date().toISOString(),
       end_reason: reason,
     })
-    .eq('id', runId);
+    .eq('id', run.id);
+
+  // SPEC 075 F4 — só o desfecho `failed` pertence ao catálogo (§4);
+  // `completed`/`handed_off`/`timed_out` são fins normais de um fluxo e
+  // ficam de fora, de propósito (§4: "execução bem-sucedida de
+  // automação" também fica fora do feed).
+  if (status === 'failed') {
+    const { data: flow } = await db
+      .from('flows')
+      .select('name')
+      .eq('id', run.flow_id)
+      .maybeSingle();
+
+    await recordActivity(db, {
+      accountId: run.account_id,
+      resourceType: 'flow',
+      action: 'flow.run_failed',
+      resourceId: run.flow_id,
+      resourceLabel: (flow as { name?: string } | null)?.name ?? null,
+      actor: { kind: 'system', name: 'flow-engine' },
+      conversationId: run.conversation_id,
+      contactId: run.contact_id,
+      source: { table: 'flow_run_events', id: run.id },
+      metadata: { reason, run_id: run.id },
+    });
+  }
 }
 
 // ============================================================
@@ -755,7 +781,7 @@ async function advanceFromNodeKey(
       await logEvent(db, run.id, 'error', null, {
         reason: 'next_node_key was null mid-advance',
       });
-      await endRun(db, run.id, 'failed', 'missing_next_node');
+      await endRun(db, run, 'failed', 'missing_next_node');
       return { outcome: 'completed' };
     }
     const node: FlowNodeRow | null = nodes.get(currentKey) ?? null;
@@ -763,7 +789,7 @@ async function advanceFromNodeKey(
       await logEvent(db, run.id, 'error', currentKey, {
         reason: 'node_not_found',
       });
-      await endRun(db, run.id, 'failed', 'node_not_found');
+      await endRun(db, run, 'failed', 'node_not_found');
       return { outcome: 'completed' };
     }
     await logEvent(db, run.id, 'node_entered', node.node_key, {
@@ -793,7 +819,7 @@ async function advanceFromNodeKey(
           reason: 'send_text_failed',
           detail: err instanceof Error ? err.message : String(err),
         });
-        await endRun(db, run.id, 'failed', 'send_text_failed');
+        await endRun(db, run, 'failed', 'send_text_failed');
         return { outcome: 'completed' };
       }
       currentKey = cfg.next_node_key;
@@ -824,7 +850,7 @@ async function advanceFromNodeKey(
           reason: 'send_media_failed',
           detail: err instanceof Error ? err.message : String(err),
         });
-        await endRun(db, run.id, 'failed', 'send_media_failed');
+        await endRun(db, run, 'failed', 'send_media_failed');
         return { outcome: 'completed' };
       }
       currentKey = cfg.next_node_key;
@@ -854,7 +880,7 @@ async function advanceFromNodeKey(
           reason: 'collect_input_prompt_failed',
           detail: err instanceof Error ? err.message : String(err),
         });
-        await endRun(db, run.id, 'failed', 'collect_input_prompt_failed');
+        await endRun(db, run, 'failed', 'collect_input_prompt_failed');
         return { outcome: 'completed' };
       }
       const advanced = await advanceCurrentNodeKey(
@@ -880,7 +906,7 @@ async function advanceFromNodeKey(
           reason: 'condition_evaluation_failed',
           detail: err instanceof Error ? err.message : String(err),
         });
-        await endRun(db, run.id, 'failed', 'condition_evaluation_failed');
+        await endRun(db, run, 'failed', 'condition_evaluation_failed');
         return { outcome: 'completed' };
       }
       currentKey = branch === 'true' ? cfg.true_next : cfg.false_next;
@@ -955,21 +981,21 @@ async function advanceFromNodeKey(
     }
     if (node.node_type === 'end') {
       await logEvent(db, run.id, 'completed', node.node_key);
-      await endRun(db, run.id, 'completed', 'end_node');
+      await endRun(db, run, 'completed', 'end_node');
       return { outcome: 'completed' };
     }
     // Unknown node type — shouldn't happen given the CHECK constraint.
     await logEvent(db, run.id, 'error', node.node_key, {
       reason: `unknown_node_type:${node.node_type}`,
     });
-    await endRun(db, run.id, 'failed', 'unknown_node_type');
+    await endRun(db, run, 'failed', 'unknown_node_type');
     return { outcome: 'completed' };
   }
   // Safety break — log + fail.
   await logEvent(db, run.id, 'error', currentKey, {
     reason: 'advance_loop_safety_break',
   });
-  await endRun(db, run.id, 'failed', 'advance_loop_overflow');
+  await endRun(db, run, 'failed', 'advance_loop_overflow');
   return { outcome: 'completed' };
 }
 
@@ -1105,7 +1131,7 @@ async function handleReplyForActiveRun(
   if (!run.current_node_key) {
     // Defensive — a run with status='active' but no current node is
     // malformed. Fail the run rather than spin.
-    await endRun(db, run.id, 'failed', 'active_run_missing_current_node');
+    await endRun(db, run, 'failed', 'active_run_missing_current_node');
     return {
       consumed: true,
       flow_run_id: run.id,
@@ -1115,7 +1141,7 @@ async function handleReplyForActiveRun(
 
   const currentNode = nodes.get(run.current_node_key) ?? null;
   if (!currentNode) {
-    await endRun(db, run.id, 'failed', 'current_node_not_found');
+    await endRun(db, run, 'failed', 'current_node_not_found');
     return { consumed: true, flow_run_id: run.id, outcome: 'no_match' };
   }
 
@@ -1258,11 +1284,11 @@ async function handleReplyForActiveRun(
     await logEvent(db, run.id, 'handoff', run.current_node_key, {
       reason: 'fallback_exhausted',
     });
-    await endRun(db, run.id, 'handed_off', 'fallback_exhausted');
+    await endRun(db, run, 'handed_off', 'fallback_exhausted');
     return { consumed: true, flow_run_id: run.id, outcome: 'handed_off' };
   }
   // action.type === 'end'
-  await endRun(db, run.id, 'completed', 'fallback_exhausted_end');
+  await endRun(db, run, 'completed', 'fallback_exhausted_end');
   return { consumed: true, flow_run_id: run.id, outcome: 'completed' };
 }
 

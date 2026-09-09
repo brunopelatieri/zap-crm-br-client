@@ -178,3 +178,16 @@ export function canDeleteAccount(role: AccountRole): boolean {
 export function canTransferOwnership(role: AccountRole): boolean {
   return role === 'owner';
 }
+
+/**
+ * Owner / admin: abrir a página `/activity` (SPEC 075 D-5, §9).
+ *
+ * `agent` não entra aqui — ele vê a PRÓPRIA atividade só no widget do
+ * dashboard (a RLS de `account_activity_log`, migração 084, já limita
+ * a leitura dele a `actor_user_id = auth.uid()`; este predicado é só o
+ * que decide se a UI renderiza a página inteira). `viewer` não vê
+ * nada: é auditoria de pessoas, não dado operacional de leitura.
+ */
+export function canViewAccountActivity(role: AccountRole): boolean {
+  return hasMinRole(role, 'admin');
+}

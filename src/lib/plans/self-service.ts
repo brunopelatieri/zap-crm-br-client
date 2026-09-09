@@ -23,6 +23,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { emitSystemEvent } from '@/lib/notifications/emit';
+import { recordActivity } from '@/lib/activity/record';
 import { computePeriodEnd, type BillingCycle } from './billing';
 import type { AccountPlanStatus, BillingPeriod } from './types';
 
@@ -180,6 +181,19 @@ export async function applyPlanChange(
       eventErr
     );
   }
+
+  // SPEC 075 F4 — `input.actor` já vem como uma tag ("self-service:
+  // <email>"), não um `userId`; `system` com o nome é o que dá para
+  // registrar sem reabrir a assinatura só para isto.
+  await recordActivity(db, {
+    accountId: input.accountId,
+    resourceType: 'plan',
+    action: 'plan.changed',
+    resourceLabel: planRow.code,
+    actor: { kind: 'system', name: input.actor },
+    source: { table: 'account_plan_events', id: input.accountId },
+    metadata: { from_plan_code: fromPlanCode, to_plan_code: planRow.code },
+  });
 
   await dispatchWebhookEvent(db, input.accountId, 'plan.changed', {
     fromPlanCode,

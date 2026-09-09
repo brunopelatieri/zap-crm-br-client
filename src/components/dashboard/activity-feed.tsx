@@ -2,46 +2,31 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import {
-  MessageSquare,
-  UserPlus,
-  Briefcase,
-  Radio,
-  Zap,
-  Inbox,
-} from 'lucide-react';
-import type { ComponentType } from 'react';
-import type { ActivityItem, ActivityKind } from '@/lib/dashboard/types';
+import { Inbox } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+
+import type { ActivityFeedEntry } from '@/lib/activity/feed';
 import { cn } from '@/lib/utils';
+import {
+  KIND_THEME,
+  useActivityText,
+} from '@/components/activity/activity-presentation';
 import { EmptyState } from './empty-state';
 import { Skeleton } from './skeleton';
 
 interface ActivityFeedProps {
-  items: ActivityItem[] | null;
+  items: ActivityFeedEntry[] | null;
   loading: boolean;
 }
 
 const PAGE_SIZES = [5, 10, 20, 50] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 
-interface KindTheme {
-  icon: ComponentType<{ className?: string }>;
-  /** Tailwind classes for the round icon badge + label color. */
-  badge: string;
-}
-
-const KIND_THEME: Record<ActivityKind, KindTheme> = {
-  message: { icon: MessageSquare, badge: 'bg-blue-500/10 text-blue-400' },
-  contact: { icon: UserPlus, badge: 'bg-primary/10 text-primary' },
-  deal: { icon: Briefcase, badge: 'bg-primary/10 text-primary' },
-  broadcast: { icon: Radio, badge: 'bg-amber-500/10 text-amber-400' },
-  automation: { icon: Zap, badge: 'bg-rose-500/10 text-rose-400' },
-};
-
-import { useTranslations } from 'next-intl';
-
 export function ActivityFeed({ items, loading }: ActivityFeedProps) {
   const t = useTranslations('Dashboard.activityFeed');
+  // O ícone e a FRASE vêm da camada compartilhada com `/activity`: o
+  // mesmo evento não pode se ler diferente nas duas telas (SPEC 075 F6).
+  const activityText = useActivityText();
   // Start at 5 — a quick scan of the most recent events without
   // dominating vertical real estate. User expands explicitly via the
   // footer control when they want deeper history.
@@ -60,8 +45,10 @@ export function ActivityFeed({ items, loading }: ActivityFeedProps) {
     <section className="border-border bg-card rounded-xl border">
       <header className="border-border flex items-center justify-between border-b px-5 py-4">
         <h2 className="text-foreground text-sm font-semibold">{t('title')}</h2>
+        {/* Deixou de apontar para /inbox: o "ver tudo" de um feed de
+            atividade é a página de atividade (SPEC 075 §7.1). */}
         <Link
-          href="/inbox"
+          href="/activity"
           className="text-primary hover:text-primary/80 text-xs font-medium"
         >
           {t('viewAll')}
@@ -76,6 +63,8 @@ export function ActivityFeed({ items, loading }: ActivityFeedProps) {
         </div>
       ) : items.length === 0 ? (
         <div className="p-5">
+          {/* Estado vazio HONESTO (D-4): o registro começa na instalação,
+              então "nada aqui" não significa "nada aconteceu na conta". */}
           <EmptyState
             icon={Inbox}
             title={t('noActivity')}
@@ -103,7 +92,7 @@ export function ActivityFeed({ items, loading }: ActivityFeedProps) {
                     <Icon className="h-3.5 w-3.5" />
                   </span>
                   <span className="text-foreground min-w-0 flex-1 truncate text-sm">
-                    {it.text}
+                    {activityText(it)}
                   </span>
                   <span className="text-muted-foreground flex-shrink-0 text-xs tabular-nums">
                     {relativeTime(it.at, t)}

@@ -24,6 +24,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
+import { recordActivity } from '@/lib/activity/record';
 
 // Map known SQLSTATEs from the RPCs (see migration 018) onto HTTP
 // statuses. The `error.code` field is the SQLSTATE; the `message`
@@ -81,12 +82,30 @@ export async function PATCH(
       );
     }
 
+    const { data: targetProfile } = await ctx.supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('user_id', userId)
+      .eq('account_id', ctx.accountId)
+      .maybeSingle();
+
     const { error } = await ctx.supabase.rpc('set_member_role', {
       p_user_id: userId,
       p_new_role: role,
     });
 
     if (error) return rpcErrorToResponse(error);
+
+    // SPEC 075 F4.
+    void recordActivity(ctx.supabase, {
+      accountId: ctx.accountId,
+      resourceType: 'member',
+      action: 'member.role_changed',
+      resourceId: userId,
+      resourceLabel: (targetProfile?.full_name as string | null) ?? null,
+      actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+      metadata: { new_role: role },
+    });
 
     return NextResponse.json({ ok: true });
   } catch (err) {
@@ -109,11 +128,28 @@ export async function DELETE(
 
     const { userId } = await params;
 
+    const { data: targetProfile } = await ctx.supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('user_id', userId)
+      .eq('account_id', ctx.accountId)
+      .maybeSingle();
+
     const { data, error } = await ctx.supabase.rpc('remove_account_member', {
       p_user_id: userId,
     });
 
     if (error) return rpcErrorToResponse(error);
+
+    // SPEC 075 F4.
+    void recordActivity(ctx.supabase, {
+      accountId: ctx.accountId,
+      resourceType: 'member',
+      action: 'member.removed',
+      resourceId: userId,
+      resourceLabel: (targetProfile?.full_name as string | null) ?? null,
+      actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+    });
 
     return NextResponse.json({ ok: true, newPersonalAccountId: data });
   } catch (err) {

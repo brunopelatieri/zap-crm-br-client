@@ -17,6 +17,7 @@ import {
   scopedChannelError,
 } from '@/lib/channels/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
+import { recordActivity } from '@/lib/activity/record';
 
 export async function GET() {
   const supabase = await createClient();
@@ -193,6 +194,17 @@ export async function POST(request: Request) {
     const err = await insertSteps(automation.id, effectiveSteps);
     if (err) return NextResponse.json({ error: err }, { status: 500 });
   }
+
+  // SPEC 075 F4.
+  void recordActivity(supabase, {
+    accountId,
+    resourceType: 'automation',
+    action: 'automation.created',
+    resourceId: automation.id,
+    resourceLabel: effectiveName,
+    actor: { kind: 'user', userId: user.id },
+    channelId: scopedChannelId ?? null,
+  });
 
   return NextResponse.json({ automation }, { status: 201 });
 }

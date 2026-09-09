@@ -43,6 +43,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
+import { recordActivity } from '@/lib/activity/record';
 
 /** Nome-base dos canais criados pela rota, igual ao backfill da 072. */
 const DEFAULT_CHANNEL_NAME = 'WhatsApp Oficial';
@@ -364,6 +365,20 @@ export async function createCloudChannel(
     throw configError;
   }
 
+  // SPEC 075 F4 — o canal só entra no feed depois de ter credencial de
+  // verdade (o `throw` acima interrompe antes de chegar aqui quando a
+  // credencial falha), então "criado" aqui já é "pronto para operar".
+  await recordActivity(db, {
+    accountId: input.accountId,
+    resourceType: 'channel',
+    action: 'channel.connected',
+    resourceId: channel.id,
+    resourceLabel: input.name,
+    actor: { kind: 'user', userId: input.userId },
+    channelId: channel.id,
+    channelType: 'whatsapp_cloud',
+  });
+
   return { channelId: channel.id };
 }
 
@@ -525,8 +540,18 @@ export async function updateCloudChannelOnSave(
   db: SupabaseClient,
   accountId: string,
   channelId: string,
-  input: SaveChannelInput
+  input: SaveChannelInput,
+  actorUserId?: string | null
 ): Promise<void> {
+  // Lido ANTES do UPDATE só para saber se isto é uma reativação — a
+  // mesma pergunta que `removeCloudChannel` já faz antes de mutar.
+  const { data: before } = await db
+    .from('channels')
+    .select('status, name')
+    .eq('id', channelId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
   const patch: Record<string, unknown> = {
     status: input.status,
     status_detail: input.statusDetail,
@@ -546,6 +571,28 @@ export async function updateCloudChannelOnSave(
     .eq('account_id', accountId);
 
   if (error) throw error;
+
+  // SPEC 075 F4 — o único ramo desta função que "cria" um evento
+  // auditável: reativar um número `disabled` (§ acima, "readota o
+  // canal disabled"). Um salvamento de credencial sobre um canal já
+  // `connected` não é uma reconexão, só uma atualização — `createCloudChannel`
+  // já cobre o nascimento do canal, então aqui só o desfecho
+  // disabled → connected fica de fora sem isto.
+  if (before?.status === 'disabled' && input.status === 'connected') {
+    await recordActivity(db, {
+      accountId,
+      resourceType: 'channel',
+      action: 'channel.connected',
+      resourceId: channelId,
+      resourceLabel: input.name ?? before.name ?? null,
+      actor: actorUserId
+        ? { kind: 'user', userId: actorUserId }
+        : { kind: 'system' },
+      channelId,
+      channelType: 'whatsapp_cloud',
+      metadata: { reactivated: true },
+    });
+  }
 }
 
 export type RemoveOutcome = 'deleted' | 'disabled';
@@ -579,11 +626,12 @@ export async function removeCloudChannel(
   db: SupabaseClient,
   accountId: string,
   channelId: string,
-  statusDetail: string
+  statusDetail: string,
+  actorUserId?: string | null
 ): Promise<RemoveOutcome> {
   const { data: channel, error: channelError } = await db
     .from('channels')
-    .select('id, type')
+    .select('id, type, name')
     .eq('id', channelId)
     .eq('account_id', accountId)
     .maybeSingle();
@@ -637,6 +685,19 @@ export async function removeCloudChannel(
         'delete_failed'
       );
     }
+
+    await recordActivity(db, {
+      accountId,
+      resourceType: 'channel',
+      action: 'channel.deleted',
+      resourceId: channelId,
+      resourceLabel: (channel as { name?: string | null }).name ?? null,
+      actor: actorUserId
+        ? { kind: 'user', userId: actorUserId }
+        : { kind: 'system' },
+      channelType: 'whatsapp_cloud',
+    });
+
     return 'deleted';
   }
 
@@ -684,6 +745,19 @@ export async function removeCloudChannel(
       'update_failed'
     );
   }
+
+  await recordActivity(db, {
+    accountId,
+    resourceType: 'channel',
+    action: 'channel.disconnected',
+    resourceId: channelId,
+    resourceLabel: (channel as { name?: string | null }).name ?? null,
+    actor: actorUserId
+      ? { kind: 'user', userId: actorUserId }
+      : { kind: 'system' },
+    channelType: 'whatsapp_cloud',
+    metadata: { reason: statusDetail },
+  });
 
   return 'disabled';
 }

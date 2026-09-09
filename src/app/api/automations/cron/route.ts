@@ -166,6 +166,15 @@ export async function GET(request: Request) {
         JSON.stringify(retentionOutcome.result)
       );
     }
+    // SPEC 075 F8 — interruptor PRÓPRIO (ACTIVITY_LOG_RETENTION_DAYS),
+    // por isso o log é condicionado a `.enabled`, não a
+    // `retentionOutcome.ran` (que é sobre a retenção de MENSAGENS).
+    if (retentionOutcome.activityLog.enabled) {
+      console.log(
+        '[automations-cron] activity log retention:',
+        JSON.stringify(retentionOutcome.activityLog)
+      );
+    }
 
     // Fase 5 (SPEC 062 §8) — sem interruptor de `.env`: ao contrário da
     // retenção, o vencimento de plano não tem um "nasce desligado" —

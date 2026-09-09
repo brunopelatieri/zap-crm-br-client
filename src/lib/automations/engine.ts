@@ -37,6 +37,7 @@ import { isAccountBlocked } from '@/lib/platform/blocked';
 import { ASSIGNABLE_ACCOUNT_ROLES } from '@/lib/auth/roles';
 import { isAssignableMember } from '@/lib/inbox/assignment';
 import { excludesOptedOut, isOptedOut } from '@/lib/contacts/consent';
+import { recordActivity } from '@/lib/activity/record';
 
 // ------------------------------------------------------------
 // Public API
@@ -372,6 +373,13 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   const { data: steps, error: stepsErr } = await scoped;
 
   if (stepsErr) {
+    if (args.parentStepId === null) {
+      await recordAutomationFailedActivity(
+        args.automation,
+        args.logId,
+        stepsErr.message
+      );
+    }
     await finalizeLog(args.logId, 'failed', stepsErr.message);
     return;
   }
@@ -461,6 +469,13 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   }
 
   if (args.parentStepId === null) {
+    if (status === 'failed') {
+      await recordAutomationFailedActivity(
+        args.automation,
+        args.logId,
+        errorMessage
+      );
+    }
     await appendResults(args.logId, results, status, errorMessage);
   } else {
     // Nested branch — just append results; parent scope decides final status.
@@ -1461,6 +1476,27 @@ async function appendResults(
   }
   if (errorMessage) update.error_message = errorMessage;
   await db.from('automation_logs').update(update).eq('id', logId);
+}
+
+// SPEC 075 F4 — o catálogo (§4) tem `automation.failed` para "gatilho
+// falhou" (execução bem-sucedida fica de fora, de propósito). Chokepoint
+// único no desfecho `failed` do escopo mais externo, mesmo espírito de
+// `endRun()` em `src/lib/flows/engine.ts`.
+async function recordAutomationFailedActivity(
+  automation: Automation,
+  logId: string | null,
+  errorMessage: string | null
+): Promise<void> {
+  await recordActivity(supabaseAdmin(), {
+    accountId: automation.account_id,
+    resourceType: 'automation',
+    action: 'automation.failed',
+    resourceId: automation.id,
+    resourceLabel: automation.name,
+    actor: { kind: 'system', name: 'automation-engine' },
+    source: { table: 'automation_logs', id: logId ?? automation.id },
+    metadata: errorMessage ? { error: errorMessage } : undefined,
+  });
 }
 
 async function finalizeLog(

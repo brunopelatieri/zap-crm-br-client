@@ -20,6 +20,7 @@ import {
   scopedChannelError,
 } from '@/lib/channels/scoped-channel';
 import { loadAccountChannelTypes } from '@/lib/channels/account-channel-types';
+import { recordActivity } from '@/lib/activity/record';
 
 export async function GET(
   _request: Request,
@@ -64,8 +65,9 @@ export async function PATCH(
   // requires `agent`, but this route mutates via the service-role client
   // which bypasses RLS, so enforce the role here.
   let accountId: string;
+  let userId: string;
   try {
-    ({ accountId } = await requireRole('agent'));
+    ({ accountId, userId } = await requireRole('agent'));
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -82,7 +84,7 @@ export async function PATCH(
   const { data: existing } = await admin
     .from('automations')
     .select(
-      'id, user_id, account_id, is_active, trigger_type, trigger_config, channel_id'
+      'id, user_id, account_id, name, is_active, trigger_type, trigger_config, channel_id'
     )
     .eq('id', id)
     .maybeSingle();
@@ -239,6 +241,40 @@ export async function PATCH(
     if (err) return NextResponse.json({ error: err }, { status: 500 });
   }
 
+  // SPEC 075 F4 — `enabled`/`disabled` quando o PATCH muda `is_active`
+  // DE PROPÓSITO; `updated` para qualquer outro campo. As duas podem
+  // acontecer no mesmo PATCH (ex.: renomear E ativar) — são fatos
+  // independentes, não uma escolha exclusiva. A reativação por
+  // `clearedChannelWhileActive` não conta como `enabled`: `is_active`
+  // nunca entrou em `update` nesse caminho, o gatilho do banco é quem
+  // mexeu nele, e o operador só pediu para trocar o canal.
+  const actor = { kind: 'user' as const, userId };
+  if ('is_active' in update) {
+    void recordActivity(admin, {
+      accountId,
+      resourceType: 'automation',
+      action: update.is_active ? 'automation.enabled' : 'automation.disabled',
+      resourceId: id,
+      resourceLabel: (existing.name as string | null) ?? null,
+      actor,
+    });
+  }
+  const otherFieldsChanged = Object.keys(update).some((k) => k !== 'is_active');
+  if (otherFieldsChanged || Array.isArray(body.steps)) {
+    void recordActivity(admin, {
+      accountId,
+      resourceType: 'automation',
+      action: 'automation.updated',
+      resourceId: id,
+      resourceLabel:
+        (update.name as string | null) ??
+        (existing.name as string | null) ??
+        null,
+      actor,
+      metadata: { fields: Object.keys(update) },
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -251,18 +287,40 @@ export async function DELETE(
   // Deleting an automation is a write — enforce `agent` (the service-role
   // client below bypasses the agent-gated automations_delete RLS).
   let accountId: string;
+  let userId: string;
   try {
-    ({ accountId } = await requireRole('agent'));
+    ({ accountId, userId } = await requireRole('agent'));
   } catch (err) {
     return toErrorResponse(err);
   }
 
-  const { error } = await supabaseAdmin()
+  const admin = supabaseAdmin();
+
+  // Nome ANTES do DELETE — é a única cópia que sobra para o rótulo do
+  // feed (mesmo raciocínio da trigger de `contacts`, migração 084 §3.4).
+  const { data: existing } = await admin
+    .from('automations')
+    .select('name')
+    .eq('id', id)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  const { error } = await admin
     .from('automations')
     .delete()
     .eq('id', id)
     .eq('account_id', accountId);
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await recordActivity(admin, {
+    accountId,
+    resourceType: 'automation',
+    action: 'automation.deleted',
+    resourceId: id,
+    resourceLabel: (existing?.name as string | null) ?? null,
+    actor: { kind: 'user', userId },
+  });
+
   return NextResponse.json({ ok: true });
 }

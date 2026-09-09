@@ -26,30 +26,14 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { recordActivity } from '@/lib/activity/record';
+import type { OptInStatus, ConsentSource } from './consent-rules';
 
-export type OptInStatus = 'opted_in' | 'opted_out' | 'unknown';
-
-export type ConsentSource =
-  'inbound_keyword' | 'manual' | 'import' | 'api' | 'automation';
-
-/** Categorias que NÃO são marketing e portanto alcançam quem optou por sair. */
-const NON_MARKETING_CATEGORIES = new Set(['utility', 'authentication']);
-
-/**
- * `true` quando esta categoria de template precisa excluir contatos em
- * opt-out da audiência.
- */
-export function excludesOptedOut(category: string | null | undefined): boolean {
-  if (!category) return true;
-  return !NON_MARKETING_CATEGORIES.has(category.trim().toLowerCase());
-}
-
-/** Predicado sobre uma linha de contato já carregada. */
-export function isOptedOut(contact: {
-  opt_in_status?: string | null;
-}): boolean {
-  return contact.opt_in_status === 'opted_out';
-}
+// Reexportados para os chamadores SERVER-ONLY que já importavam daqui —
+// código que chega ao browser deve importar de `consent-rules.ts` direto
+// (ver o cabeçalho daquele arquivo).
+export { excludesOptedOut, isOptedOut } from './consent-rules';
+export type { OptInStatus, ConsentSource };
 
 export interface SetContactOptInParams {
   contactId: string;
@@ -59,6 +43,20 @@ export interface SetContactOptInParams {
   keyword?: string | null;
   /** Só para `inbound_keyword`: o id da mensagem na Meta. */
   whatsappMessageId?: string | null;
+  /**
+   * SPEC 075 F4 — necessário só para o feed de atividade
+   * (`account_activity_log.account_id` não tem como ser inferido daqui
+   * dentro; a RPC não devolve a conta do contato). Opcional para não
+   * quebrar um chamador futuro que ainda não tenha a conta em mãos —
+   * nesse caso o evento simplesmente não é gravado.
+   */
+  accountId?: string;
+  /**
+   * Só para `source: 'manual'` — o único source com um humano por trás.
+   * Sem isto o evento é atribuído a `actor.kind: 'system'` como os
+   * demais sources automáticos.
+   */
+  actorUserId?: string;
 }
 
 export interface SetContactOptInResult {
@@ -105,6 +103,36 @@ export async function setContactOptIn(
 
   if (!row) {
     throw new Error('set_contact_opt_in returned no row');
+  }
+
+  // SPEC 075 F4 — só `opted_out`/`opted_in` pertencem ao catálogo (§4);
+  // `unknown` fica fora, e um estado que não MUDOU (`changed === false`,
+  // ex.: pedir "sair" duas vezes) não vira uma segunda linha de feed.
+  if (
+    row.changed &&
+    params.accountId &&
+    (row.opt_in_status === 'opted_out' || row.opt_in_status === 'opted_in')
+  ) {
+    // `actor.kind: 'system'` para os sources automáticos
+    // (`inbound_keyword`, `import`, `api`, `automation`) — nenhum tem um
+    // `userId` de agente. `manual` é o único source com um humano por
+    // trás; quando o chamador passa `actorUserId`, atribui a ele.
+    await recordActivity(db, {
+      accountId: params.accountId,
+      resourceType: 'contact',
+      action:
+        row.opt_in_status === 'opted_out'
+          ? 'contact.opted_out'
+          : 'contact.opted_in',
+      resourceId: row.contact_id,
+      contactId: row.contact_id,
+      actor:
+        params.source === 'manual' && params.actorUserId
+          ? { kind: 'user', userId: params.actorUserId }
+          : { kind: 'system', name: params.source },
+      source: { table: 'contact_consent_events', id: row.contact_id },
+      metadata: { source: params.source, keyword: params.keyword ?? null },
+    });
   }
 
   return {

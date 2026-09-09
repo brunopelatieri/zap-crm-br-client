@@ -31,6 +31,7 @@ import { getAdapter } from '@/lib/channels/registry';
 import { can } from '@/lib/channels/capabilities';
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
 import { isUuid } from '@/lib/api/uuid';
+import { recordActivity } from '@/lib/activity/record';
 import type { ChannelType } from '@/lib/channels/types';
 import type { MessageDeletionProviderOutcome } from '@/types';
 
@@ -105,7 +106,7 @@ export async function POST(
   // padrão de `/api/whatsapp/react`).
   const { data: conversation, error: convError } = await ctx.supabase
     .from('conversations')
-    .select('id, channel_id, contact:contacts(phone)')
+    .select('id, channel_id, contact_id, contact:contacts(phone)')
     .eq('id', message.conversation_id)
     .eq('account_id', ctx.accountId)
     .maybeSingle();
@@ -335,6 +336,22 @@ export async function POST(
       );
     }
 
+    // SPEC 075 F3 — o caminho quente que motivou a SPEC inteira (§ Contexto).
+    void recordActivity(ctx.supabase, {
+      accountId: ctx.accountId,
+      resourceType: 'message',
+      action: 'message.deleted',
+      resourceId: message.id,
+      resourceLabel: truncatePreview(message.content_text),
+      actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+      channelId,
+      channelType,
+      conversationId: message.conversation_id,
+      contactId: conversation.contact_id,
+      source: { table: 'message_deletion_log', id: message.id },
+      metadata: { provider_outcome: providerOutcome },
+    });
+
     if (isLastMessage) {
       await ctx.supabase
         .from('conversations')
@@ -423,6 +440,27 @@ export async function POST(
       { status: 500 }
     );
   }
+
+  // SPEC 075 F3 — depois do DELETE de propósito: `resource_id` sem FK
+  // (§3.1) é exatamente para registrar um recurso que acabou de deixar
+  // de existir.
+  await recordActivity(ctx.supabase, {
+    accountId: ctx.accountId,
+    resourceType: 'message',
+    action: 'message.purged',
+    resourceId: message.id,
+    resourceLabel: truncatePreview(message.content_text),
+    actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+    channelId,
+    channelType,
+    conversationId: message.conversation_id,
+    contactId: conversation.contact_id,
+    source: { table: 'message_deletion_log', id: message.id },
+    metadata: {
+      provider_outcome: providerOutcome,
+      media_removed: mediaRemoved,
+    },
+  });
 
   if (isLastMessage) {
     await ctx.supabase

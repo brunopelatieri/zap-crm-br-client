@@ -11,6 +11,7 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { recordActivity } from '@/lib/activity/record';
 
 /** 8 KB — também usado pela rota para decidir o aviso `payload_truncated`. */
 export const PAYLOAD_MAX_BYTES = 8 * 1024;
@@ -82,5 +83,21 @@ export async function logIngestEvent(
       '[ingest/log] unexpected error writing webhook_ingest_logs row:',
       err
     );
+  }
+
+  // SPEC 075 F4 — o catálogo (§4) só tem `webhook.ingest_failed`, ou
+  // seja, `warning` não entra no feed (a linha de `webhook_ingest_logs`
+  // continua gravada de qualquer jeito, só não duplica no feed).
+  if (params.level === 'error') {
+    await recordActivity(db, {
+      accountId: params.accountId,
+      resourceType: 'webhook',
+      action: 'webhook.ingest_failed',
+      resourceLabel: params.webhookName ?? params.webhookId ?? null,
+      actor: { kind: 'api', keyId: params.apiKeyId },
+      contactId: params.contactId ?? null,
+      source: { table: 'webhook_ingest_logs', id: params.apiKeyId },
+      metadata: { code: params.code, webhook_id: params.webhookId ?? null },
+    });
   }
 }

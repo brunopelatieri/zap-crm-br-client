@@ -33,6 +33,11 @@ vi.mock('@/lib/supabase/admin', () => ({
   }),
 }));
 
+const recordActivityMock = vi.fn(async () => undefined);
+vi.mock('@/lib/activity/record', () => ({
+  recordActivity: (...args: unknown[]) => recordActivityMock(...(args as [])),
+}));
+
 vi.mock('next-intl/server', () => ({
   getLocale: async () => 'pt-BR',
   // Devolve a própria chave — o teste não afere tradução, e assim
@@ -297,6 +302,23 @@ describe('caminho feliz', () => {
     expect(row.contact_id).toBe('contact-1');
     expect(row.format).toBe('pdf');
     expect(row.message_count).toBe(1);
+  });
+
+  it('SPEC 075 F3: registra conversation.exported no feed de atividade', async () => {
+    await post(validBody);
+
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        accountId: 'acct-1',
+        resourceType: 'conversation',
+        action: 'conversation.exported',
+        resourceId: CONVERSATION_ID,
+        contactId: 'contact-1',
+        source: { table: 'conversation_exports', id: renderedHeader?.exportId },
+      })
+    );
   });
 
   it('formato zip devolve application/zip', async () => {

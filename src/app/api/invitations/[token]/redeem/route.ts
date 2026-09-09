@@ -27,6 +27,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit';
 import { createClient } from '@/lib/supabase/server';
+import { recordActivity } from '@/lib/activity/record';
 
 function getClientIp(request: Request): string {
   const xff = request.headers.get('x-forwarded-for');
@@ -86,6 +87,18 @@ export async function POST(
   });
 
   if (error) return rpcErrorToResponse(error);
+
+  // SPEC 075 F4 — na conta que o convite mudou (`accountId`, devolvido
+  // pela RPC), não na pessoal que o usuário deixou para trás.
+  if (typeof accountId === 'string') {
+    void recordActivity(supabase, {
+      accountId,
+      resourceType: 'member',
+      action: 'member.joined',
+      resourceId: user.id,
+      actor: { kind: 'user', userId: user.id },
+    });
+  }
 
   return NextResponse.json({ ok: true, accountId });
 }

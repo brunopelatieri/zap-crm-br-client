@@ -176,6 +176,7 @@
     "automations": "Automações",
     "flows": "Fluxos",
     "aiAgents": "Agentes de IA",
+    "activity": "Atividade",
     "plan": "Plano e uso",
     "settings": "Configurações",
     "beta": "Beta",
@@ -195,6 +196,7 @@
   },
   "Header": {
     "dashboard": "Painel",
+    "activity": "Atividade da conta",
     "inbox": "Caixa de entrada",
     "notifications": "Notificações",
     "contacts": "Contatos",
@@ -358,6 +360,142 @@
     },
     "emptyState": {
       "title": "Ainda não há dados suficientes"
+    }
+  },
+  "Activity": {
+    "page": {
+      "title": "Atividade da conta",
+      "subtitle": "Quem fez o quê dentro desta conta.",
+      "incomplete": "O registro começa quando o recurso foi instalado e pode ter falhas — nenhuma ação é bloqueada só porque registrá-la falhou.",
+      "loadMore": "Carregar mais",
+      "loading": "Carregando…",
+      "error": "Não foi possível carregar o registro de atividade.",
+      "retry": "Tentar de novo",
+      "details": "Detalhes",
+      "hiddenByChannel": "{count, plural, =1 {# evento sem canal está oculto por este filtro} other {# eventos sem canal estão ocultos por este filtro}}",
+      "counter": "{shown, plural, =1 {# evento carregado} other {# eventos carregados}} · {period}",
+      "empty": {
+        "title": "Nenhuma atividade registrada ainda",
+        "hint": "O registro começa no momento em que este recurso é instalado — nada que aconteceu antes aparece aqui."
+      },
+      "emptyFiltered": {
+        "title": "Nenhuma atividade corresponde a estes filtros",
+        "hint": "Tente ampliar o período ou limpar um filtro."
+      },
+      "noAccess": "É preciso ter o papel de administrador ou superior para ver o registro de atividade da conta."
+    },
+    "filters": {
+      "period": "Período",
+      "user": "Usuário",
+      "type": "Tipo",
+      "channel": "Canal",
+      "search": "Buscar",
+      "searchPlaceholder": "Buscar por nome…",
+      "clear": "Limpar filtros",
+      "allUsers": "Todos",
+      "allTypes": "Todos os tipos",
+      "allChannels": "Todos os canais",
+      "system": "Sistema"
+    },
+    "periods": {
+      "today": "Hoje",
+      "last7": "Últimos 7 dias",
+      "last30": "Últimos 30 dias",
+      "last90": "Últimos 90 dias"
+    },
+    "actors": {
+      "system": "Sistema",
+      "contact": "O contato",
+      "api": "API",
+      "unknown": "Desconhecido"
+    },
+    "roles": {
+      "owner": "proprietário",
+      "admin": "administrador",
+      "agent": "agente",
+      "viewer": "leitor"
+    },
+    "unknownResource": "(sem nome)",
+    "resourceTypes": {
+      "message": "Mensagens",
+      "conversation": "Conversas",
+      "contact": "Contatos",
+      "deal": "Negócios",
+      "broadcast": "Campanhas",
+      "automation": "Automações",
+      "flow": "Fluxos",
+      "channel": "Canais",
+      "member": "Equipe",
+      "export": "Exportações",
+      "plan": "Plano",
+      "tag": "Etiquetas",
+      "webhook": "Webhooks"
+    },
+    "actions": {
+      "message": {
+        "deleted": "{actor} apagou uma mensagem",
+        "purged": "{actor} excluiu uma mensagem do sistema",
+        "deleted_by_contact": "{actor} apagou a própria mensagem"
+      },
+      "conversation": {
+        "assigned": "{actor} atribuiu uma conversa",
+        "transferred": "{actor} continuou uma conversa por outro canal",
+        "exported": "{actor} exportou a conversa com {label}"
+      },
+      "contact": {
+        "created": "{actor} criou o contato {label}",
+        "updated": "{actor} editou o contato {label}",
+        "deleted": "{actor} excluiu o contato {label}",
+        "imported": "{actor} importou {count, plural, =1 {# contato} other {# contatos}}",
+        "exported": "{actor} exportou {count, plural, =1 {# contato} other {# contatos}}",
+        "opted_out": "Um contato pediu para sair da lista",
+        "opted_in": "Um contato voltou a aceitar mensagens"
+      },
+      "deal": {
+        "created": "{actor} criou o negócio {label}",
+        "stage_changed": "{actor} moveu {label} de {from} para {to}",
+        "deleted": "{actor} excluiu o negócio {label}"
+      },
+      "broadcast": {
+        "created": "{actor} criou a campanha {label}",
+        "dispatched": "{actor} disparou a campanha {label}",
+        "scheduled": "{actor} agendou a campanha {label}",
+        "canceled": "{actor} cancelou a campanha {label}",
+        "blocked": "A campanha {label} foi bloqueada"
+      },
+      "automation": {
+        "enabled": "{actor} ativou a automação {label}",
+        "disabled": "{actor} desativou a automação {label}",
+        "created": "{actor} criou a automação {label}",
+        "updated": "{actor} editou a automação {label}",
+        "deleted": "{actor} excluiu a automação {label}",
+        "failed": "A automação {label} falhou"
+      },
+      "flow": {
+        "activated": "{actor} ativou o fluxo {label}",
+        "deactivated": "{actor} desativou o fluxo {label}",
+        "run_failed": "Uma execução do fluxo {label} falhou"
+      },
+      "channel": {
+        "connected": "{actor} conectou o canal {label}",
+        "disconnected": "{actor} desconectou o canal {label}",
+        "deleted": "{actor} removeu o canal {label}",
+        "default_changed": "{actor} tornou {label} o canal padrão"
+      },
+      "member": {
+        "invited": "{actor} convidou alguém para a equipe",
+        "joined": "{actor} entrou na equipe",
+        "role_changed": "{actor} mudou o papel de {label} para {role}",
+        "removed": "{actor} removeu {label} da equipe"
+      },
+      "webhook": {
+        "ingest_failed": "Um webhook de entrada falhou ({label})"
+      },
+      "plan": {
+        "changed": "O plano mudou para {label}",
+        "renewed": "O plano foi renovado",
+        "requested": "{actor} solicitou o plano {label}"
+      }
     }
   },
   "Inbox": {
@@ -1519,25 +1657,30 @@
       "metaErrorCode": "Código",
       "metaErrorAction": "Ação recomendada",
       "metaErrors": {
-        "131026": {
-          "title": "Mensagem não foi entregue",
-          "description": "O número do destinatário não está no WhatsApp, não aceitou os Termos de Serviço atuais da Meta, ou está usando uma versão do app não suportada.",
-          "action": "Marcar o número como inválido e não tentar novamente."
+        "100": {
+          "title": "Parâmetro inválido",
+          "description": "Um campo do JSON da requisição está incorreto, mal formatado ou não existe na API.",
+          "action": "Revisar a estrutura da requisição (aspas soltas, chaves erradas, etc.)."
         },
-        "131047": {
-          "title": "Janela de 24 horas fechada",
-          "description": "Mais de 24 horas se passaram desde a última mensagem do contato, então uma mensagem livre não pode mais ser enviada.",
-          "action": "Usar um template aprovado para reabrir a janela de conversa."
+        "190": {
+          "title": "Token de acesso expirado",
+          "description": "O Token de Acesso (Bearer) expirou ou foi invalidado no Meta for Developers.",
+          "action": "Renovar ou trocar o Token de Acesso permanente."
         },
-        "131049": {
-          "title": "Mensagem bloqueada para preservar a integridade do sistema",
-          "description": "As heurísticas antispam da Meta bloquearam este envio para proteger a qualidade da plataforma.",
-          "action": "Aguardar 24 horas antes de tentar novamente e reduzir o volume de disparos em massa."
+        "80007": {
+          "title": "Excesso de chamadas à API",
+          "description": "Os limites de chamadas em nível de app ou de WABA no Graph API foram atingidos.",
+          "action": "Reduzir a velocidade geral das requisições."
         },
-        "131050": {
-          "title": "Destinatário optou por sair",
-          "description": "O destinatário clicou em \"Parar promoções\" em um template de marketing anterior.",
-          "action": "Bloquear envios automáticos para este número a partir de agora."
+        "130403": {
+          "title": "Empresa bloqueada",
+          "description": "O número foi banido por violação severa das Políticas de Comércio da Meta.",
+          "action": "Entrar com recurso (Appeal) pelo painel da Meta."
+        },
+        "130429": {
+          "title": "Limite de taxa excedido",
+          "description": "O limite de throughput da Cloud API (mensagens por segundo) foi excedido.",
+          "action": "Implementar backoff exponencial na fila de disparos."
         },
         "130472": {
           "title": "Número do contato faz parte de um experimento",
@@ -1549,95 +1692,90 @@
           "description": "Esta WABA não tem permissão para enviar mensagens para o país ou região do destinatário.",
           "action": "Revisar as configurações regionais no Business Manager."
         },
-        "131021": {
-          "title": "Destinatário é o remetente",
-          "description": "A mensagem foi endereçada para o mesmo número que está enviando.",
-          "action": "Corrigir a lógica de roteamento que montou esta requisição."
-        },
-        "131060": {
-          "title": "Mensagem temporariamente indisponível",
-          "description": "Uma falha de entrega temporária e não especificada do lado da Meta.",
-          "action": "Aguardar de 5 a 10 minutos e tentar novamente."
-        },
-        "130429": {
-          "title": "Limite de taxa excedido",
-          "description": "O limite de throughput da Cloud API (mensagens por segundo) foi excedido.",
-          "action": "Implementar backoff exponencial na fila de disparos."
-        },
-        "131048": {
-          "title": "Limite de taxa de spam",
-          "description": "Esta WABA recebeu muitos bloqueios de usuários, ou excedeu seu limite diário de mensagens.",
-          "action": "Pausar campanhas frias e revisar a qualidade das listas de contatos."
-        },
-        "131056": {
-          "title": "Muitas mensagens para o mesmo destinatário",
-          "description": "Várias mensagens foram disparadas para o mesmo usuário em um espaço de tempo muito curto.",
-          "action": "Inserir atrasos entre mensagens automáticas seguidas para o mesmo contato."
-        },
-        "80007": {
-          "title": "Excesso de chamadas à API",
-          "description": "Os limites de chamadas em nível de app ou de WABA no Graph API foram atingidos.",
-          "action": "Reduzir a velocidade geral das requisições."
-        },
-        "100": {
-          "title": "Parâmetro inválido",
-          "description": "Um campo do JSON da requisição está incorreto, mal formatado ou não existe na API.",
-          "action": "Revisar a estrutura da requisição (aspas soltas, chaves erradas, etc.)."
-        },
-        "131008": {
-          "title": "Parâmetro obrigatório ausente",
-          "description": "Falta um campo obrigatório no corpo da requisição para este tipo de mensagem.",
-          "action": "Validar os dados de entrada antes de montar a requisição."
-        },
-        "131051": {
-          "title": "Tipo de mensagem não suportado",
-          "description": "Este tipo de mensagem (ex: sticker, variante de localização não suportada) não é suportado neste endpoint.",
-          "action": "Consultar a referência da Meta para tipos de mensagem suportados."
-        },
-        "131053": {
-          "title": "Erro de upload de mídia",
-          "description": "O arquivo excede os limites de tamanho da Meta ou tem um tipo MIME inválido.",
-          "action": "Validar o tipo MIME e comprimir a mídia antes do upload."
-        },
-        "131052": {
-          "title": "Erro de download de mídia",
-          "description": "A Meta não conseguiu baixar a mídia a partir do link externo fornecido.",
-          "action": "Garantir que a URL é pública e não exige autenticação."
-        },
-        "132000": {
-          "title": "Erro no envio do template",
-          "description": "O template está pausado ou rejeitado, falta uma variável, ou o idioma usado está errado.",
-          "action": "Sincronizar o status do template (Aprovado/Pausado/Rejeitado) diariamente e revisar as variáveis enviadas."
-        },
-        "190": {
-          "title": "Token de acesso expirado",
-          "description": "O Token de Acesso (Bearer) expirou ou foi invalidado no Meta for Developers.",
-          "action": "Renovar ou trocar o Token de Acesso permanente."
+        "131000": {
+          "title": "Algo deu errado",
+          "description": "Instabilidade nos servidores da Meta ou erro interno no Graph API.",
+          "action": "Tentar novamente automaticamente, de forma controlada."
         },
         "131005": {
           "title": "Permissão negada",
           "description": "O token atual não possui os escopos necessários (ex: whatsapp_business_messaging).",
           "action": "Revisar os escopos no Access Token Debugger."
         },
-        "131042": {
-          "title": "Problema de pagamento",
-          "description": "Falha de faturamento: cartão recusado, sem fundos ou limite de crédito atingido.",
-          "action": "Regularizar imediatamente no Business Manager."
+        "131008": {
+          "title": "Parâmetro obrigatório ausente",
+          "description": "Falta um campo obrigatório no corpo da requisição para este tipo de mensagem.",
+          "action": "Validar os dados de entrada antes de montar a requisição."
+        },
+        "131021": {
+          "title": "Destinatário é o remetente",
+          "description": "A mensagem foi endereçada para o mesmo número que está enviando.",
+          "action": "Corrigir a lógica de roteamento que montou esta requisição."
+        },
+        "131026": {
+          "title": "Mensagem não foi entregue",
+          "description": "O número do destinatário não está no WhatsApp, não aceitou os Termos de Serviço atuais da Meta, ou está usando uma versão do app não suportada.",
+          "action": "Marcar o número como inválido e não tentar novamente."
         },
         "131031": {
           "title": "Conta bloqueada",
           "description": "A WABA está temporariamente bloqueada por verificações de segurança.",
           "action": "Tratar diretamente no WhatsApp Manager."
         },
-        "130403": {
-          "title": "Empresa bloqueada",
-          "description": "O número foi banido por violação severa das Políticas de Comércio da Meta.",
-          "action": "Entrar com recurso (Appeal) pelo painel da Meta."
+        "131042": {
+          "title": "Problema de pagamento",
+          "description": "Falha de faturamento: cartão recusado, sem fundos ou limite de crédito atingido.",
+          "action": "Regularizar imediatamente no Business Manager."
         },
-        "131000": {
-          "title": "Algo deu errado",
-          "description": "Instabilidade nos servidores da Meta ou erro interno no Graph API.",
-          "action": "Tentar novamente automaticamente, de forma controlada."
+        "131047": {
+          "title": "Janela de 24 horas fechada",
+          "description": "Mais de 24 horas se passaram desde a última mensagem do contato, então uma mensagem livre não pode mais ser enviada.",
+          "action": "Usar um template aprovado para reabrir a janela de conversa."
+        },
+        "131048": {
+          "title": "Limite de taxa de spam",
+          "description": "Esta WABA recebeu muitos bloqueios de usuários, ou excedeu seu limite diário de mensagens.",
+          "action": "Pausar campanhas frias e revisar a qualidade das listas de contatos."
+        },
+        "131049": {
+          "title": "Mensagem bloqueada para preservar a integridade do sistema",
+          "description": "As heurísticas antispam da Meta bloquearam este envio para proteger a qualidade da plataforma.",
+          "action": "Aguardar 24 horas antes de tentar novamente e reduzir o volume de disparos em massa."
+        },
+        "131050": {
+          "title": "Destinatário optou por sair",
+          "description": "O destinatário clicou em \"Parar promoções\" em um template de marketing anterior.",
+          "action": "Bloquear envios automáticos para este número a partir de agora."
+        },
+        "131051": {
+          "title": "Tipo de mensagem não suportado",
+          "description": "Este tipo de mensagem (ex: sticker, variante de localização não suportada) não é suportado neste endpoint.",
+          "action": "Consultar a referência da Meta para tipos de mensagem suportados."
+        },
+        "131052": {
+          "title": "Erro de download de mídia",
+          "description": "A Meta não conseguiu baixar a mídia a partir do link externo fornecido.",
+          "action": "Garantir que a URL é pública e não exige autenticação."
+        },
+        "131053": {
+          "title": "Erro de upload de mídia",
+          "description": "O arquivo excede os limites de tamanho da Meta ou tem um tipo MIME inválido.",
+          "action": "Validar o tipo MIME e comprimir a mídia antes do upload."
+        },
+        "131056": {
+          "title": "Muitas mensagens para o mesmo destinatário",
+          "description": "Várias mensagens foram disparadas para o mesmo usuário em um espaço de tempo muito curto.",
+          "action": "Inserir atrasos entre mensagens automáticas seguidas para o mesmo contato."
+        },
+        "131060": {
+          "title": "Mensagem temporariamente indisponível",
+          "description": "Uma falha de entrega temporária e não especificada do lado da Meta.",
+          "action": "Aguardar de 5 a 10 minutos e tentar novamente."
+        },
+        "132000": {
+          "title": "Erro no envio do template",
+          "description": "O template está pausado ou rejeitado, falta uma variável, ou o idioma usado está errado.",
+          "action": "Sincronizar o status do template (Aprovado/Pausado/Rejeitado) diariamente e revisar as variáveis enviadas."
         }
       }
     },

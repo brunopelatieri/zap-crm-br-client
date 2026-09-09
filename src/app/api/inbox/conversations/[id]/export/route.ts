@@ -20,6 +20,8 @@ import { getLocale, getTranslations } from 'next-intl/server';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { recordActivity } from '@/lib/activity/record';
+import { maskPhoneForLog } from '@/lib/phone/mask-for-log';
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit';
 import {
   CONVERSATION_EXPORT_MAX_MESSAGES,
@@ -448,6 +450,24 @@ export async function POST(
   } catch (err) {
     console.error('[conversation-export] audit insert threw:', err);
   }
+
+  // SPEC 075 F3 — mesmo espírito best-effort do bloco acima: o arquivo
+  // já está pronto, uma falha aqui não pode puni-lo.
+  void recordActivity(ctx.supabase, {
+    accountId: ctx.accountId,
+    resourceType: 'conversation',
+    action: 'conversation.exported',
+    resourceId: conversationId,
+    // Rótulo do log é mascarado à parte de `contactName` — este último
+    // segue cru no PDF/ZIP porque é o próprio dado do usuário sendo
+    // exportado para ele mesmo, não um rótulo de auditoria.
+    resourceLabel: data.contact.name || maskPhoneForLog(data.contact.phone),
+    actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+    conversationId,
+    contactId: data.contact.id,
+    source: { table: 'conversation_exports', id: exportId },
+    metadata: { format, message_count: data.messages.length },
+  });
 
   return new NextResponse(new Uint8Array(fileBody), {
     status: 200,

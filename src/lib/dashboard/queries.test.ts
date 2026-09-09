@@ -162,15 +162,97 @@ describe('loadResponseTime', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// SPEC 075 F6 — o feed deixou de ser cinco consultas ao vivo (estado
+// presente disfarçado de linha do tempo, §1.1) e virou UMA leitura de
+// `account_activity_log`.
+//
+// O que este bloco trava: a fonte é a tabela de log e mais nada. Um
+// "conserto" futuro que reintroduza `contacts`/`deals` ao vivo aqui
+// reintroduz o bug que a SPEC existe para matar — e falha neste teste.
+// ---------------------------------------------------------------------------
 describe('loadActivity', () => {
-  it('scopes dashboard_recent_inbound by accountId, not by assignment', async () => {
+  const ROW = {
+    id: '00000000-0000-0000-0000-000000000001',
+    created_at: '2026-09-09T12:00:00.000Z',
+    actor_kind: 'user',
+    actor_user_id: 'user-1',
+    actor_name: 'Bruno',
+    actor_role: 'owner',
+    resource_type: 'deal',
+    action: 'deal.stage_changed',
+    resource_id: 'deal-1',
+    resource_label: 'Loja X',
+    channel_id: null,
+    channel_type: null,
+    conversation_id: null,
+    contact_id: null,
+    source_table: null,
+    source_id: null,
+    metadata: { from: 'Proposta', to: 'Fechado' },
+  };
+
+  it('lê account_activity_log e mais nada — nenhuma consulta ao vivo', async () => {
     const rpcCalls: RpcCall[] = [];
-    const db = makeDb({ rpc: { dashboard_recent_inbound: [] }, rpcCalls });
+    const db = makeDb({
+      from: { account_activity_log: { data: [ROW] } },
+      rpcCalls,
+    });
 
     await loadActivity(db, 'acct-1');
 
-    const msgCall = rpcCalls.find((c) => c.fn === 'dashboard_recent_inbound');
-    expect(msgCall).toBeDefined();
-    expect(msgCall).toMatchObject({ args: { p_account_id: 'acct-1' } });
+    const tables = vi.mocked(db.from).mock.calls.map(([t]) => t);
+    expect(tables).toEqual(['account_activity_log']);
+    // As cinco fontes antigas — nenhuma delas pode voltar.
+    for (const gone of ['contacts', 'deals', 'broadcasts', 'automation_logs']) {
+      expect(tables).not.toContain(gone);
+    }
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it('escopa por accountId (a RLS faz o corte por papel, não este código)', async () => {
+    const db = makeDb({ from: { account_activity_log: { data: [] } } });
+
+    await loadActivity(db, 'acct-1');
+
+    const builder = vi.mocked(db.from).mock.results[0].value;
+    expect(builder.eq).toHaveBeenCalledWith('account_id', 'acct-1');
+    // Nenhum filtro por ator: quem esconde a atividade do colega de um
+    // agente é a policy da 084 (D-5), não um `.eq('actor_user_id', …)`.
+    const eqFields = builder.eq.mock.calls.map(([f]: [string]) => f);
+    expect(eqFields).not.toContain('actor_user_id');
+  });
+
+  it('devolve entradas já prontas para a UI traduzir (ação + valores, não frase)', async () => {
+    const db = makeDb({ from: { account_activity_log: { data: [ROW] } } });
+
+    const items = await loadActivity(db, 'acct-1');
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'deal',
+      action: 'deal.stage_changed',
+      actorName: 'Bruno',
+      values: { label: 'Loja X', from: 'Proposta', to: 'Fechado' },
+      href: '/pipelines',
+    });
+    // Nada de texto pré-montado: era exatamente o português cru que a
+    // §7.1 mandou tirar daqui.
+    expect(items[0]).not.toHaveProperty('text');
+  });
+
+  it('pede uma janela de 90 dias, não os 30 padrão de queryActivity', async () => {
+    const db = makeDb({ from: { account_activity_log: { data: [] } } });
+
+    await loadActivity(db, 'acct-1');
+
+    const builder = vi.mocked(db.from).mock.results[0].value;
+    const [field, value] = builder.gte.mock.calls[0] as [string, string];
+    expect(field).toBe('created_at');
+    // Um feed vazio no widget se lê como "nada aconteceu"; 90 dias
+    // reduzem a chance de isso ser só "nada aconteceu no último mês".
+    const days = (Date.now() - Date.parse(value)) / 86_400_000;
+    expect(days).toBeGreaterThan(89);
+    expect(days).toBeLessThan(91);
   });
 });

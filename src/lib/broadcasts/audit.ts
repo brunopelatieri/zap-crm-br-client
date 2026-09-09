@@ -23,6 +23,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { recordActivity } from '@/lib/activity/record';
+import type { ActivityAction } from '@/lib/activity/types';
 
 export type BroadcastAuditEvent =
   /** Disparo iniciado (imediato ou retomado pelo cron). */
@@ -55,6 +57,26 @@ export interface BroadcastAuditEntry {
   details?: Record<string, unknown>;
 }
 
+// SPEC 075 F3 — mapeia o evento de `broadcast_audit_log` para o
+// catálogo fechado de `account_activity_log` (§4). Ponto ÚNICO: os
+// quatro chamadores de `logBroadcastAudit` (`/api/broadcasts/send`,
+// `broadcast-dispatch.ts` do cron, e qualquer futuro cancelamento)
+// ganham o feed de auditoria automaticamente, sem precisar lembrar de
+// chamar `recordActivity` em cada um.
+//
+// `rescheduled`/`postponed_window`/`failed` não têm ação correspondente
+// no §4 — a SPEC os deixa de fora da v1 (nenhuma linha citada na
+// tabela), e por isso não geram evento aqui.
+const ACTIVITY_ACTION_BY_EVENT: Partial<
+  Record<BroadcastAuditEvent, ActivityAction>
+> = {
+  dispatched: 'broadcast.dispatched',
+  scheduled: 'broadcast.scheduled',
+  canceled: 'broadcast.canceled',
+  blocked_window: 'broadcast.blocked',
+  blocked_quota: 'broadcast.blocked',
+};
+
 /**
  * Registra uma entrada na trilha. Nunca lança.
  *
@@ -85,4 +107,27 @@ export async function logBroadcastAudit(
   } catch (err) {
     console.error('[broadcast-audit] insert threw:', err);
   }
+
+  const action = ACTIVITY_ACTION_BY_EVENT[entry.event];
+  if (!action) return;
+
+  await recordActivity(db, {
+    accountId: entry.accountId,
+    resourceType: 'broadcast',
+    action,
+    resourceId: entry.broadcastId ?? null,
+    resourceLabel: entry.broadcastName ?? null,
+    actor: entry.actorUserId
+      ? { kind: 'user', userId: entry.actorUserId }
+      : { kind: 'system', name: 'cron' },
+    source: entry.broadcastId
+      ? { table: 'broadcast_audit_log', id: entry.broadcastId }
+      : null,
+    metadata: {
+      event: entry.event,
+      template_name: entry.templateName ?? null,
+      total_recipients: entry.totalRecipients ?? null,
+      scheduled_at: entry.scheduledAt ?? null,
+    },
+  });
 }

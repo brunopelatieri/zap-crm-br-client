@@ -37,8 +37,13 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/auth/account', () => ({
-  requireRole: vi.fn(async () => ({ accountId: 'acct-1' })),
+  requireRole: vi.fn(async () => ({ accountId: 'acct-1', userId: 'user-1' })),
   toErrorResponse: vi.fn(),
+}));
+
+const recordActivityMock = vi.fn(async () => undefined);
+vi.mock('@/lib/activity/record', () => ({
+  recordActivity: (...args: unknown[]) => recordActivityMock(...(args as [])),
 }));
 
 vi.mock('@/lib/automations/steps-tree', () => ({
@@ -137,11 +142,51 @@ beforeEach(() => {
     id: 'auto-1',
     user_id: 'user-1',
     account_id: 'acct-1',
+    name: 'Boas-vindas',
     is_active: true,
     trigger_type: 'new_message_received',
     trigger_config: {},
     channel_id: 'ch-a',
   };
+  recordActivityMock.mockClear();
+});
+
+describe('PATCH — SPEC 075 F4: feed de atividade', () => {
+  it('is_active: false → automation.disabled, sem automation.updated', async () => {
+    await patch({ is_active: false });
+
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        resourceType: 'automation',
+        action: 'automation.disabled',
+        resourceId: 'auto-1',
+      })
+    );
+  });
+
+  it('mudar só o nome → automation.updated, sem enabled/disabled', async () => {
+    await patch({ name: 'Novo nome' });
+
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'automation.updated' })
+    );
+  });
+
+  it('reativação por channel_id: null NÃO conta como automation.enabled', async () => {
+    await patch({ channel_id: null });
+
+    // Só `automation.updated` (mudança de canal) — a reativação do
+    // gatilho não passou por `update.is_active`.
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'automation.updated' })
+    );
+  });
 });
 
 describe('PATCH — voltar para "Todos os números" (SPEC 065 D-8)', () => {

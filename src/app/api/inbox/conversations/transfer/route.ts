@@ -16,6 +16,7 @@ import {
   sendMessageToConversation,
   SendMessageError,
 } from '@/lib/whatsapp/send-message';
+import { recordActivity } from '@/lib/activity/record';
 
 /**
  * Continuar a conversa por outro canal (SPEC 056 §4.2).
@@ -265,6 +266,25 @@ export async function POST(request: Request) {
         // o vetor de envio frio mais provável do sistema — deixá-la fora
         // da contagem faria a cota parar de descrever o número.
         coldSendOrigin: 'human',
+      });
+
+      // SPEC 075 F3 — a thread de DESTINO é o `conversation_id`/
+      // `resource_id`: é para lá que "ver detalhes" deve levar, não
+      // para a de origem que só emprestou o contexto.
+      void recordActivity(supabase, {
+        accountId,
+        resourceType: 'conversation',
+        action: 'conversation.transferred',
+        resourceId: target.id,
+        actor: { kind: 'user', userId: user.id },
+        channelId: targetChannelId,
+        channelType: targetType,
+        conversationId: target.id,
+        contactId: source.contact_id,
+        metadata: {
+          from_channel_id: source.channel_id ?? null,
+          to_channel_id: targetChannelId,
+        },
       });
 
       return NextResponse.json({

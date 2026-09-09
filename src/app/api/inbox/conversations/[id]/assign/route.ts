@@ -7,6 +7,7 @@ import {
 } from '@/lib/rate-limit';
 import { reassignConversation } from '@/lib/inbox/assignment';
 import { isUuid } from '@/lib/api/uuid';
+import { recordActivity } from '@/lib/activity/record';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -29,7 +30,7 @@ type Params = { params: Promise<{ id: string }> };
  */
 export async function POST(request: Request, { params }: Params) {
   try {
-    const { supabase, userId } = await requireRole('agent');
+    const { supabase, userId, accountId, role } = await requireRole('agent');
 
     const limit = checkRateLimit(`inbox-assign:${userId}`, RATE_LIMITS.send);
     if (!limit.success) return rateLimitResponse(limit);
@@ -66,6 +67,24 @@ export async function POST(request: Request, { params }: Params) {
         { error: result.error, code: result.code },
         { status: result.status }
       );
+    }
+
+    // SPEC 075 F3 — só quando passa para ALGUÉM (§4 só tem
+    // `conversation.assigned`, não "devolvido à fila"). Devolver à fila
+    // (target === null) não é ausente por esquecimento: não há ator a
+    // filtrar do lado do NOVO dono, e o catálogo é fechado de propósito.
+    if (target !== null) {
+      void recordActivity(supabase, {
+        accountId,
+        resourceType: 'conversation',
+        action: 'conversation.assigned',
+        resourceId: id,
+        actor: { kind: 'user', userId, role },
+        channelId: result.conversation.channel_id ?? null,
+        conversationId: id,
+        contactId: result.conversation.contact_id,
+        metadata: { target_user_id: target },
+      });
     }
 
     return NextResponse.json({ conversation: result.conversation });

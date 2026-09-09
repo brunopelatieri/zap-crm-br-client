@@ -21,11 +21,22 @@
  * por par (conta × canal) e só então chama a função. A função nunca
  * conhece `.env` nem lê `channel_retention_policies` sozinha (SPEC 060
  * §2 ponto 1, §4.1).
+ *
+ * SPEC 075 F8/D-6 — as MESMAS duas portas também disparam a retenção de
+ * `account_activity_log` (`@/lib/activity/retention`), mas com regra
+ * PRÓPRIA: interruptor próprio (`ACTIVITY_LOG_RETENTION_DAYS`), sem
+ * corte por canal, e independente do claim/intervalo/`enabled` daqui —
+ * "uma sentença a mais dentro do cron que já existe", não um apêndice
+ * desta varredura.
  */
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { readPlatformRetentionDefaults } from '@/lib/platform/retention-defaults';
 import type { ChannelType } from '@/lib/channels/types';
+import {
+  sweepActivityLog,
+  type ActivityRetentionSweepResult,
+} from '@/lib/activity/retention';
 import { readRetentionDefaults } from './defaults';
 import { mergeGlobalDefaults } from './global-defaults';
 import { resolveEffectivePolicy, rowToPolicy } from './policy';
@@ -44,6 +55,16 @@ export interface RetentionSweepOutcome {
   ran: boolean;
   skippedReason?: RetentionSkipReason;
   result?: RetentionRunResult;
+  /**
+   * SPEC 075 F8/D-6 — "uma sentença a mais dentro do cron que já
+   * existe": a retenção de `account_activity_log` roda nas MESMAS duas
+   * portas que a de mensagens, mas com interruptor PRÓPRIO
+   * (`ACTIVITY_LOG_RETENTION_DAYS`), independente de
+   * `MESSAGE_RETENTION_ENABLED`. Por isso está fora do `if
+   * (!defaults.enabled) return` abaixo — sempre presente, mesmo quando
+   * a retenção de MENSAGENS está desligada ou pulou o intervalo.
+   */
+  activityLog: ActivityRetentionSweepResult;
 }
 
 function emptyRunResult(): RetentionRunResult {
@@ -59,18 +80,31 @@ function emptyRunResult(): RetentionRunResult {
 
 export async function runMessageRetention(
   now: Date = new Date(),
-  opts: { ignoreInterval?: boolean } = {}
+  opts: { ignoreInterval?: boolean; activityLogDryRun?: boolean } = {}
 ): Promise<RetentionSweepOutcome> {
+  const db = supabaseAdmin();
+
+  // SPEC 075 F8/D-6 — roda SEMPRE, antes de qualquer `return` da
+  // retenção de mensagens: tem interruptor próprio
+  // (`ACTIVITY_LOG_RETENTION_DAYS`) e não pode depender de
+  // `MESSAGE_RETENTION_ENABLED` nem do claim/intervalo daquela
+  // varredura. `sweepActivityLog` já nunca lança.
+  //
+  // `activityLogDryRun` existe para a verificação do F8 ("prévia antes
+  // de qualquer apagamento", §12) — `GET .../retention/cron?dry_run=1`
+  // conta o que SERIA apagado sem apagar nada.
+  const activityLog = await sweepActivityLog(db, now, {
+    dryRun: opts.activityLogDryRun,
+  });
+
   try {
     const defaults = readRetentionDefaults(process.env);
 
     // Regra 1 da SPEC (§1): nasce desligado. Nenhuma leitura de estado,
     // nenhum claim, nenhuma query em `channels` — sai antes de tudo.
     if (!defaults.enabled) {
-      return { ran: false, skippedReason: 'disabled' };
+      return { ran: false, skippedReason: 'disabled', activityLog };
     }
-
-    const db = supabaseAdmin();
 
     // SPEC 062 §5.3 — o elo novo da cadeia de precedência. UMA linha,
     // UMA vez por ciclo (não um SELECT por par), e o resultado viaja
@@ -89,7 +123,7 @@ export async function runMessageRetention(
 
     if (stateErr) {
       console.error('[retention-sweep] state read failed:', stateErr.message);
-      return { ran: false, skippedReason: 'claim_held' };
+      return { ran: false, skippedReason: 'claim_held', activityLog };
     }
 
     const lastRunAt = stateRow?.last_run_at
@@ -103,11 +137,11 @@ export async function runMessageRetention(
       !opts.ignoreInterval &&
       !shouldRunNow(lastRunAt, defaults.intervalHours, now)
     ) {
-      return { ran: false, skippedReason: 'interval_not_elapsed' };
+      return { ran: false, skippedReason: 'interval_not_elapsed', activityLog };
     }
 
     if (runningSince !== null && !isClaimStale(runningSince, now)) {
-      return { ran: false, skippedReason: 'claim_held' };
+      return { ran: false, skippedReason: 'claim_held', activityLog };
     }
 
     // Claim atômico: só reivindica se `running_since` ainda for NULL ou
@@ -126,11 +160,11 @@ export async function runMessageRetention(
 
     if (claimErr) {
       console.error('[retention-sweep] claim failed:', claimErr.message);
-      return { ran: false, skippedReason: 'claim_held' };
+      return { ran: false, skippedReason: 'claim_held', activityLog };
     }
     if (!claimRow) {
       // Outra invocação reivindicou entre a leitura e este UPDATE.
-      return { ran: false, skippedReason: 'claim_held' };
+      return { ran: false, skippedReason: 'claim_held', activityLog };
     }
 
     const result = emptyRunResult();
@@ -157,10 +191,10 @@ export async function runMessageRetention(
       }
     }
 
-    return { ran: true, result };
+    return { ran: true, result, activityLog };
   } catch (err) {
     console.error('[retention-sweep] sweep failed:', err);
-    return { ran: false, skippedReason: 'claim_held' };
+    return { ran: false, skippedReason: 'claim_held', activityLog };
   }
 }
 

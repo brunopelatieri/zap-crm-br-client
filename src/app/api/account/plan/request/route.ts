@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { emitSystemEvent } from '@/lib/notifications/emit';
+import { recordActivity } from '@/lib/activity/record';
 
 export async function POST(request: Request) {
   try {
@@ -79,6 +80,20 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    // SPEC 075 F4 — `source_table` é `plan_change_requests`, não
+    // `account_plan_events` (o §4 da SPEC erra a tabela: a solicitação
+    // ainda não efetivou troca nenhuma, então não existe linha em
+    // `account_plan_events` para apontar).
+    void recordActivity(ctx.supabase, {
+      accountId: ctx.accountId,
+      resourceType: 'plan',
+      action: 'plan.requested',
+      resourceLabel: plan.code,
+      actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+      source: { table: 'plan_change_requests', id: created.id },
+      metadata: { requested_plan_id: plan.id },
+    });
 
     // Grava na outbox e agenda a entrega (SPEC 063 §1, §3.1) — nunca
     // falha a solicitação por causa do aviso.

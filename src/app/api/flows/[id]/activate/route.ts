@@ -10,6 +10,7 @@ import {
   loadScopedChannel,
   scopedChannelError,
 } from '@/lib/channels/scoped-channel';
+import { recordActivity } from '@/lib/activity/record';
 
 /**
  * POST /api/flows/[id]/activate
@@ -141,5 +142,19 @@ export async function POST(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // SPEC 075 F4 — o catálogo (§4) só tem activated/deactivated; 'draft'
+  // e 'archived' são a mesma coisa do ponto de vista de "está rodando
+  // ou não" e caem em deactivated.
+  void recordActivity(admin, {
+    accountId,
+    resourceType: 'flow',
+    action: status === 'active' ? 'flow.activated' : 'flow.deactivated',
+    resourceId: id,
+    resourceLabel: (updated as { name?: string } | null)?.name ?? null,
+    actor: { kind: 'user', userId: user.id },
+    metadata: { status },
+  });
+
   return NextResponse.json({ flow: updated });
 }

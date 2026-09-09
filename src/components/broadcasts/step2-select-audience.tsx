@@ -30,7 +30,7 @@ import { QuotaMeter, exceedsQuota } from './quota-meter';
 import { useMessagingLimit } from './messaging-limit-provider';
 import { useSpreadsheetParser } from '@/hooks/use-spreadsheet-parser';
 import { estimateAudience } from '@/lib/audience/estimate';
-import { excludesOptedOut } from '@/lib/contacts/consent';
+import { excludesOptedOut } from '@/lib/contacts/consent-rules';
 import type {
   AudienceConfig,
   CustomFieldFilter,

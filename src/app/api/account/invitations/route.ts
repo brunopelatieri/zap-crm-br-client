@@ -34,6 +34,7 @@ import {
 } from '@/lib/rate-limit';
 import { checkQuota } from '@/lib/plans/gate';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { recordActivity } from '@/lib/activity/record';
 
 // Resolve the base URL we publish invite links under.
 //
@@ -352,6 +353,19 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    // SPEC 075 F4 — sem `resourceId` de pessoa (o convite ainda não tem
+    // usuário associado): a linha de `account_invitations` é o
+    // `source`, e o papel oferecido vai em `metadata`.
+    void recordActivity(ctx.supabase, {
+      accountId: ctx.accountId,
+      resourceType: 'member',
+      action: 'member.invited',
+      resourceLabel: label ?? null,
+      actor: { kind: 'user', userId: ctx.userId, role: ctx.role },
+      source: { table: 'account_invitations', id: data.id },
+      metadata: { role },
+    });
 
     return NextResponse.json(
       {

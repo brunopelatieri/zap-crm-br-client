@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { truncatePreview } from './delete';
+import { recordActivity } from '@/lib/activity/record';
 
 interface RevokeTargetRow {
   id: string;
@@ -26,8 +27,8 @@ interface RevokeTargetRow {
   // relacionamento inferido — o `!inner` aqui é 1:1, mas o cliente
   // genérico (sem tipos gerados) não garante a forma em compile-time.
   conversations:
-    | { account_id: string; channel_id: string | null }
-    | { account_id: string; channel_id: string | null }[]
+    | { account_id: string; channel_id: string | null; contact_id: string }
+    | { account_id: string; channel_id: string | null; contact_id: string }[]
     | null;
 }
 
@@ -36,6 +37,13 @@ function channelIdOf(row: RevokeTargetRow): string | null {
     ? row.conversations[0]
     : row.conversations;
   return row.channel_id ?? conversationRow?.channel_id ?? null;
+}
+
+function contactIdOf(row: RevokeTargetRow): string | null {
+  const conversationRow = Array.isArray(row.conversations)
+    ? row.conversations[0]
+    : row.conversations;
+  return conversationRow?.contact_id ?? null;
 }
 
 /**
@@ -57,7 +65,7 @@ export async function markRevokedByContact(
   const { data: rows, error } = await db
     .from('messages')
     .select(
-      'id, conversation_id, channel_id, content_type, content_text, media_path, created_at, deleted_at, conversations!inner(account_id, channel_id)'
+      'id, conversation_id, channel_id, content_type, content_text, media_path, created_at, deleted_at, conversations!inner(account_id, channel_id, contact_id)'
     )
     .eq('message_id', providerMessageId)
     .eq('conversations.account_id', accountId);
@@ -111,30 +119,75 @@ export async function markRevokedByContact(
     const channelType = channelId
       ? (channelTypeById.get(channelId) ?? null)
       : null;
+    // SPEC 075 F3 — o único caso de ator 'contact' do catálogo. `db`
+    // aqui é sempre um cliente de service-role (o chamador é um
+    // webhook), o mesmo que grava `message_deletion_log` abaixo.
+    const contactId = contactIdOf(row);
 
-    const { error: logError } = await db.from('message_deletion_log').insert({
-      account_id: accountId,
-      conversation_id: row.conversation_id,
-      message_id: row.id,
-      provider_message_id: providerMessageId,
-      channel_id: channelId,
-      channel_type: channelType,
-      action: 'mark',
-      // Não houve endpoint NOSSO a disparar — foi o contato quem apagou.
-      provider_outcome: 'not_attempted',
-      provider_error: null,
-      actor: 'contact',
-      actor_user_id: null,
-      actor_role: null,
-      content_type: row.content_type,
-      content_preview: truncatePreview(row.content_text),
-      had_media: !!row.media_path,
-      media_path: row.media_path,
-      media_removed: null,
-      message_created_at: row.created_at,
-    });
-    if (logError) {
-      console.error('[revoke-by-contact] log insert failed:', logError.message);
+    // As duas escritas abaixo são auditoria independente uma da outra
+    // (nenhuma lê o resultado da outra) — rodam em paralelo em vez de
+    // sequenciais, porque isto roda no caminho de resposta de um
+    // webhook inbound e cada linha de `targets` já soma duas idas ao
+    // banco.
+    const [logResult, activityResult] = await Promise.allSettled([
+      db.from('message_deletion_log').insert({
+        account_id: accountId,
+        conversation_id: row.conversation_id,
+        message_id: row.id,
+        provider_message_id: providerMessageId,
+        channel_id: channelId,
+        channel_type: channelType,
+        action: 'mark',
+        // Não houve endpoint NOSSO a disparar — foi o contato quem apagou.
+        provider_outcome: 'not_attempted',
+        provider_error: null,
+        actor: 'contact',
+        actor_user_id: null,
+        actor_role: null,
+        content_type: row.content_type,
+        content_preview: truncatePreview(row.content_text),
+        had_media: !!row.media_path,
+        media_path: row.media_path,
+        media_removed: null,
+        message_created_at: row.created_at,
+      }),
+      recordActivity(db, {
+        accountId,
+        resourceType: 'message',
+        action: 'message.deleted_by_contact',
+        resourceId: row.id,
+        resourceLabel: truncatePreview(row.content_text),
+        actor: contactId
+          ? { kind: 'contact', contactId }
+          : { kind: 'system', name: 'webhook' },
+        channelId,
+        channelType: (channelType as 'whatsapp_cloud' | 'whatsapp_qr') ?? null,
+        conversationId: row.conversation_id,
+        contactId,
+        // `source_id` aqui é `messages.id` (não o PK da linha de log que
+        // acabou de ser inserida, que este loop não captura de volta) —
+        // é a chave que "ver detalhes" usa para filtrar
+        // `message_deletion_log.message_id`, o suficiente para achar o
+        // registro.
+        source: { table: 'message_deletion_log', id: row.id },
+      }),
+    ]);
+
+    if (logResult.status === 'rejected') {
+      console.error('[revoke-by-contact] log insert threw:', logResult.reason);
+    } else if (logResult.value.error) {
+      console.error(
+        '[revoke-by-contact] log insert failed:',
+        logResult.value.error.message
+      );
+    }
+    if (activityResult.status === 'rejected') {
+      // `recordActivity` nunca lança pelo próprio contrato — defensivo,
+      // caso isso mude no futuro.
+      console.error(
+        '[revoke-by-contact] recordActivity threw:',
+        activityResult.reason
+      );
     }
   }
 }
