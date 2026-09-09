@@ -47,6 +47,7 @@ export const EVOLUTION_KEY_SCOPE = {
   '/send/location': 'instance',
   '/send/poll': 'instance',
   '/message/react': 'instance',
+  '/message/delete': 'instance',
   '/message/markread': 'instance',
   '/message/presence': 'instance',
   '/message/downloadmedia': 'instance',

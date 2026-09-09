@@ -387,6 +387,64 @@ export interface Message {
   is_favorite?: boolean;
   favorited_at?: string | null;
   favorited_by?: string | null;
+  /**
+   * Marcada como apagada (SPEC 074, migração 083). O interruptor — o
+   * resto do eixo (`deletion_scope`/`deletion_actor`/`deletion_error`)
+   * só muda o texto exibido. `null`/`undefined` = nunca apagada.
+   */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  /**
+   * Desfecho do PROVEDOR ao apagar, não uma escolha do usuário — os três
+   * valores são os três resultados possíveis do §1.3 da SPEC 074:
+   * revogada de fato (QRCode), canal sem endpoint de revogação (oficial)
+   * ou o endpoint existia e recusou.
+   */
+  deletion_scope?: 'revoked' | 'not_supported' | 'revoke_failed' | null;
+  /** Quem apagou: o agente pelo CRM, ou o próprio contato pelo aparelho
+   *  dele (revogação recebida via webhook, §9). */
+  deletion_actor?: 'agent' | 'contact' | null;
+  /** Motivo da recusa do provedor, quando `deletion_scope === 'revoke_failed'`. */
+  deletion_error?: string | null;
+  /** Mensagem NOVA criada pelo reenvio desta (§8) — nunca ressuscita a apagada. */
+  resent_from_message_id?: string | null;
+}
+
+// ============================================================
+// Log de apagamento de mensagem (migração 083, SPEC 074)
+// ============================================================
+
+export type MessageDeletionAction = 'mark' | 'purge' | 'revoke_retry';
+export type MessageDeletionProviderOutcome =
+  'revoked' | 'not_supported' | 'revoke_failed' | 'not_attempted';
+
+/**
+ * Registro append-only que SOBREVIVE à exclusão de uma mensagem — é por
+ * isso que ele é uma tabela à parte, e não mais colunas em `messages`
+ * (§3.2 da SPEC 074). Sem policy de escrita pelo cliente; só a rota, com
+ * `service_role`, grava.
+ */
+export interface MessageDeletionLog {
+  id: string;
+  account_id: string;
+  conversation_id: string | null;
+  message_id: string | null;
+  provider_message_id: string | null;
+  channel_id: string | null;
+  channel_type: string | null;
+  action: MessageDeletionAction;
+  provider_outcome: MessageDeletionProviderOutcome;
+  provider_error: string | null;
+  actor: 'agent' | 'contact';
+  actor_user_id: string | null;
+  actor_role: string | null;
+  content_type: string | null;
+  content_preview: string | null;
+  had_media: boolean;
+  media_path: string | null;
+  media_removed: boolean | null;
+  message_created_at: string | null;
+  created_at: string;
 }
 
 export type ReactionActor = 'customer' | 'agent';

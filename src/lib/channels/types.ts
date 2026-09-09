@@ -171,6 +171,14 @@ export interface SendReactionParams {
   emoji: string;
 }
 
+/** SPEC 074 §5. Presente só quando `capabilities.deleteForEveryone`. */
+export interface DeleteMessageParams {
+  /** Telefone do contato (E.164 sem '+'), como nos demais métodos. */
+  to: string;
+  /** Id da mensagem NO PROVEDOR. */
+  providerMessageId: string;
+}
+
 // ------------------------------------------------------------
 // Recebimento
 // ------------------------------------------------------------
@@ -318,6 +326,8 @@ export interface ChannelAdapter {
     ctx: ChannelContext,
     p: SendReactionParams
   ): Promise<SendResult>;
+  /** Presente quando `capabilities.deleteForEveryone` é true (SPEC 074 §5). */
+  deleteMessage?(ctx: ChannelContext, p: DeleteMessageParams): Promise<void>;
 
   /** Traduz o payload cru do provedor em eventos normalizados. */
   normalizeInbound(raw: unknown): NormalizedInbound[];

@@ -82,6 +82,9 @@ export interface SendMediaPayload {
   /** Original file name — surfaced to the recipient for documents. */
   filename?: string;
   replyToId?: string;
+  /** SPEC 074 §8 — presente quando este envio é o reenvio de uma
+   *  mensagem apagada; vira `messages.resent_from_message_id`. */
+  resentFromMessageId?: string;
 }
 
 interface ReplyDraft {
@@ -89,6 +92,25 @@ interface ReplyDraft {
   id: string;
   authorLabel: string;
   preview: string;
+}
+
+/**
+ * O que "Reenviar" (SPEC 074 §8) semeia no composer — texto preenche e
+ * devolve o foco (D-8, nunca envia sozinho); mídia reaproveita o MESMO
+ * objeto do bucket (D-9), com a legenda em aberto para edição. `id` é a
+ * mensagem apagada de origem, guardado até o envio de fato acontecer
+ * para fechar o ciclo em `resent_from_message_id`.
+ */
+export interface ResendSeed {
+  id: string;
+  text?: string;
+  media?: {
+    kind: ComposerMediaKind;
+    mediaUrl: string;
+    path: string;
+    filename: string;
+    caption: string;
+  };
 }
 
 // Mirrors the chat-media bucket's allowed_mime_types (migration 023) for
@@ -119,6 +141,17 @@ interface MediaDraft {
   previewUrl: string;
   filename: string;
   caption: string;
+  /**
+   * `true` só para um rascunho SEMEADO por "Reenviar" (SPEC 074 §8) —
+   * `path` aponta para o objeto da mensagem ORIGINAL, não algo que este
+   * composer subiu. Descartar/substituir este rascunho NUNCA pode chamar
+   * `removeStaged`: apagaria o anexo da mensagem antiga, que continua
+   * existindo (marcada, não excluída) e cujo registro (PDF, API) depende
+   * dele. `sendDraft()` já não faz GC em sucesso — esta flag cobre só os
+   * caminhos de DESCARTE (`discardDraft`, substituição por novo upload,
+   * desmontagem).
+   */
+  preserveOnDiscard?: boolean;
 }
 
 interface MessageComposerProps {
@@ -132,7 +165,11 @@ interface MessageComposerProps {
    */
   channelType: ChannelType;
   sessionExpired: boolean;
-  onSend: (text: string, replyToId?: string) => void;
+  onSend: (
+    text: string,
+    replyToId?: string,
+    resentFromMessageId?: string
+  ) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
   onSendInteractive: (
     payload: InteractiveMessagePayload,
@@ -149,6 +186,12 @@ interface MessageComposerProps {
   onTransferChannel?: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
+  /** SPEC 074 §8 — semeia o rascunho de um reenvio. Um objeto NOVO a
+   *  cada clique em "Reenviar" (mesmo `id` reenviado duas vezes ainda
+   *  dispara o efeito). Consumido uma vez; o chamador limpa o próprio
+   *  estado via `onResendSeedConsumed`. */
+  resendSeed?: ResendSeed | null;
+  onResendSeedConsumed?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -173,6 +216,8 @@ export function MessageComposer({
   onTransferChannel,
   replyTo,
   onClearReply,
+  resendSeed,
+  onResendSeedConsumed,
 }: MessageComposerProps) {
   const t = useTranslations('Inbox.composer');
   // Nome próprio — não reaproveita `t`: o composer já teve histórico
@@ -191,6 +236,9 @@ export function MessageComposer({
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // SPEC 074 §8 — id da mensagem apagada sendo reenviada, guardado entre
+  // o "Reenviar" que semeou o rascunho e o clique em Enviar de fato.
+  const [resendFromId, setResendFromId] = useState<string | null>(null);
 
   // Interactive-message builder dialog + quick-reply picker.
   const [interactiveOpen, setInteractiveOpen] = useState(false);
@@ -226,6 +274,25 @@ export function MessageComposer({
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, []);
 
+  /**
+   * Libera um rascunho de mídia ao ser descartado/substituído — o ÚNICO
+   * lugar que decide se o objeto do bucket é apagado (achado de code
+   * review: antes, cada um dos call sites abaixo repetia o mesmo `if
+   * (!d?.preserveOnDiscard)`, e um call site novo podia esquecer o
+   * guard). `preserveOnDiscard` (rascunho semeado por "Reenviar", SPEC
+   * 074 §8) aponta para o objeto de uma mensagem ORIGINAL, não algo que
+   * este composer subiu — apagar ali derrubaria o anexo da mensagem
+   * antiga. Todo caminho que troca/descarta `draft` passa por aqui.
+   */
+  const releaseDraft = useCallback(
+    (d: MediaDraft | null | undefined) => {
+      if (!d) return;
+      if (!d.preserveOnDiscard) removeStaged(d.path);
+      revokePreview(d.previewUrl);
+    },
+    [removeStaged, revokePreview]
+  );
+
   // Voice recording state. The recorder encodes Ogg/Opus in-browser
   // (opus-recorder) so there's no server-side transcode.
   const [recording, setRecording] = useState(false);
@@ -258,10 +325,9 @@ export function MessageComposer({
       cancelledRef.current = true;
       // stop() releases the mic stream + audio context inside opus-recorder.
       void recorderRef.current?.stop().catch(() => {});
-      removeStaged(draftRef.current?.path);
-      revokePreview(draftRef.current?.previewUrl);
+      releaseDraft(draftRef.current);
     };
-  }, [clearTimer, removeStaged, revokePreview]);
+  }, [clearTimer, releaseDraft]);
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -271,21 +337,59 @@ export function MessageComposer({
     el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
   }, []);
 
+  // SPEC 074 §8, D-8 — "Reenviar" PREENCHE, nunca envia sozinho. Texto
+  // vai para o textarea de sempre; mídia vira um rascunho normal, com
+  // `preserveOnDiscard` (descartá-lo não pode apagar o objeto da
+  // mensagem antiga). Um `ResendSeed` novo a cada clique — mesmo `id`
+  // reenviado duas vezes ainda dispara o efeito.
+  useEffect(() => {
+    if (!resendSeed) return;
+    // Um reenvio substitui o que quer que já estivesse na caixa — solta
+    // (com GC, exceto se o próprio rascunho anterior também for um
+    // reenvio) o que tinha antes de semear o novo. Sem isto, anexar uma
+    // foto de verdade e então clicar "Reenviar" em outra mensagem
+    // apagada órfãva o upload no bucket para sempre (achado de code
+    // review).
+    releaseDraft(draftRef.current);
+    setResendFromId(resendSeed.id);
+    if (resendSeed.media) {
+      setDraft({
+        kind: resendSeed.media.kind,
+        mediaUrl: resendSeed.media.mediaUrl,
+        path: resendSeed.media.path,
+        previewUrl: resendSeed.media.mediaUrl,
+        filename: resendSeed.media.filename,
+        caption: resendSeed.media.caption,
+        preserveOnDiscard: true,
+      });
+    } else {
+      setDraft(null);
+      setText(resendSeed.text ?? '');
+    }
+    requestAnimationFrame(() => {
+      adjustHeight();
+      textareaRef.current?.focus();
+    });
+    onResendSeedConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resendSeed]);
+
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sending || sessionExpired) return;
 
     setSending(true);
     try {
-      onSend(trimmed, replyTo?.id);
+      onSend(trimmed, replyTo?.id, resendFromId ?? undefined);
       setText('');
+      setResendFromId(null);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, onSend, replyTo?.id, resendFromId]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -488,9 +592,13 @@ export function MessageComposer({
           CHAT_MEDIA_BUCKET,
           file
         );
-        // Replacing an existing draft? GC the previous object first.
-        removeStaged(draftRef.current?.path);
-        revokePreview(draftRef.current?.previewUrl);
+        // Replacing an existing draft? Release it first (GC unless it
+        // was itself a resend seed). This new upload is a fresh
+        // attachment, unrelated to any pending resend — achado de code
+        // review: sem isto, um `resendFromId` deixado de um "Reenviar"
+        // anterior contaminava este envio novo e sem relação nenhuma.
+        releaseDraft(draftRef.current);
+        setResendFromId(null);
         setDraft({
           kind,
           mediaUrl: publicUrl,
@@ -505,7 +613,7 @@ export function MessageComposer({
         setBusy(false);
       }
     },
-    [removeStaged, revokePreview]
+    [releaseDraft]
   );
 
   const handlePicked = useCallback(
@@ -541,8 +649,10 @@ export function MessageComposer({
           CHAT_MEDIA_BUCKET,
           file
         );
-        removeStaged(draftRef.current?.path);
-        revokePreview(draftRef.current?.previewUrl);
+        // Mesmo raciocínio de `stageUpload`: nova gravação, sem relação
+        // com qualquer reenvio pendente.
+        releaseDraft(draftRef.current);
+        setResendFromId(null);
         setDraft({
           kind: 'audio',
           mediaUrl: publicUrl,
@@ -557,7 +667,7 @@ export function MessageComposer({
         setBusy(false);
       }
     },
-    [removeStaged, revokePreview]
+    [releaseDraft]
   );
 
   const startRecording = useCallback(async () => {
@@ -635,20 +745,33 @@ export function MessageComposer({
         draft.kind === 'audio' ? undefined : draft.caption.trim() || undefined,
       filename: draft.kind === 'document' ? draft.filename : undefined,
       replyToId: replyTo?.id,
+      resentFromMessageId: resendFromId ?? undefined,
     });
     // The object is now owned by the sent message — clear without GC.
-    // A pré-visualização, porém, é local e morre aqui.
+    // A pré-visualização, porém, é local e morre aqui (no-op quando é a
+    // URL assinada de um reenvio, não um blob: local).
     revokePreview(draft.previewUrl);
     setDraft(null);
+    setResendFromId(null);
     onClearReply?.();
-  }, [draft, busy, onSendMedia, replyTo?.id, onClearReply, revokePreview]);
+  }, [
+    draft,
+    busy,
+    onSendMedia,
+    replyTo?.id,
+    resendFromId,
+    onClearReply,
+    revokePreview,
+  ]);
 
-  // Discard GCs the staged object — it was uploaded but never sent.
+  // Discard GCs the staged object — it was uploaded but never sent. Não
+  // para um rascunho semeado por "Reenviar": `path` ali é o objeto da
+  // mensagem ORIGINAL, que continua existindo (ver `preserveOnDiscard`).
   const discardDraft = useCallback(() => {
-    removeStaged(draft?.path);
-    revokePreview(draft?.previewUrl);
+    releaseDraft(draft);
     setDraft(null);
-  }, [draft?.path, draft?.previewUrl, removeStaged, revokePreview]);
+    setResendFromId(null);
+  }, [draft, releaseDraft]);
 
   const setCaption = useCallback((caption: string) => {
     setDraft((d) => (d ? { ...d, caption } : d));

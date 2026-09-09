@@ -91,6 +91,10 @@ export interface TranscriptLabels {
   statusRead: string;
   statusFailed: string;
   favoriteBadge: string;
+  /** SPEC 074 §10 — badge ao lado do de favorita, exatamente um dos
+   *  dois: revogada de fato, ou só marcada (canal oficial / falha). */
+  deletedRevokedBadge: string;
+  deletedBadge: string;
   aiBadge: string;
   campaignBadge: (broadcastName: string) => string;
   templateBadge: (templateName: string) => string;
@@ -342,6 +346,16 @@ function badgesForMessage(
 ): string[] {
   const badges: string[] = [];
   if (message.is_favorite) badges.push(labels.favoriteBadge);
+  // SPEC 074 §10 — o PDF é registro; omitir que uma mensagem foi apagada
+  // seria falsificá-lo. Mensagem EXCLUÍDA (purge) nem chega aqui — não
+  // existe mais linha nenhuma para exportar.
+  if (message.deleted_at) {
+    badges.push(
+      message.deletion_scope === 'revoked'
+        ? labels.deletedRevokedBadge
+        : labels.deletedBadge
+    );
+  }
   if (message.ai_generated) badges.push(labels.aiBadge);
   if (message.broadcast?.name) {
     badges.push(labels.campaignBadge(message.broadcast.name));

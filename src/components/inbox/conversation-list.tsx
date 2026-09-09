@@ -721,7 +721,14 @@ function ConversationItem({
         )}
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <p className="text-muted-foreground truncate text-xs">
-            {conversation.last_message_text || t('noMessagesYet')}
+            {/* D-10 (SPEC 074): o marcador cru gravado por
+                `/api/inbox/messages/[id]/delete` (mesma convenção
+                não-traduzida de `[sticker]`/`[image]`) vira texto
+                localizado só na exibição — o valor gravado no banco
+                continua neutro. */}
+            {conversation.last_message_text === '[deleted]'
+              ? t('previewDeleted')
+              : conversation.last_message_text || t('noMessagesYet')}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
             {/* Botão "Assumir" — só na fila (aba Open). Reivindica a

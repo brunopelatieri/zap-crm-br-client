@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Contact, MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,13 @@ interface TemplatePickerProps {
    * existe lá.
    */
   channelId?: string | null;
+  /**
+   * Reenvio de uma mensagem apagada de template (SPEC 074 §8): pula a
+   * lista e abre direto no formulário de variáveis, pré-selecionado por
+   * nome. Sem correspondência (template renomeado/apagado da Meta desde
+   * então) cai de volta na lista normal — nunca um erro.
+   */
+  initialTemplateName?: string | null;
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
@@ -88,6 +95,7 @@ export function TemplatePicker({
   onSelect,
   contact,
   channelId,
+  initialTemplateName,
 }: TemplatePickerProps) {
   const t = useTranslations('Inbox.templatePicker');
 
@@ -195,6 +203,32 @@ export function TemplatePicker({
       cancelled = true;
     };
   }, [open, channelId]);
+
+  // Pré-seleção do reenvio (SPEC 074 §8) — só depois que a lista carrega,
+  // e só UMA VEZ por abertura do diálogo. `autoPickedRef` é o que faz
+  // isso valer: sem ele, o botão "Voltar" (que chama `resetSelection` e
+  // zera `selected`) reabria a mesma pré-seleção na hora — o operador
+  // nunca conseguia voltar para a lista livre para escolher outro
+  // template (achado de code review). O ref só é marcado no instante em
+  // que a pré-seleção de fato acontece, não antes — enquanto a lista
+  // ainda está carregando, ou se o template não for encontrado, o efeito
+  // continua livre para tentar de novo no próximo dep change.
+  const autoPickedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      autoPickedRef.current = false;
+      return;
+    }
+    if (loading || selected || !initialTemplateName || autoPickedRef.current) {
+      return;
+    }
+    const match = templates.find((tpl) => tpl.name === initialTemplateName);
+    if (match) {
+      autoPickedRef.current = true;
+      pickTemplate(match);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, loading, templates, initialTemplateName, selected]);
 
   function resetSelection() {
     setSelected(null);

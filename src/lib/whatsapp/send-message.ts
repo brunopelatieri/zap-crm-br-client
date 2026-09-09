@@ -115,6 +115,14 @@ export interface SendMessageParams {
   interactivePayload?: InteractiveMessagePayload | null;
   replyToMessageId?: string | null;
   /**
+   * Reenvio de uma mensagem apagada (SPEC 074 §8) — fecha o ciclo em
+   * `messages.resent_from_message_id`. `null`/ausente para todo envio
+   * comum. A linha nova NUNCA ressuscita a apagada; ela referencia a
+   * antiga só para o selo "reenviada" e o "reenviada às {hora}" no
+   * rodapé da original.
+   */
+  resentFromMessageId?: string | null;
+  /**
    * Autor humano da mensagem, gravado em `messages.sender_id`.
    *
    * A coluna existe desde a migração 001 e NUNCA foi preenchida por
@@ -255,6 +263,7 @@ export async function sendMessageToConversation(
     templateMessageParams,
     interactivePayload,
     replyToMessageId,
+    resentFromMessageId,
     senderId,
     coldSendOrigin,
   } = params;
@@ -660,6 +669,7 @@ export async function sendMessageToConversation(
       message_id: waMessageId,
       status: 'sent',
       reply_to_message_id: replyToMessageId || null,
+      resent_from_message_id: resentFromMessageId || null,
     })
     .select()
     .single();

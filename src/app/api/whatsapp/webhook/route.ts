@@ -12,6 +12,7 @@ import { proxyMediaUrl } from '@/lib/storage/media-url';
 import { buildMediaPath, baseMimeType } from '@/lib/storage/upload-media';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { ingestInbound, type IngestContext } from '@/lib/channels/ingest';
+import { markRevokedByContact } from '@/lib/messages/revoke-by-contact';
 import { resolveDefaultChannelId } from '@/lib/channels/send';
 import type { NormalizedMessage } from '@/lib/channels/types';
 import {
@@ -61,6 +62,15 @@ interface WhatsAppMessage {
     address?: string;
   };
   reaction?: { message_id: string; emoji: string };
+  /**
+   * SPEC 074 §9.1 — o CONTATO apagou uma mensagem DELE. Campo cru
+   * conforme o texto da SPEC ("messages[].type = 'revoke' com
+   * original_message_id"); `revoke.original_message_id` fica como
+   * alternativa defensiva — nenhum dos dois foi medido contra um evento
+   * real ainda (ver F10).
+   */
+  original_message_id?: string;
+  revoke?: { original_message_id?: string };
   /**
    * Set when the customer taps a button or list row on an interactive
    * message we sent. `button_reply.id` / `list_reply.id` is whatever id
@@ -664,6 +674,25 @@ async function processMessage(
       emoji: message.reaction?.emoji ?? '',
       occurredAt: metaMessageAt,
     });
+    return;
+  }
+
+  // SPEC 074 §9.1 — revogação: o CONTATO apagou uma mensagem DELE que já
+  // tínhamos ingerido. Não é mensagem nem reação: não cria linha, não
+  // mexe em `unread_count` — só localiza e marca. Fora de `ingestInbound`
+  // de propósito (nenhum outro evento normalizado faz UPDATE direto em
+  // `messages`; a decisão mora em `revoke-by-contact.ts`, compartilhada
+  // com o webhook do canal QRCode).
+  if (message.type === 'revoke') {
+    const originalId =
+      message.original_message_id || message.revoke?.original_message_id;
+    if (!originalId) {
+      console.warn(
+        '[whatsapp webhook] evento revoke sem original_message_id — ignorado'
+      );
+      return;
+    }
+    await markRevokedByContact(supabaseAdmin(), accountId, originalId);
     return;
   }
 

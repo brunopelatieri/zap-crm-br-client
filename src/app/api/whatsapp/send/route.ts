@@ -90,6 +90,9 @@ export async function POST(request: Request) {
       template_message_params,
       interactive_payload,
       reply_to_message_id,
+      // Reenvio de uma mensagem apagada (SPEC 074 §8) — repassado tal
+      // qual até `messages.resent_from_message_id`.
+      resent_from_message_id,
     } = body;
 
     if ((!conversationIdInput && !contact_id) || !message_type) {
@@ -261,6 +264,7 @@ export async function POST(request: Request) {
         templateMessageParams: template_message_params,
         interactivePayload: interactive_payload,
         replyToMessageId: reply_to_message_id,
+        resentFromMessageId: resent_from_message_id,
         // Autoria: este é o caminho com usuário logado. A API pública
         // (/api/v1/messages) omite e grava null — lá não há humano.
         senderId: user.id,

@@ -214,6 +214,10 @@ export const RATE_LIMITS = {
    *  delete — per user. These are occasional admin clicks, not a
    *  polling path, so the budget mirrors `adminAction`. */
   evolutionInstanceAction: { limit: 30, windowMs: 60_000 },
+  /** Apagar mensagem enviada (SPEC 074 §6), por usuário. Apagar é ação
+   *  rara e deliberada — 30/min é folgado para um humano clicando e
+   *  fecha a porta de um script varrendo a conversa mensagem a mensagem. */
+  msgDelete: { limit: 30, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

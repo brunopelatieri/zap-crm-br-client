@@ -45,6 +45,7 @@ import { capabilitiesFor } from '../capabilities';
 import type {
   ChannelAdapter,
   ChannelContext,
+  DeleteMessageParams,
   NormalizedInbound,
   SendLocationParams,
   SendMediaParams,
@@ -82,6 +83,18 @@ function credentials(ctx: ChannelContext): { instanceToken: string } {
  *  caminho novo. */
 function toEvolutionNumber(to: string): string {
   return sanitizePhoneForMeta(to);
+}
+
+/**
+ * `POST /message/delete` quer o `chat` como JID (`5519…@s.whatsapp.net`),
+ * não o número cru que os demais endpoints de envio aceitam (SPEC 074
+ * §5.1 item 1) — nenhum helper do repositório montava JID de SAÍDA antes
+ * disto. AINDA NÃO MEDIDO contra a instância real se o servidor também
+ * aceita o número cru; até a F10 confirmar, esta é a leitura mais
+ * conservadora da referência.
+ */
+function toEvolutionJid(to: string): string {
+  return `${toEvolutionNumber(to)}@s.whatsapp.net`;
 }
 
 /**
@@ -280,6 +293,28 @@ export const evolutionAdapter: ChannelAdapter = {
       number: toEvolutionNumber(p.to),
       id: p.targetProviderMessageId,
       reaction: p.emoji,
+    });
+  },
+
+  /**
+   * `POST /message/delete` — revogação "para todos" (SPEC 074 §1.2).
+   * Reaproveita o `send()` interno (mesmo tratamento de erro/log/
+   * `flagAuthFailureIfNeeded`); o `providerMessageId` que ele devolve é
+   * descartado — quem chama já tem o id, é o ALVO da revogação, não o
+   * resultado dela.
+   *
+   * AINDA NÃO MEDIDO contra o servidor real (SPEC 074 §5.1): falta
+   * confirmar (2) se o endpoint exige `fromMe`/`participant` e (3, 4) o
+   * formato do erro ao revogar mensagem antiga/inexistente e se o
+   * servidor ecoa a própria revogação como `SendMessage`. `deleteMessage`
+   * nunca lança por essas incertezas — como os demais métodos de envio,
+   * um erro do provedor sobe como `EvolutionApiError` e é o CHAMADOR
+   * (a rota) que decide `deletion_scope = 'revoke_failed'` com o motivo.
+   */
+  async deleteMessage(ctx, p: DeleteMessageParams): Promise<void> {
+    await send(ctx, '/message/delete', {
+      chat: toEvolutionJid(p.to),
+      messageId: p.providerMessageId,
     });
   },
 

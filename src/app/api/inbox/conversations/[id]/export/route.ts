@@ -223,6 +223,8 @@ export async function POST(
     statusRead: tDoc('statusRead'),
     statusFailed: tDoc('statusFailed'),
     favoriteBadge: tDoc('favoriteBadge'),
+    deletedRevokedBadge: tDoc('deletedRevokedBadge'),
+    deletedBadge: tDoc('deletedBadge'),
     aiBadge: tDoc('aiBadge'),
     campaignBadge: (name) => tDoc('campaignBadge', { name }),
     templateBadge: (name) => tDoc('templateBadge', { name }),

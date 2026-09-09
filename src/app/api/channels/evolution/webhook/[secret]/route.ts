@@ -57,6 +57,7 @@ import {
   pickString as firstString,
 } from '@/lib/evolution/payload';
 import { ingestInbound, type IngestContext } from '@/lib/channels/ingest';
+import { markRevokedByContact } from '@/lib/messages/revoke-by-contact';
 import type {
   NormalizedMessage,
   NormalizedReaction,
@@ -729,6 +730,43 @@ async function handleMessageEvent(
   const occurredAt = parseEvolutionTimestamp(pickKey(info, 'Timestamp'));
 
   const msg = pickRecord(data, 'Message') ?? {};
+
+  // Revogação (SPEC 074 §9.2): whatsmeow entrega como MESSAGE cujo
+  // `Message` carrega `protocolMessage` (`type: REVOKE`), não como um
+  // tipo de evento à parte — mesmo padrão de `reactionMessage` abaixo.
+  // Trata ANTES da reação porque as duas são protos irmãos de mensagem
+  // "não-conteúdo": nenhuma pode cair no caminho de baixo e virar bolha
+  // vazia.
+  const protocolMessage = pickRecord(msg, 'protocolMessage');
+  if (
+    protocolMessage &&
+    firstString(protocolMessage, 'type')?.toUpperCase() === 'REVOKE'
+  ) {
+    // Eco da PRÓPRIA revogação do CRM (o operador apagou pelo inbox, a
+    // Evolution ecoa via SEND_MESSAGE) — já processada por
+    // `/api/inbox/messages/[id]/delete`; ignorar evita marcar de novo
+    // com `deletion_actor` errado (§9.3.2, mesma decisão da reação).
+    if (isEcho) {
+      console.warn(
+        '[evolution webhook] eco de revogação (própria ou do operador pelo aparelho) — ignorado:',
+        providerMessageId
+      );
+      return;
+    }
+    const targetId = firstString(
+      pickRecord(protocolMessage, 'key'),
+      'ID',
+      'id'
+    );
+    if (!targetId) {
+      console.warn(
+        '[evolution webhook] protocolMessage REVOKE sem key.ID — ignorado'
+      );
+      return;
+    }
+    await markRevokedByContact(supabaseAdmin(), resolved.accountId, targetId);
+    return;
+  }
 
   // Reação: whatsmeow entrega como MESSAGE com `reactionMessage`, não
   // como um tipo de evento à parte.

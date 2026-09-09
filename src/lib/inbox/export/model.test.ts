@@ -21,6 +21,8 @@ const labels: TranscriptLabels = {
   statusRead: 'lida',
   statusFailed: 'falhou',
   favoriteBadge: '★ favorita',
+  deletedRevokedBadge: 'Revogada',
+  deletedBadge: 'Apagada',
   aiBadge: 'IA',
   campaignBadge: (name) => `Campanha: ${name}`,
   templateBadge: (name) => `Template: ${name}`,
@@ -311,6 +313,35 @@ describe('buildTranscript — mapeamento por content_type', () => {
     const bubble = firstBubble(buildTranscript(data, labels, formatDateTime));
     expect(bubble.badges).toContain('IA');
     expect(bubble.senderLabel).toBe('Bot (IA)');
+  });
+
+  it('mensagem revogada (SPEC 074) gera badge "Revogada", nao "Apagada"', () => {
+    const data = buildData({
+      messages: [
+        baseMessage({
+          sender_type: 'agent',
+          deleted_at: '2026-09-08T10:00:00.000Z',
+          deletion_scope: 'revoked',
+        }),
+      ],
+    });
+    const bubble = firstBubble(buildTranscript(data, labels, formatDateTime));
+    expect(bubble.badges).toContain('Revogada');
+    expect(bubble.badges).not.toContain('Apagada');
+  });
+
+  it('mensagem apagada no CRM (nao revogada) gera badge "Apagada"', () => {
+    const data = buildData({
+      messages: [
+        baseMessage({
+          sender_type: 'agent',
+          deleted_at: '2026-09-08T10:00:00.000Z',
+          deletion_scope: 'not_supported',
+        }),
+      ],
+    });
+    const bubble = firstBubble(buildTranscript(data, labels, formatDateTime));
+    expect(bubble.badges).toContain('Apagada');
   });
 });
 

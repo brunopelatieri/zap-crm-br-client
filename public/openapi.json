@@ -1967,7 +1967,10 @@
           "reply_to_message_id",
           "interactive_reply_id",
           "created_at",
-          "is_favorite"
+          "is_favorite",
+          "deleted_at",
+          "deletion_scope",
+          "deletion_actor"
         ],
         "properties": {
           "id": {
@@ -2023,6 +2026,21 @@
           "is_favorite": {
             "type": "boolean",
             "description": "Read-only. True when an agent starred this message in the inbox — the account's message retention policy never removes a favorited message."
+          },
+          "deleted_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Read-only. Null unless this message was deleted — an agent deleted one they sent, or the contact deleted one of their own from their phone. The row is kept for the record instead of disappearing (unless an admin purged it, in which case it stops appearing here entirely). There is no DELETE endpoint on this API."
+          },
+          "deletion_scope": {
+            "type": ["string", "null"],
+            "enum": ["revoked", "not_supported", "revoke_failed", null],
+            "description": "Read-only. Set only when deleted_at is set. 'revoked': actually removed from the contact's device (WhatsApp QRCode channel only). 'not_supported': the official Meta channel has no delete-for-everyone endpoint, so the message was only marked here. 'revoke_failed': the QRCode channel's delete request was rejected by WhatsApp."
+          },
+          "deletion_actor": {
+            "type": ["string", "null"],
+            "enum": ["agent", "contact", null],
+            "description": "Read-only. Set only when deleted_at is set. Who deleted the message: an agent from the inbox, or the contact from their own phone."
           }
         }
       },

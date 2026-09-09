@@ -56,8 +56,12 @@ import { MessageActions } from './message-actions';
 import {
   MessageComposer,
   CHAT_MEDIA_BUCKET,
+  type ComposerMediaKind,
+  type ResendSeed,
   type SendMediaPayload,
 } from './message-composer';
+import { signMediaUrl } from '@/lib/storage/sign-media-client';
+import { deletionScopeFor, deriveResendFilename } from '@/lib/messages/delete';
 import { resolveSessionWindow } from '@/lib/channels/session-window';
 import { deleteAccountMedia } from '@/lib/storage/upload-media';
 import { TemplatePicker } from './template-picker';
@@ -205,9 +209,10 @@ export function MessageThread({
   const tQuote = useTranslations('Inbox.replyQuote');
   const tBubble = useTranslations('Inbox.bubble');
   const tExport = useTranslations('Inbox.exportConversation');
+  const tDelete = useTranslations('Inbox.delete');
   const dateFnsLocale = getDateFnsLocale(useLocale());
 
-  const { user } = useAuth();
+  const { user, accountRole } = useAuth();
   // Admin/owner podem mover uma conversa para QUALQUER colega; um
   // agente comum só pode reivindicar para si (a lista fica restrita a
   // "eu mesmo") ou devolver à fila — espelha exatamente o gate do RPC
@@ -226,6 +231,14 @@ export function MessageThread({
   const [fetchError, setFetchError] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  // SPEC 074 §8 — reenvio: `resendSeed` alimenta o composer (texto/mídia);
+  // `resendTemplateName` pré-seleciona o `TemplatePicker` quando a
+  // mensagem apagada era um template.
+  const [resendSeed, setResendSeed] = useState<ResendSeed | null>(null);
+  const [resendTemplateOrigin, setResendTemplateOrigin] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const { members: profiles } = useAccountMembers();
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
@@ -545,7 +558,7 @@ export function MessageThread({
   }, [messages]);
 
   const handleSend = useCallback(
-    async (text: string, replyToId?: string) => {
+    async (text: string, replyToId?: string, resentFromMessageId?: string) => {
       if (!conversation) return;
 
       const tempId = `temp-${Date.now()}`;
@@ -560,6 +573,7 @@ export function MessageThread({
         status: 'sending',
         created_at: new Date().toISOString(),
         reply_to_message_id: replyToId,
+        resent_from_message_id: resentFromMessageId ?? null,
       };
       onNewMessage(optimisticMsg);
       setReplyTo(null);
@@ -573,6 +587,7 @@ export function MessageThread({
             message_type: 'text',
             content_text: text,
             reply_to_message_id: replyToId,
+            resent_from_message_id: resentFromMessageId,
           }),
         });
 
@@ -630,6 +645,7 @@ export function MessageThread({
         status: 'sending',
         created_at: new Date().toISOString(),
         reply_to_message_id: payload.replyToId,
+        resent_from_message_id: payload.resentFromMessageId ?? null,
       };
       onNewMessage(optimisticMsg);
       setReplyTo(null);
@@ -646,6 +662,7 @@ export function MessageThread({
             content_text: contentText,
             filename: payload.filename,
             reply_to_message_id: payload.replyToId,
+            resent_from_message_id: payload.resentFromMessageId,
           }),
         });
 
@@ -656,11 +673,15 @@ export function MessageThread({
           console.error('Failed to send media:', reason);
           toast.error(`Failed to send: ${reason}`);
           onUpdateMessage(tempId, { status: 'failed' });
-          // The upload never reached the recipient — GC the orphaned
-          // object rather than leaving it in the public bucket forever.
-          void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(
-            () => {}
-          );
+          // O upload nunca chegou ao destinatário — GC o objeto órfão.
+          // NÃO para um reenvio (SPEC 074 §8, D-9): `payload.path` ali é
+          // o objeto da mensagem ORIGINAL apagada, que continua
+          // existindo e cujo registro (PDF, API) depende dele.
+          if (!payload.resentFromMessageId) {
+            void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(
+              () => {}
+            );
+          }
           return;
         }
 
@@ -670,9 +691,11 @@ export function MessageThread({
         const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Failed to send: ${reason}`);
         onUpdateMessage(tempId, { status: 'failed' });
-        void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(
-          () => {}
-        );
+        if (!payload.resentFromMessageId) {
+          void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(
+            () => {}
+          );
+        }
       }
     },
     [conversation, onNewMessage, onUpdateMessage]
@@ -804,6 +827,10 @@ export function MessageThread({
 
       const renderedBody = renderTemplateBody(template.body_text, values.body);
       const tempId = `temp-${Date.now()}`;
+      const resentFromMessageId =
+        resendTemplateOrigin?.name === template.name
+          ? resendTemplateOrigin.id
+          : undefined;
 
       // Optimistic bubble — renders header/body/footer/buttons immediately
       // via template_preview, same as the persisted row will (mirrors how
@@ -836,6 +863,7 @@ export function MessageThread({
         },
         status: 'sending',
         created_at: new Date().toISOString(),
+        resent_from_message_id: resentFromMessageId ?? null,
       };
       onNewMessage(optimisticMsg);
 
@@ -859,6 +887,7 @@ export function MessageThread({
             },
             template_params: values.body,
             content_text: renderedBody,
+            resent_from_message_id: resentFromMessageId,
           }),
         });
 
@@ -878,9 +907,11 @@ export function MessageThread({
         const reason = err instanceof Error ? err.message : 'network error';
         toast.error(`Failed to send template: ${reason}`);
         onUpdateMessage(tempId, { status: 'failed' });
+      } finally {
+        setResendTemplateOrigin(null);
       }
     },
-    [conversation, onNewMessage, onUpdateMessage]
+    [conversation, onNewMessage, onUpdateMessage, resendTemplateOrigin]
   );
 
   // Build a quick id → Message map so reply quotes can be rendered without
@@ -888,6 +919,18 @@ export function MessageThread({
   const messagesById = useMemo(() => {
     const map = new Map<string, Message>();
     for (const m of messages) map.set(m.id, m);
+    return map;
+  }, [messages]);
+
+  // SPEC 074 §8 — "reenviada às {hora}" no rodapé da mensagem APAGADA
+  // que ganhou um filho (`resent_from_message_id` apontando para ela).
+  const resentAtByOriginalId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of messages) {
+      if (m.resent_from_message_id) {
+        map.set(m.resent_from_message_id, m.created_at);
+      }
+    }
     return map;
   }, [messages]);
 
@@ -1100,6 +1143,102 @@ export function MessageThread({
       }
     },
     [user?.id, onUpdateMessage, t]
+  );
+
+  // ---- SPEC 074 — apagar / reenviar mensagem enviada -------------------
+
+  const handleDeleteMessage = useCallback(
+    async (msg: Message, purge: boolean) => {
+      const wasAlreadyMarked = !!msg.deleted_at;
+      try {
+        const res = await fetch(`/api/inbox/messages/${msg.id}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ purge }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data?.error || tDelete('markFailed'));
+          return;
+        }
+
+        if (purge) {
+          // A linha real some via o `DELETE` do realtime (já assinado
+          // pela página); nada a corrigir localmente além do toast.
+          toast.success(tDelete('purgedToast'));
+          return;
+        }
+
+        if (wasAlreadyMarked) {
+          // Retomada (`revoke_retry`) — NÃO toca `deleted_at`/`deleted_by`.
+          onUpdateMessage(msg.id, {
+            deletion_scope: deletionScopeFor(data.provider_outcome),
+            deletion_error: data.provider_error ?? null,
+          });
+        } else {
+          onUpdateMessage(msg.id, {
+            deleted_at: new Date().toISOString(),
+            deletion_scope: deletionScopeFor(data.provider_outcome),
+            deletion_actor: 'agent',
+            deletion_error: data.provider_error ?? null,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to delete message:', err);
+        toast.error(tDelete('markFailed'));
+      }
+    },
+    [onUpdateMessage, tDelete]
+  );
+
+  const handleRetryRevoke = useCallback(
+    (msg: Message) => {
+      void handleDeleteMessage(msg, false);
+    },
+    [handleDeleteMessage]
+  );
+
+  const handleResend = useCallback(
+    async (msg: Message) => {
+      if (msg.content_type === 'template') {
+        setResendTemplateOrigin({
+          id: msg.id,
+          name: msg.template_name ?? '',
+        });
+        setTemplateModalOpen(true);
+        return;
+      }
+
+      if (msg.content_type === 'text') {
+        setResendSeed({ id: msg.id, text: msg.content_text ?? '' });
+        return;
+      }
+
+      // image | video | audio | document — reaproveita o MESMO objeto do
+      // bucket (D-9); `canResendMessage` já garantiu `media_path`
+      // presente antes de o botão sequer aparecer.
+      if (!msg.media_path) return;
+      try {
+        const signedUrl = await signMediaUrl({
+          bucket: CHAT_MEDIA_BUCKET,
+          path: msg.media_path,
+        });
+        setResendSeed({
+          id: msg.id,
+          media: {
+            kind: msg.content_type as ComposerMediaKind,
+            mediaUrl: signedUrl,
+            path: msg.media_path,
+            filename: deriveResendFilename(msg),
+            caption: msg.content_text ?? '',
+          },
+        });
+      } catch (err) {
+        console.error('Failed to prepare resend:', err);
+        toast.error(tDelete('markFailed'));
+      }
+    },
+    [tDelete]
   );
 
   const handleAssignChange = useCallback(
@@ -1509,6 +1648,17 @@ export function MessageThread({
                       const next = own?.emoji === emoji ? '' : emoji;
                       void postReaction(msg.id, next);
                     };
+                    // SPEC 074 §4 — o canal é o DA MENSAGEM quando
+                    // preenchido (desvio F6.3), senão o da conversa.
+                    // Mesma leitura que a rota faz, para que a barra
+                    // decida exatamente o que o servidor decidiria.
+                    const msgChannelType = msg.channel_id
+                      ? channelTypeOf(accountChannels, msg.channel_id)
+                      : threadChannelType;
+                    const deletedByName = msg.deleted_by
+                      ? (profiles.find((p) => p.user_id === msg.deleted_by)
+                          ?.full_name ?? null)
+                      : null;
                     return (
                       <MessageActions
                         key={msg.id}
@@ -1521,6 +1671,16 @@ export function MessageThread({
                           msg.id.startsWith('temp-')
                             ? undefined
                             : () => void handleToggleFavorite(msg)
+                        }
+                        role={accountRole ?? undefined}
+                        channelType={msgChannelType}
+                        onDelete={
+                          canSend
+                            ? (purge) => handleDeleteMessage(msg, purge)
+                            : undefined
+                        }
+                        onResend={
+                          canSend ? () => void handleResend(msg) : undefined
                         }
                       >
                         <MessageBubble
@@ -1543,6 +1703,12 @@ export function MessageThread({
                                 null)
                               : null
                           }
+                          deletedByName={deletedByName}
+                          onRetryRevoke={
+                            canSend ? () => handleRetryRevoke(msg) : undefined
+                          }
+                          resentAt={resentAtByOriginalId.get(msg.id) ?? null}
+                          isResend={!!msg.resent_from_message_id}
                         />
                       </MessageActions>
                     );
@@ -1604,14 +1770,20 @@ export function MessageThread({
         }
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
+        resendSeed={resendSeed}
+        onResendSeedConsumed={() => setResendSeed(null)}
       />
 
       <TemplatePicker
         open={templateModalOpen}
-        onOpenChange={setTemplateModalOpen}
+        onOpenChange={(next) => {
+          setTemplateModalOpen(next);
+          if (!next) setResendTemplateOrigin(null);
+        }}
         onSelect={handleSendTemplate}
         contact={contact}
         channelId={conversation?.channel_id ?? null}
+        initialTemplateName={resendTemplateOrigin?.name ?? null}
       />
 
       {contact && conversation?.channel_id && (

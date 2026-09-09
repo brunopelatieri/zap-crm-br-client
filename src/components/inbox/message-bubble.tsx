@@ -20,6 +20,8 @@ import {
   QrCode,
   BadgeCheck,
   Star,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ReplyQuote } from './reply-quote';
@@ -54,6 +56,20 @@ interface MessageBubbleProps {
    * mesmo motivo do selo de thread (`use-account-channels.ts`).
    */
   channelBadge?: Channel | null;
+  /**
+   * Nome de quem apagou (`message.deleted_by`), resolvido pelo chamador
+   * a partir da lista de membros — o balão não tem acesso a `profiles`.
+   * Só é lido quando `message.deletion_actor === 'agent'`.
+   */
+  deletedByName?: string | null;
+  /** "Tentar de novo" (SPEC 074 §6) — só renderizado quando
+   *  `message.deletion_scope === 'revoke_failed'`. */
+  onRetryRevoke?: () => void;
+  /** Horário em que esta mensagem (apagada) foi reenviada, quando existe
+   *  uma mensagem filha com `resent_from_message_id` apontando para ela. */
+  resentAt?: string | null;
+  /** Esta própria mensagem É o reenvio de outra — selo discreto "reenviada". */
+  isResend?: boolean;
 }
 
 function StatusIcon({
@@ -292,6 +308,43 @@ function DocumentLink({
   );
 }
 
+/**
+ * Corpo do balão apagado (SPEC 074 §7.1 D-2): o registro continua
+ * legível — texto riscado com opacidade reduzida — mas mídia NUNCA
+ * renderiza a miniatura; entra a moldura vermelha com o rótulo do tipo.
+ * Abrir o lightbox de algo que se acabou de apagar é ruído.
+ */
+function DeletedMessageContent({
+  message,
+  t,
+}: {
+  message: Message;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const mediaLabel: Record<string, string> = {
+    image: t('photo'),
+    video: t('video'),
+    audio: t('audio'),
+    document: t('document'),
+  };
+  const label = mediaLabel[message.content_type];
+
+  if (label) {
+    return (
+      <div className="border-destructive/40 bg-destructive/10 text-muted-foreground flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
+        <Ban className="text-destructive/70 h-4 w-4 shrink-0" />
+        <span>[{label}]</span>
+      </div>
+    );
+  }
+
+  return (
+    <p className="text-sm break-words whitespace-pre-wrap line-through opacity-60">
+      {message.content_text || t('unsupported')}
+    </p>
+  );
+}
+
 function MessageContent({
   message,
   t,
@@ -301,6 +354,10 @@ function MessageContent({
   t: ReturnType<typeof useTranslations>;
   onOpenMedia?: (messageId: string) => void;
 }) {
+  if (message.deleted_at) {
+    return <DeletedMessageContent message={message} t={t} />;
+  }
+
   switch (message.content_type) {
     case 'text':
       return (
@@ -564,6 +621,37 @@ function MessageContent({
   }
 }
 
+/**
+ * Texto do rodapé de apagamento (SPEC 074 §7.1) — quatro desfechos, na
+ * ordem do §1.3: revogada, apagada-no-CRM, revogação falhou, ou apagada
+ * pelo PRÓPRIO CONTATO (que sobrepõe os três anteriores, qualquer que
+ * seja `deletion_scope`).
+ */
+function deletionFooterText(
+  message: Message,
+  tDelete: ReturnType<typeof useTranslations>,
+  deletedByName?: string | null
+): string {
+  if (message.deletion_actor === 'contact') return tDelete('badgeByContact');
+
+  const time = message.deleted_at
+    ? format(new Date(message.deleted_at), 'HH:mm')
+    : '';
+  const who = deletedByName || '—';
+
+  switch (message.deletion_scope) {
+    case 'revoked':
+      return `${tDelete('badgeRevoked')} — ${tDelete('deletedBy', { name: who, time })}`;
+    case 'revoke_failed':
+      return tDelete('badgeRevokeFailed', {
+        reason: message.deletion_error || '',
+      });
+    case 'not_supported':
+    default:
+      return `${tDelete('badgeNotSupported')} — ${tDelete('badgeNotSupportedHint')}`;
+  }
+}
+
 export function MessageBubble({
   message,
   reply,
@@ -573,12 +661,32 @@ export function MessageBubble({
   senderName,
   onOpenMedia,
   channelBadge,
+  deletedByName,
+  onRetryRevoke,
+  resentAt,
+  isResend,
 }: MessageBubbleProps) {
   const t = useTranslations('Inbox.bubble');
+  const tDelete = useTranslations('Inbox.delete');
 
   const isAgent =
     message.sender_type === 'agent' || message.sender_type === 'bot';
+  const isDeleted = !!message.deleted_at;
   const time = format(new Date(message.created_at), 'HH:mm');
+  // Balão apagado troca o preenchimento colorido por um tom neutro com
+  // tinta vermelha (D-2) — os textos "claros sobre verde"/"claros sobre
+  // cinza" de baixo precisam de UMA cor segura contra esse fundo novo,
+  // em vez da distinção isAgent de sempre.
+  const mutedTextClass = isDeleted
+    ? 'text-muted-foreground'
+    : isAgent
+      ? 'text-neutral-900/60'
+      : 'text-muted-foreground';
+  const badgeClass = isDeleted
+    ? 'bg-muted text-muted-foreground'
+    : isAgent
+      ? 'bg-neutral-900/10 text-neutral-900'
+      : 'bg-primary-foreground/20 text-primary-foreground';
 
   // Row alignment + width cap are owned by <MessageActions> so its hover
   // group matches the bubble's content area, not the full row.
@@ -587,20 +695,29 @@ export function MessageBubble({
       <div
         className={cn(
           'relative rounded-2xl px-3 py-2',
-          // Outgoing bubbles use a fixed pale-green fill (not the themed
-          // `--primary`) so agent messages are always visually distinct
-          // from the accent color. Text/timestamp/badge below are all
-          // dark neutrals chosen for contrast against that light fill.
-          isAgent
-            ? 'rounded-br-md bg-[#E1F7C9] text-neutral-900'
-            : 'bg-muted text-foreground rounded-bl-md'
+          isDeleted
+            ? cn(
+                'border-destructive/60 bg-destructive/5 text-foreground border',
+                isAgent ? 'rounded-br-md' : 'rounded-bl-md'
+              )
+            : // Outgoing bubbles use a fixed pale-green fill (not the themed
+              // `--primary`) so agent messages are always visually distinct
+              // from the accent color. Text/timestamp/badge below are all
+              // dark neutrals chosen for contrast against that light fill.
+              isAgent
+              ? 'rounded-br-md bg-[#E1F7C9] text-neutral-900'
+              : 'bg-muted text-foreground rounded-bl-md'
         )}
       >
         {senderName && (
           <p
             className={cn(
               'mb-0.5 truncate text-xs font-semibold',
-              isAgent ? 'text-neutral-900/70' : 'text-foreground/70'
+              isDeleted
+                ? 'text-foreground/70'
+                : isAgent
+                  ? 'text-neutral-900/70'
+                  : 'text-foreground/70'
             )}
           >
             {senderName}
@@ -640,9 +757,7 @@ export function MessageBubble({
             <span
               className={cn(
                 'inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] leading-none font-semibold tracking-wide uppercase',
-                isAgent
-                  ? 'bg-neutral-900/10 text-neutral-900'
-                  : 'bg-primary-foreground/20 text-primary-foreground'
+                badgeClass
               )}
               title={t('aiBadgeTitle')}
             >
@@ -659,9 +774,7 @@ export function MessageBubble({
             <span
               className={cn(
                 'inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] leading-none font-semibold',
-                isAgent
-                  ? 'bg-neutral-900/10 text-neutral-900'
-                  : 'bg-primary-foreground/20 text-primary-foreground'
+                badgeClass
               )}
               title={t('channelBadgeTitle', { channel: channelBadge.name })}
             >
@@ -673,6 +786,21 @@ export function MessageBubble({
               {channelBadge.name}
             </span>
           )}
+          {/* Selo "reenviada" (§8) — esta mensagem NASCEU de um reenvio;
+              o discreto aqui, o "reenviada às {hora}" fica na ORIGINAL
+              apagada (rodapé de apagamento, abaixo). */}
+          {isAgent && isResend && (
+            <span
+              className={cn(
+                'inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] leading-none font-semibold',
+                badgeClass
+              )}
+              title={tDelete('resentBadge')}
+            >
+              <RotateCcw className="h-2.5 w-2.5" />
+              {tDelete('resentBadge')}
+            </span>
+          )}
           <span
             className={cn(
               'text-[10px]',
@@ -680,7 +808,7 @@ export function MessageBubble({
               // timestamp must read against that (not the neutral
               // foreground) — otherwise it goes low-contrast in light
               // mode. Inbound bubbles use the muted surface.
-              isAgent ? 'text-neutral-900/60' : 'text-muted-foreground'
+              mutedTextClass
             )}
           >
             {time}
@@ -693,6 +821,37 @@ export function MessageBubble({
             />
           )}
         </div>
+        {/* Rodapé de apagamento (SPEC 074 §7.1) — mesma posição, mesmo
+            horário, mesmo status de entrega acima; só a moldura e este
+            rodapé mudam. */}
+        {isDeleted && (
+          <div
+            className={cn(
+              'mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t pt-1',
+              isAgent ? 'border-neutral-900/10' : 'border-border'
+            )}
+          >
+            <p className={cn('text-[10px]', mutedTextClass)}>
+              {deletionFooterText(message, tDelete, deletedByName)}
+            </p>
+            {message.deletion_scope === 'revoke_failed' &&
+              message.deletion_actor === 'agent' &&
+              onRetryRevoke && (
+                <button
+                  type="button"
+                  onClick={onRetryRevoke}
+                  className="text-[10px] font-semibold text-blue-500 underline-offset-2 hover:underline"
+                >
+                  {tDelete('retryRevoke')}
+                </button>
+              )}
+          </div>
+        )}
+        {isDeleted && resentAt && (
+          <p className={cn('mt-0.5 text-[10px]', mutedTextClass)}>
+            {tDelete('resentAt', { time: format(new Date(resentAt), 'HH:mm') })}
+          </p>
+        )}
       </div>
       {reactions && reactions.length > 0 && onToggleReaction && (
         <MessageReactions

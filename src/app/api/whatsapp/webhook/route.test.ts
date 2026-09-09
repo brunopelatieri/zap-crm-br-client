@@ -53,6 +53,11 @@ vi.mock('@/lib/webhooks/deliver', () => ({
   dispatchWebhookEvent: (...args: unknown[]) => dispatchWebhookEvent(...args),
 }));
 
+const markRevokedByContact = vi.fn();
+vi.mock('@/lib/messages/revoke-by-contact', () => ({
+  markRevokedByContact: (...args: unknown[]) => markRevokedByContact(...args),
+}));
+
 /**
  * `getMediaUrl`/`downloadMedia` reais fariam chamada de rede à Meta.
  * Cada teste de mídia ajusta o resolve/reject conforme o cenário.
@@ -216,6 +221,7 @@ beforeEach(() => {
   afterCallbacks.length = 0;
   ingestInbound.mockResolvedValue(undefined);
   dispatchWebhookEvent.mockResolvedValue(undefined);
+  markRevokedByContact.mockResolvedValue(undefined);
   statusMessageRow = null;
   channelRow = { id: 'chan-1', name: 'WhatsApp Oficial', status: 'connected' };
   storageUploadResult = { error: null };
@@ -503,5 +509,63 @@ describe('message.status_updated carrega channel_id/channel_type (SPEC 049 §5.5
     await afterCallbacks[0]!();
 
     expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/whatsapp/webhook — revogação pelo contato (SPEC 074 §9.1)', () => {
+  function revokeRequest(originalMessageId: string | undefined): Request {
+    return request({
+      entry: [
+        {
+          id: 'entry-1',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '+551130000000',
+                  phone_number_id: 'pnid-1',
+                },
+                contacts: [
+                  { profile: { name: 'Ana' }, wa_id: '5511999999999' },
+                ],
+                messages: [
+                  {
+                    id: 'wamid.revoke-event',
+                    from: '5511999999999',
+                    timestamp: '1786000000',
+                    type: 'revoke',
+                    ...(originalMessageId
+                      ? { original_message_id: originalMessageId }
+                      : {}),
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it('marca a mensagem original via markRevokedByContact, sem ingerir nada', async () => {
+    await POST(revokeRequest('wamid.original'));
+    await afterCallbacks[0]!();
+
+    expect(markRevokedByContact).toHaveBeenCalledTimes(1);
+    expect(markRevokedByContact).toHaveBeenCalledWith(
+      expect.anything(),
+      'acct-1',
+      'wamid.original'
+    );
+    expect(ingestInbound).not.toHaveBeenCalled();
+  });
+
+  it('sem original_message_id, ignora sem chamar markRevokedByContact', async () => {
+    await POST(revokeRequest(undefined));
+    await afterCallbacks[0]!();
+
+    expect(markRevokedByContact).not.toHaveBeenCalled();
   });
 });

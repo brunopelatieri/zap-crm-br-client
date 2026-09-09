@@ -57,6 +57,15 @@ export interface ApiMessage {
    * sido podado; ver docs/public-api.md.
    */
   is_favorite: boolean;
+  /**
+   * Apagamento (SPEC 074 §10) — somente leitura, mesmo precedente de
+   * `is_favorite`. `deleted_at` nulo = nunca apagada. Uma mensagem
+   * EXCLUÍDA do sistema (purge) para de existir — some da paginação,
+   * não aparece com estes campos preenchidos.
+   */
+  deleted_at: string | null;
+  deletion_scope: 'revoked' | 'not_supported' | 'revoke_failed' | null;
+  deletion_actor: 'agent' | 'contact' | null;
 }
 
 /**
@@ -111,5 +120,8 @@ export function serializeMessage(m: Message): ApiMessage {
     interactive_reply_id: m.interactive_reply_id ?? null,
     created_at: m.created_at,
     is_favorite: m.is_favorite ?? false,
+    deleted_at: m.deleted_at ?? null,
+    deletion_scope: m.deletion_scope ?? null,
+    deletion_actor: m.deletion_actor ?? null,
   };
 }

@@ -38,6 +38,11 @@ vi.mock('@/lib/channels/ingest', () => ({
   ingestInbound: (...args: unknown[]) => ingestInbound(...args),
 }));
 
+const markRevokedByContact = vi.fn();
+vi.mock('@/lib/messages/revoke-by-contact', () => ({
+  markRevokedByContact: (...args: unknown[]) => markRevokedByContact(...args),
+}));
+
 const bindChannelToPhone = vi.fn(
   async ({ channelId }: { channelId: string }) => ({
     channelId,
@@ -514,6 +519,55 @@ describe('MESSAGE — identidade', () => {
     expect(ctx.channelType).toBe('whatsapp_qr');
     expect(ctx.channelId).toBe('chan-1');
     expect(ctx.accountId).toBe('acct-1');
+  });
+});
+
+describe('revogação pelo contato (SPEC 074 §9.2)', () => {
+  it('protocolMessage REVOKE do cliente chama markRevokedByContact, sem ingerir nada', async () => {
+    await post(
+      SECRET,
+      payload('MESSAGE', {
+        Info: { Chat: '5511999999999@s.whatsapp.net', ID: 'msg-1' },
+        Message: {
+          protocolMessage: { type: 'REVOKE', key: { ID: 'alvo-revogado' } },
+        },
+      })
+    );
+
+    expect(markRevokedByContact).toHaveBeenCalledTimes(1);
+    expect(markRevokedByContact).toHaveBeenCalledWith(
+      expect.anything(),
+      'acct-1',
+      'alvo-revogado'
+    );
+    expect(ingestInbound).not.toHaveBeenCalled();
+  });
+
+  it('eco da própria revogação (operador/CRM) é ignorado', async () => {
+    await post(
+      SECRET,
+      payload('SEND_MESSAGE', {
+        Info: { Chat: '5511999999999@s.whatsapp.net', ID: 'msg-1' },
+        Message: {
+          protocolMessage: { type: 'REVOKE', key: { ID: 'alvo-revogado' } },
+        },
+      })
+    );
+
+    expect(markRevokedByContact).not.toHaveBeenCalled();
+    expect(ingestInbound).not.toHaveBeenCalled();
+  });
+
+  it('protocolMessage REVOKE sem key.ID é ignorado', async () => {
+    await post(
+      SECRET,
+      payload('MESSAGE', {
+        Info: { Chat: '5511999999999@s.whatsapp.net', ID: 'msg-1' },
+        Message: { protocolMessage: { type: 'REVOKE' } },
+      })
+    );
+
+    expect(markRevokedByContact).not.toHaveBeenCalled();
   });
 });
 

@@ -1967,7 +1967,10 @@
           "reply_to_message_id",
           "interactive_reply_id",
           "created_at",
-          "is_favorite"
+          "is_favorite",
+          "deleted_at",
+          "deletion_scope",
+          "deletion_actor"
         ],
         "properties": {
           "id": {
@@ -2023,6 +2026,21 @@
           "is_favorite": {
             "type": "boolean",
             "description": "Somente leitura. Verdadeiro quando um agente favoritou esta mensagem no inbox — a política de retenção da conta nunca remove uma mensagem favoritada."
+          },
+          "deleted_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Somente leitura. Nulo, a menos que esta mensagem tenha sido apagada — um agente apagou uma que ele enviou, ou o contato apagou uma dele pelo próprio celular. A linha é mantida para registro em vez de desaparecer (a menos que um admin a tenha excluído do sistema, e aí ela para de aparecer aqui por completo). Não existe endpoint DELETE nesta API."
+          },
+          "deletion_scope": {
+            "type": ["string", "null"],
+            "enum": ["revoked", "not_supported", "revoke_failed", null],
+            "description": "Somente leitura. Só preenchido quando deleted_at está preenchido. 'revoked': removida de fato do aparelho do contato (só no canal WhatsApp QRCode). 'not_supported': o canal oficial da Meta não tem endpoint de apagar-para-todos, então a mensagem só foi marcada aqui. 'revoke_failed': o pedido de apagar do canal QRCode foi recusado pelo WhatsApp."
+          },
+          "deletion_actor": {
+            "type": ["string", "null"],
+            "enum": ["agent", "contact", null],
+            "description": "Somente leitura. Só preenchido quando deleted_at está preenchido. Quem apagou a mensagem: um agente pelo inbox, ou o próprio contato pelo celular dele."
           }
         }
       },
