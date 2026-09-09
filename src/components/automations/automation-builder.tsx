@@ -1699,17 +1699,28 @@ function StepRenderer({
   parentPath: StepPath;
 } & Omit<StepListProps, 'steps' | 'parentPath'>) {
   const t = useTranslations('Automations.builder');
-  const path: StepPath = [
-    ...parentPath,
+  // `parentPath` já termina com um marcador de branch (com índice
+  // placeholder 0) quando este passo está dentro de um Sim/Não —
+  // `ConditionBranches` o monta assim de propósito. Precisamos
+  // SUBSTITUIR esse último elemento pelo índice real deste passo, não
+  // acrescentar um novo — apendar duplicava o segmento de branch e
+  // fazia `mapAtPath`/`walkBranches` tentar descer mais um nível
+  // (procurando `branches` dentro de um passo que não tem, ex.: "Enviar
+  // mensagem"), e retornar sem aplicar nada via `if (!branches) return
+  // branches`. Resultado: editar texto/config de qualquer passo aninhado
+  // num branch não salvava nada, sem erro no console.
+  const path: StepPath =
     parentScope.kind === 'root'
-      ? { kind: 'root', index }
-      : {
-          kind: 'branch',
-          parentCid: parentScope.parentCid,
-          branch: parentScope.branch,
-          index,
-        },
-  ];
+      ? [...parentPath, { kind: 'root', index }]
+      : [
+          ...parentPath.slice(0, -1),
+          {
+            kind: 'branch',
+            parentCid: parentScope.parentCid,
+            branch: parentScope.branch,
+            index,
+          },
+        ];
   const meta = STEP_META[step.step_type];
   const Icon = meta.icon;
   const expanded = props.expandedId === step.cid;
