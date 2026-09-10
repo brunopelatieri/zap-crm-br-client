@@ -196,7 +196,9 @@ export async function POST(request: Request) {
   }
 
   // SPEC 075 F4.
-  void recordActivity(supabase, {
+  // Usar admin em vez de supabase para evitar problemas de RLS na leitura
+  // de enriquecimento de nome/papel do ator.
+  void recordActivity(admin, {
     accountId,
     resourceType: 'automation',
     action: 'automation.created',

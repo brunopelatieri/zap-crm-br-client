@@ -140,7 +140,7 @@ export function Sidebar({
   const visibleNavItems: NavItem[] = useMemo(() => {
     if (!accountRole || !canViewAccountActivity(accountRole)) return navItems;
     const withActivity = [...navItems];
-    withActivity.splice(1, 0, {
+    withActivity.splice(3, 0, {
       href: '/activity',
       labelKey: 'activity',
       icon: ScrollText,

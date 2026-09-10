@@ -176,7 +176,7 @@
     "automations": "Automações",
     "flows": "Fluxos",
     "aiAgents": "Agentes de IA",
-    "activity": "Atividade",
+    "activity": "Atividades",
     "plan": "Plano e uso",
     "settings": "Configurações",
     "beta": "Beta",
@@ -1536,7 +1536,7 @@
       "table": {
         "name": "Nome",
         "template": "Template",
-        "recipients": "Contatos",
+        "recipients": "Envios",
         "delivery": "Entrega",
         "read": "Lida",
         "status": "Status",
