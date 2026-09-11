@@ -1545,6 +1545,7 @@
       "errorLoad": "Falha ao carregar disparos",
       "retry": "Tentar novamente",
       "variant": "Variante {variant}",
+      "scheduledFor": "Agendado {date}",
       "actions": {
         "edit": "Editar"
       }
@@ -1587,6 +1588,7 @@
       "backToBroadcasts": "Voltar aos disparos",
       "notFound": "Disparo não encontrado",
       "template": "Template: {name}",
+      "scheduledFor": "Agendado {date}",
       "createdAt": "Criado {date}",
       "continueEditing": "Continuar edição",
       "draftBanner": "Rascunho — esta campanha ainda não foi enviada.",

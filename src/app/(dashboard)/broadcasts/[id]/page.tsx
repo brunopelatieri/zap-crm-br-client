@@ -35,6 +35,7 @@ import {
   Copy,
   ScrollText,
   Pencil,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getBroadcastStatus, getRecipientStatus } from '@/lib/broadcast-status';
@@ -49,6 +50,8 @@ import { RecipientErrorCell } from '@/components/broadcasts/recipient-error-cell
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
+import { useAccountChannels } from '@/lib/channels/use-account-channels';
+import { ChannelBadge } from '@/components/channels/channel-badge';
 
 /**
  * Cadência do polling enquanto o disparo roda no servidor. Igual à da
@@ -95,6 +98,7 @@ export default function BroadcastDetailPage() {
   const tAwaitingCheck = useTranslations('Broadcasts.awaitingCheck');
   const tWebhook = useTranslations('Broadcasts.webhookFunnel');
   const canEdit = useCan('send-messages');
+  const channels = useAccountChannels();
   const broadcastId = params.id as string;
 
   const [broadcast, setBroadcast] = useState<Broadcast | null>(null);
@@ -401,14 +405,46 @@ export default function BroadcastDetailPage() {
                 </button>
               </div>
             ) : (
-              <div className="text-muted-foreground mt-1 flex items-center gap-3 text-sm">
-                <span>{t('template', { name: broadcast.template_name })}</span>
-                <span>-</span>
-                <span>
-                  {t('createdAt', {
-                    date: new Date(broadcast.created_at).toLocaleDateString(),
-                  })}
-                </span>
+              <div className="mt-1 space-y-1.5">
+                {channels.count > 1 && broadcast.channel_id && (
+                  <div className="flex items-center gap-1.5">
+                    <ChannelBadge
+                      channel={channels.byId.get(broadcast.channel_id)}
+                    />
+                  </div>
+                )}
+                <div className="text-muted-foreground flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-1.5">
+                    <FileText className="h-3.5 w-3.5" />
+                    <span className="font-mono">{broadcast.template_name}</span>
+                  </div>
+                  <span>·</span>
+                {broadcast.scheduled_at ? (
+                  <>
+                    <span>
+                      {`Agendado ${new Date(broadcast.scheduled_at).toLocaleString('pt-BR', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}`}
+                    </span>
+                    <span>·</span>
+                    <span>
+                      {t('createdAt', {
+                        date: new Date(broadcast.created_at).toLocaleDateString(),
+                      })}
+                    </span>
+                  </>
+                ) : (
+                  <span>
+                    {t('createdAt', {
+                      date: new Date(broadcast.created_at).toLocaleDateString(),
+                    })}
+                  </span>
+                )}
+                </div>
               </div>
             )}
             {broadcast.source === 'webhook' && (

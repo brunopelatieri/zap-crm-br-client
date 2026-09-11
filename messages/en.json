@@ -1545,6 +1545,7 @@
       "errorLoad": "Failed to load broadcasts",
       "retry": "Retry",
       "variant": "Variant {variant}",
+      "scheduledFor": "Scheduled {date}",
       "actions": {
         "edit": "Edit"
       }
@@ -1587,6 +1588,7 @@
       "backToBroadcasts": "Back to Broadcasts",
       "notFound": "Broadcast not found",
       "template": "Template: {name}",
+      "scheduledFor": "Scheduled {date}",
       "createdAt": "Created {date}",
       "continueEditing": "Continue editing",
       "draftBanner": "Draft — this campaign hasn't been sent yet.",
