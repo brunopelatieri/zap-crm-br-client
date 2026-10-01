@@ -85,7 +85,7 @@ export function isMetaCredentialError(err: unknown): boolean {
   return err.status >= 400 && err.status < 500;
 }
 
-async function throwMetaError(
+export async function throwMetaError(
   response: Response,
   fallback: string
 ): Promise<never> {

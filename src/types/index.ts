@@ -261,7 +261,10 @@ export interface Conversation {
 // Notifications (migration 027)
 // ============================================================
 
-export type NotificationType = 'conversation_assigned';
+export type NotificationType =
+  | 'conversation_assigned'
+  /** SPEC 076 (migração 086): envio bloqueado por pagamento (131042). */
+  | 'channel_payment_blocked';
 
 export interface Notification {
   id: string;
@@ -271,6 +274,8 @@ export interface Notification {
   type: NotificationType;
   conversation_id?: string;
   contact_id?: string;
+  /** Canal a que o alerta se refere (migração 086). */
+  channel_id?: string;
   /** Who triggered it. Null when an automation/system assigned it. */
   actor_user_id?: string;
   title: string;
@@ -326,6 +331,13 @@ export interface Message {
    * `status === 'failed'`.
    */
   error_message?: string | null;
+  /**
+   * `statuses[].pricing.billable` do webhook da Meta (SPEC 076 D-7,
+   * migração 086). Nulo = a Meta não informou.
+   */
+  pricing_billable?: boolean | null;
+  /** `statuses[].pricing.category` em MAIÚSCULAS (SPEC 076 D-7). */
+  pricing_category?: string | null;
   created_at: string;
   reply_to_message_id?: string;
   /**
@@ -480,6 +492,74 @@ export interface WhatsAppConfig {
   last_registration_error?: string;
   /** Anti-fatigue cooldown in days (SPEC 044 §6.2). 0 = disabled. */
   broadcast_cooldown_days?: number;
+}
+
+// ============================================================
+// WhatsApp billing monitor (SPEC 076, migration 086)
+// ============================================================
+
+/** Vocabulário de `health_status.can_send_message` da Meta (F-6). */
+export type WabaHealthValue = 'AVAILABLE' | 'LIMITED' | 'BLOCKED';
+
+/** Uma entidade de `health_status.entities[]`, como guardada em jsonb. */
+export interface WabaHealthEntity {
+  entity_type: string;
+  id: string | null;
+  can_send_message: string | null;
+  errors: Array<{
+    error_code: number | null;
+    error_description: string | null;
+    possible_solution: string | null;
+  }>;
+  additional_info: string[];
+}
+
+/** Consumo de uma categoria de preço no mês. `cost` nulo = indisponível. */
+export interface BillingSpendCategory {
+  volume: number;
+  cost: number | null;
+}
+
+export type BillingErrorKind =
+  'auth' | 'permission' | 'rate_limit' | 'transient' | 'unknown';
+
+/** Linha de `whatsapp_billing_status` — retrato atual por (conta, WABA). */
+export interface WhatsappBillingStatusRow {
+  account_id: string;
+  waba_id: string;
+  currency: string | null;
+  health_overall: WabaHealthValue | null;
+  health_entities: WabaHealthEntity[] | null;
+  business_id: string | null;
+  health_checked_at: string | null;
+  spend_period_start: string | null;
+  spend_tz_offset_seconds: number | null;
+  spend_total: number | null;
+  spend_by_category: Record<string, BillingSpendCategory> | null;
+  spend_currency: string | null;
+  spend_checked_at: string | null;
+  // Erro/contador/recuo POR leitura: status de envio e consumo falham de
+  // forma independente (SPEC 076 §7.6).
+  health_error_kind: BillingErrorKind | null;
+  health_error_code: number | null;
+  health_error_message: string | null;
+  health_error_at: string | null;
+  health_consecutive_failures: number;
+  health_next_retry_at: string | null;
+  spend_error_kind: BillingErrorKind | null;
+  spend_error_code: number | null;
+  spend_error_message: string | null;
+  spend_error_at: string | null;
+  spend_consecutive_failures: number;
+  spend_next_retry_at: string | null;
+  payment_blocked_since: string | null;
+  last_payment_error_at: string | null;
+  last_payment_error_phone_number_id: string | null;
+  payment_cleared_at: string | null;
+  payment_cleared_by: string | null;
+  payment_clear_reason: 'billable_delivered' | 'manual' | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)
