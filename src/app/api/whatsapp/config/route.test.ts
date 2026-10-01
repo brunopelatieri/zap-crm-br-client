@@ -29,6 +29,7 @@ interface State {
   whatsapp_config: Row[];
   conversations: Row[];
   profiles: Row[];
+  whatsapp_billing_status: Row[];
 }
 
 let state: State;
@@ -230,6 +231,7 @@ beforeEach(() => {
     channels: [{ ...CHANNEL }],
     whatsapp_config: [{ ...CONFIG }],
     conversations: [],
+    whatsapp_billing_status: [],
   };
   supabaseMock = makeClient();
   verifyPhoneNumber.mockClear();
@@ -433,6 +435,108 @@ describe('POST — idempotência e criação (§5)', () => {
     expect(body.registration_error).toBe('PIN inválido');
     expect(state.channels[0].status).toBe('connected');
     expect(state.channels[0].status_detail).toBe('PIN inválido');
+  });
+
+  describe('SPEC 076 §9.4 — credencial refeita zera os erros de leitura do monitor', () => {
+    const SAVED_WABA = '1596497364872182';
+    const failing = (waba: string): Row => ({
+      account_id: ACCOUNT,
+      waba_id: waba,
+      health_overall: 'AVAILABLE',
+      health_error_kind: 'auth',
+      health_error_code: 190,
+      health_error_message: 'Invalid OAuth access token',
+      health_error_at: '2026-10-01T10:00:00.000Z',
+      health_consecutive_failures: 3,
+      health_next_retry_at: '2026-10-01T12:00:00.000Z',
+      spend_error_kind: 'rate_limit',
+      spend_error_code: 80008,
+      spend_error_message: 'Rate limit',
+      spend_error_at: '2026-10-01T10:00:00.000Z',
+      spend_consecutive_failures: 2,
+      spend_next_retry_at: '2026-10-01T12:00:00.000Z',
+      payment_blocked_since: '2026-10-01T09:00:00.000Z',
+    });
+
+    it('zera health_error_*, spend_error_*, os contadores e os retries do WABA salvo', async () => {
+      state.whatsapp_billing_status.push(failing(SAVED_WABA));
+
+      const res = await post({
+        phone_number_id: '892352847302912',
+        waba_id: SAVED_WABA,
+        access_token: 'novo-token',
+      });
+      expect(res.status).toBe(200);
+
+      expect(state.whatsapp_billing_status[0]).toMatchObject({
+        health_error_kind: null,
+        health_error_code: null,
+        health_error_message: null,
+        health_error_at: null,
+        health_consecutive_failures: 0,
+        health_next_retry_at: null,
+        spend_error_kind: null,
+        spend_error_code: null,
+        spend_error_message: null,
+        spend_error_at: null,
+        spend_consecutive_failures: 0,
+        spend_next_retry_at: null,
+        // O retrato e o episódio de pagamento não são da credencial.
+        health_overall: 'AVAILABLE',
+        payment_blocked_since: '2026-10-01T09:00:00.000Z',
+      });
+    });
+
+    it('só o WABA salvo: outro WABA e outra conta ficam como estavam', async () => {
+      state.whatsapp_billing_status.push(
+        failing(SAVED_WABA),
+        failing('999999999999999'),
+        { ...failing(SAVED_WABA), account_id: 'acct-2' }
+      );
+
+      await post({
+        phone_number_id: '892352847302912',
+        waba_id: SAVED_WABA,
+        access_token: 'novo-token',
+      });
+
+      expect(state.whatsapp_billing_status[0].health_error_kind).toBeNull();
+      expect(state.whatsapp_billing_status[1].health_error_kind).toBe('auth');
+      expect(state.whatsapp_billing_status[2].health_error_kind).toBe('auth');
+    });
+
+    it('vale também quando o /register falhou: o token novo FOI gravado', async () => {
+      state.whatsapp_billing_status.push(failing(SAVED_WABA));
+      registerPhoneNumber.mockRejectedValueOnce(new Error('PIN inválido'));
+
+      const body = await (
+        await post({
+          phone_number_id: '892352847302912',
+          waba_id: SAVED_WABA,
+          access_token: 'novo-token',
+          pin: '123456',
+        })
+      ).json();
+
+      expect(body.registration_error).toBe('PIN inválido');
+      expect(state.whatsapp_billing_status[0].health_error_kind).toBeNull();
+    });
+
+    it('falha do monitor (tabela ausente) nunca derruba o salvamento', async () => {
+      // @ts-expect-error simula um projeto sem a migração 086
+      delete state.whatsapp_billing_status;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const res = await post({
+        phone_number_id: '892352847302912',
+        waba_id: SAVED_WABA,
+        access_token: 'novo-token',
+      });
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).saved).toBe(true);
+      errorSpy.mockRestore();
+    });
   });
 
   it('plano sem número oficial recusa a CRIAÇÃO com 403', async () => {

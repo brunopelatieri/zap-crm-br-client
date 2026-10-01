@@ -8,6 +8,7 @@ import {
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api';
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption';
+import { resetBillingReadErrors } from '@/lib/whatsapp/billing-server';
 import {
   listCloudChannels,
   resolveCloudConfig,
@@ -848,6 +849,15 @@ export async function POST(request: Request) {
         // operador precisa da frase, não de um erro genérico.
         console.error('Error updating channel row:', channelError);
       }
+    }
+
+    // SPEC 076 §9.4: credencial refeita → o monitor de cobrança volta a
+    // ler este WABA já na próxima abertura. Sem isto, um `auth_error`
+    // (sem recuo automático, §7.6) só sairia por leitura forçada. Vale
+    // também quando o /register falhou: o token novo FOI gravado.
+    // Best-effort — nunca falha o salvamento.
+    if (wabaId) {
+      await resetBillingReadErrors(supabaseAdmin(), accountId, wabaId);
     }
 
     if (registrationError) {

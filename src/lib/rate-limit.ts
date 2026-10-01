@@ -218,6 +218,11 @@ export const RATE_LIMITS = {
    *  rara e deliberada — 30/min é folgado para um humano clicando e
    *  fecha a porta de um script varrendo a conversa mensagem a mensagem. */
   msgDelete: { limit: 30, windowMs: 60_000 },
+  /** "Atualizar" do monitor de cobrança do WhatsApp (SPEC 076 §9.1), por
+   *  usuário. Cada clique pode custar até duas chamadas à Graph e o
+   *  limite de taxa da Meta é por WABA (200/h no padrão) — daí 6/min,
+   *  somado ao 1 leitura forçada por WABA a cada 60 s do servidor. */
+  billingRefresh: { limit: 6, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't
