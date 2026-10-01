@@ -20,6 +20,15 @@ vi.mock('next/server', () => ({
   },
 }));
 
+// Sem as variáveis de ambiente `createClient` lança: é o caso do achado de
+// `isBillingMonitorEnabled()` sem argumento. Todo o resto dos testes passa
+// o `admin` explicitamente, então este mock não os afeta.
+vi.mock('@/lib/supabase/admin', () => ({
+  supabaseAdmin: () => {
+    throw new Error('supabaseUrl is required.');
+  },
+}));
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
@@ -1428,5 +1437,192 @@ describe('isBillingMonitorEnabled', () => {
     }).admin;
     state.platform_settings.push({ whatsapp_billing_monitor_enabled: true });
     expect(await isBillingMonitorEnabled(broken)).toBe(false);
+  });
+});
+
+// ============================================================
+// Revisão de código — achados 1, 2, 4, 7 e 9
+// ============================================================
+
+describe('moeda do consumo no mês (F-5, R-5)', () => {
+  const BRL = { ...HEALTH_OK, currency: 'BRL' };
+
+  it('troca de moeda no meio do mês: spend_currency mantém a do início do mês e o aviso FICA', async () => {
+    seed({
+      currency: 'USD',
+      spend_currency: 'USD',
+      health_checked_at: ago(10 * MIN),
+      spend_checked_at: ago(20 * MIN),
+    });
+    stubMeta({ health: ok(BRL) });
+
+    const first = await loadDto();
+    expect(stored()).toMatchObject({ currency: 'BRL', spend_currency: 'USD' });
+    expect(first.spend?.currency_changed).toBe(true);
+
+    // 20 min depois, outra leitura de consumo: o aviso não pode sumir.
+    stubMeta({ health: ok(BRL) });
+    const later = await loadDto({ now: new Date(NOW.getTime() + 20 * MIN) });
+    expect(stored().spend_currency).toBe('USD');
+    expect(later.spend?.currency_changed).toBe(true);
+  });
+
+  it('na virada do mês a moeda do consumo é renovada', async () => {
+    seed({
+      currency: 'BRL',
+      spend_currency: 'USD',
+      spend_period_start: '2026-09-01',
+      spend_total: 99,
+    });
+    stubMeta({ health: ok(BRL) });
+
+    const dto = await loadDto();
+
+    expect(stored()).toMatchObject({
+      spend_period_start: '2026-10-01',
+      spend_currency: 'BRL',
+    });
+    expect(dto.spend?.currency_changed).toBe(false);
+  });
+
+  it('primeira leitura do mês: usa a moeda corrente', async () => {
+    stubMeta();
+    await load();
+    expect(stored().spend_currency).toBe('USD');
+  });
+});
+
+describe('acknowledgePayment — leitura que falha', () => {
+  it('falha ao ler o waba_id LANÇA em vez de virar cleared:false', async () => {
+    seed({
+      payment_blocked_since: '2026-10-15T13:40:05.000Z',
+      last_payment_error_at: '2026-10-15T13:58:42.000Z',
+    });
+    const { db, admin } = dbs({
+      fail: ({ table, verb }) =>
+        table === 'whatsapp_config' && verb === 'select'
+          ? { code: '57014', message: 'canceling statement' }
+          : null,
+    });
+
+    await expect(
+      acknowledgePayment(db, ACCOUNT, CHANNEL, {
+        userId: 'user-admin',
+        now: NOW,
+        admin,
+      })
+    ).rejects.toThrow(/failed to read waba_id/);
+    // E o alerta continua aberto, como estava.
+    expect(stored().payment_blocked_since).toBe('2026-10-15T13:40:05.000Z');
+  });
+});
+
+describe('contagem de números do WABA (barata no caso comum)', () => {
+  /** Quais tabelas o cliente de SESSÃO consultou durante a chamada. */
+  async function tablesQueried(): Promise<string[]> {
+    const tables: string[] = [];
+    const { db, admin } = dbs();
+    const spyDb = {
+      ...db,
+      from: (t: string) => {
+        tables.push(t);
+        return db.from(t);
+      },
+    } as unknown as SupabaseClient;
+    await loadChannelBilling(spyDb, ACCOUNT, CHANNEL, {
+      role: 'admin',
+      now: NOW,
+      admin,
+    });
+    return tables;
+  }
+
+  it('um número só: nenhuma consulta extra a channels além da resolução do canal', async () => {
+    seed();
+    stubMeta();
+    const tables = await tablesQueried();
+    // `resolveCloudConfig` lê `channels` uma vez. A contagem não faz
+    // `listCloudChannels` (que leria de novo).
+    expect(tables.filter((t) => t === 'channels')).toHaveLength(1);
+    expect(tables.filter((t) => t === 'whatsapp_config')).toHaveLength(2);
+  });
+
+  it('número DESATIVADO do mesmo WABA não conta', async () => {
+    seed();
+    state.channels.push({
+      ...state.channels[0]!,
+      id: 'chan-2',
+      is_default: false,
+      status: 'disabled',
+    });
+    state.whatsapp_config.push({
+      ...state.whatsapp_config[0]!,
+      id: 'cfg-2',
+      channel_id: 'chan-2',
+      phone_number_id: '900000000008888',
+    });
+    stubMeta();
+    expect((await loadDto()).shared_with_channels).toBe(1);
+  });
+
+  it('outro WABA da mesma conta não conta', async () => {
+    seed();
+    state.channels.push({
+      ...state.channels[0]!,
+      id: 'chan-2',
+      is_default: false,
+    });
+    state.whatsapp_config.push({
+      ...state.whatsapp_config[0]!,
+      id: 'cfg-2',
+      channel_id: 'chan-2',
+      phone_number_id: '900000000008888',
+      waba_id: '300000000009999',
+    });
+    stubMeta();
+    expect((await loadDto()).shared_with_channels).toBe(1);
+  });
+
+  it('falha na contagem não derruba a leitura: vira 1', async () => {
+    seed();
+    stubMeta();
+    let configReads = 0;
+    const dto = await loadDto(
+      {},
+      {
+        // A 1ª leitura de whatsapp_config é a resolução do canal; a 2ª, a contagem.
+        fail: ({ table, verb }) =>
+          table === 'whatsapp_config' &&
+          verb === 'select' &&
+          ++configReads === 2
+            ? { code: '57014', message: 'canceling statement' }
+            : null,
+      }
+    );
+    expect(dto.shared_with_channels).toBe(1);
+    expect(dto.state).toBe('ok');
+  });
+});
+
+describe('force só vale para admin+ (defesa em profundidade)', () => {
+  it('agent/viewer com force:true são tratados como leitura comum', async () => {
+    seed();
+    const meta = stubMeta();
+
+    for (const role of ['agent', 'viewer'] as const) {
+      const res = await load({ role, force: true });
+      expect(res.status).toBe('ok');
+    }
+
+    // Retrato fresco + force ignorado = nenhuma chamada e nenhum cooldown gasto.
+    expect(meta).not.toHaveBeenCalled();
+    expect((await load({ role: 'admin', force: true })).status).toBe('ok');
+    expect(meta).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('isBillingMonitorEnabled — sem o cliente admin', () => {
+  it('SUPABASE_SERVICE_ROLE_KEY ausente (supabaseAdmin lança) = desligado, não exceção', async () => {
+    await expect(isBillingMonitorEnabled()).resolves.toBe(false);
   });
 });

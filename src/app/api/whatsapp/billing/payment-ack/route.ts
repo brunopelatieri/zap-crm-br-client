@@ -24,6 +24,7 @@ import {
   requireRole,
   toErrorResponse,
 } from '@/lib/auth/account';
+import { isUuid } from '@/lib/api/uuid';
 import { canEditSettings } from '@/lib/auth/roles';
 import {
   RATE_LIMITS,
@@ -35,9 +36,6 @@ import {
   acknowledgePayment,
   isBillingMonitorEnabled,
 } from '@/lib/whatsapp/billing-server';
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
   try {
@@ -67,7 +65,7 @@ export async function POST(request: Request) {
     } catch {
       channelId = undefined;
     }
-    if (typeof channelId !== 'string' || !UUID_RE.test(channelId.trim())) {
+    if (typeof channelId !== 'string' || !isUuid(channelId.trim())) {
       return NextResponse.json(
         { error: 'channel_id must be a valid UUID' },
         { status: 400 }

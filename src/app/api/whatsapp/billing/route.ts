@@ -29,6 +29,7 @@ import {
   requireRole,
   toErrorResponse,
 } from '@/lib/auth/account';
+import { isUuid } from '@/lib/api/uuid';
 import { canEditSettings } from '@/lib/auth/roles';
 import {
   RATE_LIMITS,
@@ -41,9 +42,6 @@ import {
   loadBillingSummary,
   loadChannelBilling,
 } from '@/lib/whatsapp/billing-server';
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function tooManyRefreshes(retryAfterSeconds: number): NextResponse {
   return NextResponse.json(
@@ -83,7 +81,7 @@ export async function GET(request: Request) {
       return NextResponse.json(summary, { status: 200 });
     }
 
-    if (!UUID_RE.test(channelId)) {
+    if (!isUuid(channelId)) {
       return NextResponse.json(
         { error: 'channel_id must be a valid UUID' },
         { status: 400 }

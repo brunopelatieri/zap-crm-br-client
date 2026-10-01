@@ -42,6 +42,12 @@ import { after } from 'next/server';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
+  SCHEMA_RETRY_MS,
+  errMsg,
+  isSchemaMissingError,
+  readBillingMonitorFlag,
+} from './billing-schema';
+import {
   PAYMENT_ERROR_CODE,
   maskId,
   readStatus,
@@ -81,35 +87,15 @@ const NO_OP: PaymentSignalResult = { ok: false, changed: false, notified: 0 };
 // ============================================================
 
 /**
- * Códigos de "isso não existe no banco": tabela, coluna ou função
- * ausente — tanto do Postgres quanto do cache de schema do PostgREST.
- *
- * Um projeto Supabase sem a 086/087 aplicada (o `rs`, hoje) não pode
- * transformar cada status do webhook numa consulta que falha e num
- * `console.error`. Ao ver um destes, a peça correspondente é desligada
- * por {@link SCHEMA_RETRY_MS} neste processo e o motivo é logado UMA vez.
+ * Ao ver um erro de schema ausente (vocabulário em `billing-schema.ts`,
+ * comum com `billing-server.ts`), a peça correspondente é desligada por
+ * {@link SCHEMA_RETRY_MS} neste processo e o motivo é logado UMA vez.
  */
-const SCHEMA_MISSING_CODES = new Set([
-  '42P01', // undefined_table
-  '42703', // undefined_column
-  '42883', // undefined_function
-  'PGRST202', // função não encontrada no cache de schema
-  'PGRST204', // coluna não encontrada no cache de schema
-  'PGRST205', // tabela não encontrada no cache de schema
-]);
-
-const SCHEMA_RETRY_MS = 10 * 60 * 1000;
-
 type SchemaPiece = 'billing' | 'pricing';
 const schemaUnavailableUntil: Record<SchemaPiece, number> = {
   billing: 0,
   pricing: 0,
 };
-
-function isSchemaMissing(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && SCHEMA_MISSING_CODES.has(code);
-}
 
 function schemaAvailable(piece: SchemaPiece, now = Date.now()): boolean {
   return now >= schemaUnavailableUntil[piece];
@@ -117,20 +103,16 @@ function schemaAvailable(piece: SchemaPiece, now = Date.now()): boolean {
 
 /** Devolve `true` se o erro era de schema ausente (e já foi tratado). */
 function noteSchemaMissing(piece: SchemaPiece, error: unknown): boolean {
-  if (!isSchemaMissing(error)) return false;
+  if (!isSchemaMissingError(error)) return false;
   const wasAvailable = schemaAvailable(piece);
   schemaUnavailableUntil[piece] = Date.now() + SCHEMA_RETRY_MS;
   if (wasAvailable) {
     console.warn(
       `[billing-signal] ${piece} schema missing (migration 086/087 not applied?) — skipping for ${SCHEMA_RETRY_MS / 60000} min:`,
-      (error as { message?: string })?.message ?? error
+      errMsg(error)
     );
   }
   return true;
-}
-
-function errMsg(error: unknown): unknown {
-  return (error as { message?: string } | null)?.message ?? error;
 }
 
 // ============================================================
@@ -427,28 +409,6 @@ export async function applyPaymentSignal(
 }
 
 /**
- * `platform_settings.whatsapp_billing_monitor_enabled` (D-10).
- * `null` = a leitura falhou (distinto de "desligado": quem chama não
- * deve dar a notificação por resolvida).
- */
-async function isBillingMonitorEnabled(
-  db: SupabaseClient
-): Promise<boolean | null> {
-  const { data, error } = await db
-    .from('platform_settings')
-    .select('whatsapp_billing_monitor_enabled')
-    .maybeSingle();
-  if (error) {
-    console.error(
-      '[billing-signal] could not read whatsapp_billing_monitor_enabled:',
-      errMsg(error)
-    );
-    return null;
-  }
-  return data?.whatsapp_billing_monitor_enabled === true;
-}
-
-/**
  * Uma chamada de `notify_channel_payment_blocked` por CANAL do WABA
  * naquela conta (D-6): dois números no mesmo WABA bloqueiam juntos, e o
  * alerta cita o nome de cada um. Canal `disabled` fica de fora — não
@@ -463,7 +423,7 @@ async function notifyPaymentBlocked(
   db: SupabaseClient,
   target: PaymentSignalTarget
 ): Promise<{ count: number; complete: boolean }> {
-  const enabled = await isBillingMonitorEnabled(db);
+  const enabled = await readBillingMonitorFlag(db, 'billing-signal');
   if (enabled === null) return { count: 0, complete: false };
   if (!enabled) {
     console.log(

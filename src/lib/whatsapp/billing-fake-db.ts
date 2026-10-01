@@ -13,6 +13,15 @@
  *
  * Não simula RLS (o que muda no mundo real é a política, não a forma da
  * consulta) — por isso o log de escritas é por RÓTULO de cliente.
+ *
+ * SIMULA os CHECK e NOT NULL da migração 086 em `whatsapp_billing_status`
+ * ({@link checkBillingRow}): um upsert que o Postgres recusaria (ex.:
+ * `health_overall = 'FOO'`, mensagem de erro com mais de 500 caracteres)
+ * falha aqui com `23514`, em vez de passar no teste e quebrar em produção.
+ *
+ * Fica em `src/lib/whatsapp/` por precedente (`lib/emoji/fake-storage.ts`):
+ * nenhum código de aplicação o importa, então o Next não o empacota — só o
+ * typecheck o vê, como vê qualquer `*.test.ts`.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -83,6 +92,56 @@ export const BILLING_ROW_DEFAULTS: Row = {
   payment_clear_reason: null,
 };
 
+const HEALTH_VALUES = ['AVAILABLE', 'LIMITED', 'BLOCKED'];
+const ERROR_KINDS = [
+  'auth',
+  'permission',
+  'rate_limit',
+  'transient',
+  'unknown',
+];
+const CLEAR_REASONS = ['billable_delivered', 'manual'];
+
+/**
+ * CHECK e NOT NULL da 086 que um payload de escrita pode violar.
+ * `null` = ok; senão a mensagem do erro (`23514` / `23502`).
+ */
+export function checkBillingRow(payload: Row): FakeError | null {
+  const bad = (message: string): FakeError => ({ code: '23514', message });
+
+  const health = payload.health_overall;
+  if (health != null && !HEALTH_VALUES.includes(health as string)) {
+    return bad(`health_overall check violated: ${String(health)}`);
+  }
+  for (const col of ['health_error_kind', 'spend_error_kind']) {
+    const v = payload[col];
+    if (v != null && !ERROR_KINDS.includes(v as string)) {
+      return bad(`${col} check violated: ${String(v)}`);
+    }
+  }
+  const reason = payload.payment_clear_reason;
+  if (reason != null && !CLEAR_REASONS.includes(reason as string)) {
+    return bad(`payment_clear_reason check violated: ${String(reason)}`);
+  }
+  for (const col of ['health_error_message', 'spend_error_message']) {
+    const v = payload[col];
+    if (typeof v === 'string' && v.length > 500) {
+      return bad(`${col} check violated: ${v.length} characters`);
+    }
+  }
+  for (const col of [
+    'account_id',
+    'waba_id',
+    'health_consecutive_failures',
+    'spend_consecutive_failures',
+  ]) {
+    if (col in payload && payload[col] === null) {
+      return { code: '23502', message: `null value in column "${col}"` };
+    }
+  }
+  return null;
+}
+
 type Verb = 'select' | 'insert' | 'update' | 'upsert' | 'delete';
 type Table = keyof FakeState & string;
 
@@ -122,6 +181,11 @@ export function makeFakeDb(
       if (injected) return { data: null, error: injected };
 
       if (verb === 'select') return { data: matching(), error: null };
+
+      if (table === 'whatsapp_billing_status' && verb !== 'delete') {
+        const violation = checkBillingRow(payload);
+        if (violation) return { data: null, error: violation };
+      }
 
       if (verb !== 'delete') {
         writes.push({ client: label, table, verb, payload: { ...payload } });

@@ -208,6 +208,25 @@ export function decideRead(args: {
 // DTO (§9.1)
 // ============================================================
 
+/**
+ * Estado principal do canal a partir do retrato — UM recorte de
+ * `SendStateSnapshot` para o painel e para a lista, que precisam concordar.
+ * `wabaId` nulo = sem credencial utilizável (RF-12).
+ */
+function sendStateOf(
+  row: WhatsappBillingStatusRow | null,
+  wabaId: string | null
+) {
+  return deriveSendState({
+    hasCredentials: Boolean(wabaId),
+    healthOverall: row?.health_overall ?? null,
+    healthCheckedAt: row?.health_checked_at ?? null,
+    paymentPending: Boolean(row?.payment_blocked_since),
+    healthErrorKind: row?.health_error_kind ?? null,
+    healthErrorAt: row?.health_error_at ?? null,
+  });
+}
+
 /** Moeda do WABA muda no meio do mês (F-5): a UI avisa em vez de somar. */
 export interface BillingSpendDto {
   /** `false` = "Consumo indisponível" — nunca zero (RF-04). */
@@ -394,14 +413,7 @@ export function buildChannelBillingDto(
   const { channelId, wabaId, row, role, now } = input;
   const isAdmin = canEditSettings(role);
 
-  const sendState = deriveSendState({
-    hasCredentials: Boolean(wabaId),
-    healthOverall: row?.health_overall ?? null,
-    healthCheckedAt: row?.health_checked_at ?? null,
-    paymentPending: Boolean(row?.payment_blocked_since),
-    healthErrorKind: row?.health_error_kind ?? null,
-    healthErrorAt: row?.health_error_at ?? null,
-  });
+  const sendState = sendStateOf(row, wabaId);
 
   const problems = (row?.health_entities ?? []).filter(isProblem).map((e) => ({
     ...e,
@@ -461,14 +473,7 @@ export function buildChannelSummary(
   input: ChannelBillingSummaryInput
 ): ChannelBillingSummaryDto {
   const { channelId, wabaId, row, role, now } = input;
-  const sendState = deriveSendState({
-    hasCredentials: Boolean(wabaId),
-    healthOverall: row?.health_overall ?? null,
-    healthCheckedAt: row?.health_checked_at ?? null,
-    paymentPending: Boolean(row?.payment_blocked_since),
-    healthErrorKind: row?.health_error_kind ?? null,
-    healthErrorAt: row?.health_error_at ?? null,
-  });
+  const sendState = sendStateOf(row, wabaId);
 
   const dto: ChannelBillingSummaryDto = {
     channel_id: channelId,

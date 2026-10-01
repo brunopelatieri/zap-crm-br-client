@@ -206,6 +206,24 @@ describe('POST /api/whatsapp/billing/payment-ack', () => {
     expect(writes.every((w) => w.client === 'admin')).toBe(true);
   });
 
+  it('falha ao ler o WABA do canal: 500, e o alerta continua aberto', async () => {
+    h.session = makeFakeDb('session', state, writes, {
+      fail: ({ table, verb }) =>
+        table === 'whatsapp_config' && verb === 'select'
+          ? { code: '57014', message: 'canceling statement' }
+          : null,
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await post({ channel_id: CHANNEL });
+
+    expect(res.status).toBe(500);
+    expect(state.whatsapp_billing_status[0]!.payment_blocked_since).toBe(
+      PENDING_SINCE
+    );
+    errorSpy.mockRestore();
+  });
+
   it('owner também pode', async () => {
     signIn('owner');
     const res = await post({ channel_id: CHANNEL });

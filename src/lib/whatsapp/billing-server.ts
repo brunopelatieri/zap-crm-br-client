@@ -49,7 +49,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { after } from 'next/server';
 
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
-import type { AccountRole } from '@/lib/auth/roles';
+import { canEditSettings, type AccountRole } from '@/lib/auth/roles';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import type { WabaHealthEntity, WhatsappBillingStatusRow } from '@/types';
 import {
@@ -74,13 +74,15 @@ import {
   sanitizeErrorMessage,
   type SendState,
 } from './billing-monitor';
-import {
-  listCloudChannels,
-  resolveCloudConfig,
-  resolveWabaIdForChannel,
-} from './cloud-channels';
+import { listCloudChannels, resolveCloudConfig } from './cloud-channels';
 import { decrypt } from './encryption';
 import { MetaApiError } from './meta-api';
+import {
+  SCHEMA_RETRY_MS,
+  errMsg,
+  isSchemaMissingError,
+  readBillingMonitorFlag,
+} from './billing-schema';
 
 const TABLE = 'whatsapp_billing_status';
 
@@ -92,26 +94,12 @@ export const LIST_REFRESH_MAX_WABAS = 5;
 // ============================================================
 
 /**
- * Tabela/coluna ausente, do Postgres e do cache de schema do PostgREST.
- * Mesmo conjunto de `billing-signal.ts`: um projeto sem a 086 (o `rs`,
- * hoje) não pode derrubar a aba de configuração (RNF-11).
+ * Um projeto sem a 086 (o `rs`, hoje) não pode derrubar a aba de
+ * configuração (RNF-11). O vocabulário de "schema ausente" é o mesmo de
+ * `billing-signal.ts` (`billing-schema.ts`); o estado de processo — por
+ * quanto tempo esta peça deixa de consultar — é daqui.
  */
-const SCHEMA_MISSING_CODES = new Set([
-  '42P01',
-  '42703',
-  '42883',
-  'PGRST202',
-  'PGRST204',
-  'PGRST205',
-]);
-const SCHEMA_RETRY_MS = 10 * 60 * 1000;
-
 let schemaUnavailableUntil = 0;
-
-function isSchemaMissing(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && SCHEMA_MISSING_CODES.has(code);
-}
 
 function schemaAvailable(now: Date): boolean {
   return now.getTime() >= schemaUnavailableUntil;
@@ -119,7 +107,7 @@ function schemaAvailable(now: Date): boolean {
 
 /** `true` se era schema ausente (já tratado e logado uma vez). */
 function noteSchemaMissing(error: unknown, now: Date): boolean {
-  if (!isSchemaMissing(error)) return false;
+  if (!isSchemaMissingError(error)) return false;
   const wasAvailable = schemaAvailable(now);
   schemaUnavailableUntil = now.getTime() + SCHEMA_RETRY_MS;
   if (wasAvailable) {
@@ -129,10 +117,6 @@ function noteSchemaMissing(error: unknown, now: Date): boolean {
     );
   }
   return true;
-}
-
-function errMsg(error: unknown): unknown {
-  return (error as { message?: string } | null)?.message ?? error;
 }
 
 // ============================================================
@@ -186,28 +170,22 @@ export function __resetBillingServerStateForTests(): void {
  * `/admin` parecer quebrado por alguns segundos.
  */
 export async function isBillingMonitorEnabled(
-  admin: SupabaseClient = supabaseAdmin()
+  admin?: SupabaseClient
 ): Promise<boolean> {
+  // `supabaseAdmin()` lança sem as variáveis de ambiente: resolvê-lo como
+  // valor padrão do parâmetro o avaliaria FORA de qualquer try/catch, e a
+  // promessa "erro de leitura = desligado" não valeria para este caso.
+  let db: SupabaseClient;
   try {
-    const { data, error } = await admin
-      .from('platform_settings')
-      .select('whatsapp_billing_monitor_enabled')
-      .maybeSingle();
-    if (error) {
-      console.error(
-        '[billing-monitor] could not read whatsapp_billing_monitor_enabled — treating as off:',
-        errMsg(error)
-      );
-      return false;
-    }
-    return data?.whatsapp_billing_monitor_enabled === true;
+    db = admin ?? supabaseAdmin();
   } catch (err) {
     console.error(
-      '[billing-monitor] flag read threw — treating as off:',
+      '[billing-monitor] could not create the admin client — treating flag as off:',
       err instanceof Error ? err.message : err
     );
     return false;
   }
+  return (await readBillingMonitorFlag(db, 'billing-monitor')) === true;
 }
 
 // ============================================================
@@ -371,6 +349,27 @@ function policyBlockedColumns(
   };
 }
 
+/**
+ * Moeda registrada para o consumo do mês (F-5, R-5).
+ *
+ * O `pricing_analytics` não traz moeda: ela vem do `health_status`. Se a
+ * cada leitura `spend_currency` fosse a moeda do momento, a troca de moeda
+ * no meio do mês (USD → BRL) acenderia `currency_changed` por no máximo 15
+ * min e o aviso sumiria com o mês ainda misturado. Por isso, dentro do
+ * MESMO mês (mesmo `spend_period_start`) vale a moeda de quando o mês
+ * começou a ser lido; ela só é renovada na virada do mês.
+ */
+function spendCurrencyFor(
+  row: WhatsappBillingStatusRow | null,
+  periodStart: string,
+  currentCurrency: string | null
+): string | null {
+  if (row?.spend_currency && row.spend_period_start === periodStart) {
+    return row.spend_currency;
+  }
+  return currentCurrency;
+}
+
 interface RefreshArgs {
   admin: SupabaseClient;
   accountId: string;
@@ -487,7 +486,7 @@ async function runRefresh(
         // Nulo = indisponível, nunca zero (RF-04).
         spend_total: data.total,
         spend_by_category: data.byCategory,
-        spend_currency: currency,
+        spend_currency: spendCurrencyFor(row, data.periodStart, currency),
         spend_checked_at: nowIso,
         ...clearedErrorColumns('spend'),
       });
@@ -589,9 +588,28 @@ export async function loadChannelBilling(
   channelId: string,
   options: LoadChannelBillingOptions
 ): Promise<BillingLoadResult> {
-  const { role, force = false } = options;
+  const { role } = options;
+  // Defesa em profundidade: a rota já responde 403 ao `refresh=1` de
+  // agent/viewer, mas quem chamar esta função direto (outra rota, job)
+  // não pode contornar a regra de papel nem o balde por usuário.
+  const force = Boolean(options.force) && canEditSettings(role);
   const now = options.now ?? new Date();
   const admin = options.admin ?? supabaseAdmin();
+
+  // RF-12: sem WABA/token utilizável o canal é `no_credentials` — sem tocar
+  // a Meta nem o banco do monitor. Um ponto só para os dois caminhos
+  // (canal órfão/token zerado, ou `waba_id` ausente).
+  const noCredentials = (): BillingLoadResult => ({
+    status: 'ok',
+    dto: buildChannelBillingDto({
+      channelId,
+      wabaId: null,
+      sharedWithChannels: 0,
+      row: null,
+      role,
+      now,
+    }),
+  });
 
   let config;
   try {
@@ -599,40 +617,14 @@ export async function loadChannelBilling(
   } catch (err) {
     if (!(err instanceof ChannelNotConfiguredError)) throw err;
     if (err.reason === 'read_failed') throw err;
-    if (err.reason === 'no_credentials') {
-      // Canal da conta, mas órfão ou com token zerado (RF-12): estado
-      // `no_credentials`, sem tocar a Meta nem o banco do monitor.
-      return {
-        status: 'ok',
-        dto: buildChannelBillingDto({
-          channelId,
-          wabaId: null,
-          sharedWithChannels: 0,
-          row: null,
-          role,
-          now,
-        }),
-      };
-    }
+    if (err.reason === 'no_credentials') return noCredentials();
     // not_found / wrong_type / disabled / no_channel: para quem pergunta
     // é tudo "esse canal não existe" (não vaza que existe em outra conta).
     return { status: 'not_found' };
   }
 
   const wabaId = (config.waba_id as string | null) || null;
-  if (!wabaId) {
-    return {
-      status: 'ok',
-      dto: buildChannelBillingDto({
-        channelId,
-        wabaId: null,
-        sharedWithChannels: 0,
-        row: null,
-        role,
-        now,
-      }),
-    };
-  }
+  if (!wabaId) return noCredentials();
 
   const sharedWithChannels = await countChannelsOfWaba(db, accountId, wabaId);
   const build = (row: WhatsappBillingStatusRow | null): BillingLoadResult => ({
@@ -687,14 +679,47 @@ export async function loadChannelBilling(
   return build(await promise);
 }
 
+/**
+ * Quantos números ATIVOS da conta atendem o WABA, ele incluído.
+ *
+ * Enfeite do painel ("Compartilhado com N números"), mas roda em toda
+ * leitura — inclusive a de retrato fresco, que não toca a Meta. Por isso é
+ * barato no caso comum: UMA consulta a `whatsapp_config` (por `account_id` +
+ * `waba_id`); só com mais de uma linha uma segunda consulta confere quais
+ * dos canais estão ativos (um `disabled` não conta, como em
+ * `listCloudChannels`).
+ */
 async function countChannelsOfWaba(
   db: SupabaseClient,
   accountId: string,
   wabaId: string
 ): Promise<number> {
   try {
-    const channels = await listCloudChannels(db, accountId);
-    return Math.max(1, channels.filter((c) => c.wabaId === wabaId).length);
+    const { data: configs, error } = await db
+      .from('whatsapp_config')
+      .select('channel_id')
+      .eq('account_id', accountId)
+      .eq('waba_id', wabaId);
+    if (error) throw new Error(String(errMsg(error)));
+
+    const ids = [
+      ...new Set(
+        ((configs ?? []) as Array<{ channel_id: string | null }>)
+          .map((c) => c.channel_id)
+          .filter((id): id is string => typeof id === 'string' && id !== '')
+      ),
+    ];
+    if (ids.length <= 1) return 1;
+
+    const { data: channels, error: chError } = await db
+      .from('channels')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('type', 'whatsapp_cloud')
+      .neq('status', 'disabled')
+      .in('id', ids);
+    if (chError) throw new Error(String(errMsg(chError)));
+    return Math.max(1, (channels ?? []).length);
   } catch (err) {
     // Contagem é enfeite do painel: não derruba a leitura.
     console.error(
@@ -884,9 +909,28 @@ export async function acknowledgePayment(
     return { status: 'not_found' };
   }
 
-  const wabaId = await resolveWabaIdForChannel(db, accountId, channelId);
+  // Lido direto (e não por `resolveWabaIdForChannel`, que engole o erro e
+  // devolve `null`): uma leitura que FALHOU não pode virar "sem pendência"
+  // — o admin ouviria `cleared: false` com o alerta ainda aberto.
+  const { data: config, error: configError } = await db
+    .from('whatsapp_config')
+    .select('waba_id')
+    .eq('channel_id', channelId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+  if (configError) {
+    throw new Error(`failed to read waba_id: ${errMsg(configError)}`);
+  }
+  const wabaId = (config?.waba_id as string | null | undefined) || null;
   if (!wabaId) return { status: 'ok', cleared: false };
 
+  // Limite conhecido (SPEC 076 §10.4): `payment_cleared_at` é comparado com
+  // o carimbo DA META em `apply_payment_signal`. Com o relógio do app
+  // adiantado em relação ao da Meta, um 131042 real logo depois do clique
+  // chega com `ts < payment_cleared_at` e é ignorado. Não há margem segura:
+  // recuar o carimbo faria os erros de segundos ANTES do clique (o caso
+  // comum — o admin vê a falha, paga, clica) reabrirem o episódio. A
+  // premissa é relógio sincronizado por NTP no servidor.
   const clearedAt = now.toISOString();
   const { data, error } = await admin
     .from(TABLE)
