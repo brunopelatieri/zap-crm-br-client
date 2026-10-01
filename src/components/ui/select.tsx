@@ -6,7 +6,53 @@ import { Select as SelectPrimitive } from '@base-ui/react/select';
 import { cn } from '@/lib/utils';
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from 'lucide-react';
 
-const Select = SelectPrimitive.Root;
+type CollectedItem = { value: unknown; label: React.ReactNode };
+
+/**
+ * Percorre a árvore JSX do `Select` e coleta `{ value, label }` de cada
+ * `SelectItem`. O `SelectContent` do Base UI é lazy (só monta ao abrir),
+ * então sem `items` no Root o `SelectValue` não consegue resolver o rótulo e
+ * mostra o VALOR CRU (UUID, código...). Montar `items` aqui garante o rótulo
+ * em todos os selects, sem repetir a lista em cada tela.
+ */
+function collectItems(node: React.ReactNode, out: CollectedItem[] = []) {
+  React.Children.forEach(node, (child) => {
+    if (
+      !React.isValidElement<{ value?: unknown; children?: React.ReactNode }>(
+        child
+      )
+    ) {
+      return;
+    }
+    if (child.type === SelectItem) {
+      if (child.props.value !== undefined && child.props.value !== null) {
+        out.push({ value: child.props.value, label: child.props.children });
+      }
+      return;
+    }
+    collectItems(child.props.children, out);
+  });
+  return out;
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>({
+  items,
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  // `items` explícito sempre vence; sem nenhum SelectItem visível no JSX
+  // (ex.: itens renderizados por componente próprio) mantém o comportamento
+  // padrão do Base UI.
+  const collected = items === undefined ? collectItems(children) : [];
+  return (
+    <SelectPrimitive.Root
+      items={items ?? (collected.length > 0 ? collected : undefined)}
+      {...props}
+    >
+      {children}
+    </SelectPrimitive.Root>
+  );
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
