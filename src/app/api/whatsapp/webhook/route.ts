@@ -19,6 +19,13 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook';
+import { readStatus } from '@/lib/whatsapp/billing-monitor';
+import {
+  createWebhookPaymentSignals,
+  notePricingSchemaMissing,
+  pricingPatchFor,
+  type WebhookPaymentSignals,
+} from '@/lib/whatsapp/billing-signal';
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -129,6 +136,17 @@ interface WhatsAppWebhookEntry {
           title?: string;
           message?: string;
         }>;
+        /**
+         * SPEC 076 §10.1 — cobrança da mensagem (F-12). `billable` é o
+         * que importa ao monitor: `true` em `sent`/`delivered` depois de
+         * um 131042 prova que o pagamento voltou (§6.3).
+         */
+        pricing?: {
+          billable?: boolean;
+          pricing_model?: string; // ex.: "PMP"
+          category?: string; // ex.: "marketing", "utility", "service"
+          type?: string; // ex.: "regular", "free_customer_service"
+        };
       }>;
     };
     field: string;
@@ -293,8 +311,18 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       // Handle status updates
       if (value.statuses) {
+        // SPEC 076 §10.2 — conta/WABA do número (pela config, §7.8) e o
+        // retrato de pagamento vêm de um cache de PROCESSO dentro do
+        // `signals` (R-10): criar um por `change` é barato.
+        const statusPhoneNumberId = value.metadata?.phone_number_id;
+        const signals = statusPhoneNumberId
+          ? createWebhookPaymentSignals(supabaseAdmin(), {
+              phoneNumberId: statusPhoneNumberId,
+              entryWabaId: entry.id,
+            })
+          : null;
         for (const status of value.statuses) {
-          await handleStatusUpdate(status);
+          await handleStatusUpdate(status, signals);
         }
       }
 
@@ -456,13 +484,23 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
   return ii > ci;
 }
 
-async function handleStatusUpdate(status: {
-  id: string;
-  status: string;
-  timestamp: string;
-  recipient_id: string;
-  errors?: Array<{ code: number; title?: string; message?: string }>;
-}) {
+async function handleStatusUpdate(
+  status: {
+    id: string;
+    status: string;
+    timestamp: string;
+    recipient_id: string;
+    errors?: Array<{ code: number; title?: string; message?: string }>;
+    pricing?: {
+      billable?: boolean;
+      pricing_model?: string;
+      category?: string;
+      type?: string;
+    };
+  },
+  // SPEC 076 §10.2 — `null` sem `metadata.phone_number_id`.
+  signals: WebhookPaymentSignals | null
+) {
   // Meta's async "message undeliverable" callback — the only place this
   // error ever surfaces, since the send call itself already returned
   // 200. Computed once, up front, so both mirrors below (messages and
@@ -480,13 +518,35 @@ async function handleStatusUpdate(status: {
   //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
   //    repeat across numbers), so this updates 0..N rows and must not
   //    assume a single row.
-  const { error: msgErr } = await supabaseAdmin()
+  //
+  //    SPEC 076 D-7 — `pricing` da Meta (`billable`/`category`) vai no
+  //    MESMO UPDATE, sem 2ª escrita por status (todo `sent` e `delivered`
+  //    cobrável traz pricing). Onde a 086 não foi aplicada (o `rs`) o
+  //    PostgREST recusa a coluna inteira: nesse caso o UPDATE é REPETIDO
+  //    só com o status — o espelho sent/delivered/read nunca cai junto —
+  //    e o pricing fica desligado por 10 min neste processo. Sem
+  //    `pricing` no evento, nada é gravado (nunca nulo por cima).
+  const read = readStatus(status);
+  const statusPatch = {
+    status: status.status,
+    ...(errorMessage ? { error_message: errorMessage } : {}),
+  };
+  const pricingPatch = pricingPatchFor(read);
+  let { error: msgErr } = await supabaseAdmin()
     .from('messages')
-    .update({
-      status: status.status,
-      ...(errorMessage ? { error_message: errorMessage } : {}),
-    })
+    .update({ ...statusPatch, ...pricingPatch })
     .eq('message_id', status.id);
+
+  if (
+    msgErr &&
+    Object.keys(pricingPatch).length > 0 &&
+    notePricingSchemaMissing(msgErr)
+  ) {
+    ({ error: msgErr } = await supabaseAdmin()
+      .from('messages')
+      .update(statusPatch)
+      .eq('message_id', status.id));
+  }
 
   if (msgErr) {
     console.error('Error updating message status:', msgErr);
@@ -536,6 +596,18 @@ async function handleStatusUpdate(status: {
         contactId: recipient.contact_id,
         errorMessage,
       });
+    }
+  }
+
+  // SPEC 076 §10.3 — sinal de pagamento (131042 liga; cobrável
+  // `sent`/`delivered` posterior ao último erro limpa). Nunca lança — e o
+  // try/catch daqui é a segunda trava: uma falha do sinal não pode
+  // impedir o fan-out abaixo (§10.4).
+  if (signals) {
+    try {
+      await signals.handleStatus(status, read);
+    } catch (err) {
+      console.error('[webhook] payment signal failed:', err);
     }
   }
 

@@ -85,6 +85,26 @@ vi.mock('@/lib/supabase/admin', () => ({
   supabaseAdmin: () => adminState.client,
 }));
 
+/**
+ * SPEC 076 RF-07 — o gancho do 131042 síncrono. Espião que, por padrão,
+ * chama a implementação REAL (o sinal de verdade roda contra o
+ * `adminState.client`; fora de uma requisição o `after()` do Next lança e
+ * o agendador cai na execução solta); um teste troca a implementação
+ * para provar que o envio não espera o sinal.
+ */
+const { signalSpy } = vi.hoisted(() => ({ signalSpy: vi.fn() }));
+vi.mock('@/lib/whatsapp/billing-signal', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/whatsapp/billing-signal')>();
+  signalSpy.mockImplementation(actual.schedulePaymentErrorSignal);
+  return {
+    ...actual,
+    schedulePaymentErrorSignal: (
+      ...a: Parameters<typeof actual.schedulePaymentErrorSignal>
+    ) => signalSpy(...a),
+  };
+});
+
 vi.mock('./registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./registry')>();
   return {
@@ -831,6 +851,154 @@ describe('sendWithPhoneVariants', () => {
       })
     ).rejects.toThrow('Invalid OAuth access token');
     expect(sendTextMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('131042 síncrono liga o estado de pagamento (SPEC 076 RF-07)', () => {
+  /** O que o `throwMetaError` real produz para um 131042 (HTTP 402). */
+  function paymentError(): Error {
+    return Object.assign(
+      new Error(
+        '(#131042) Business eligibility payment issue: There was an error related to your payment method'
+      ),
+      { name: 'MetaApiError', status: 402, code: 131042 }
+    );
+  }
+
+  /** `supabaseAdmin()` de mentira: só o que o sinal consulta. */
+  function signalAdmin() {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const configFilters: unknown[][] = [];
+    function from(table: string) {
+      const chain = {
+        select: () => chain,
+        eq: (...a: unknown[]) => {
+          if (table === 'whatsapp_config') configFilters.push(a);
+          return chain;
+        },
+        maybeSingle: () =>
+          Promise.resolve({
+            data:
+              table === 'platform_settings'
+                ? { whatsapp_billing_monitor_enabled: false }
+                : null,
+            error: null,
+          }),
+        then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+          Promise.resolve({
+            data: [{ account_id: 'acct-1', waba_id: '100000000004821' }],
+            error: null,
+          }).then(onF, onR),
+      };
+      return chain;
+    }
+    return { client: { from, rpc }, rpc, configFilters };
+  }
+
+  beforeEach(async () => {
+    const { __resetBillingSignalStateForTests } =
+      await import('@/lib/whatsapp/billing-signal');
+    __resetBillingSignalStateForTests();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  it('devolve o MESMO erro ao chamador e liga o estado do WABA do número', async () => {
+    const admin = signalAdmin();
+    adminState.client = admin.client;
+    const err = paymentError();
+    sendTemplateMessage.mockRejectedValue(err);
+
+    const caught = await sendContentViaChannel(CTX, {
+      to: '+5511999999999',
+      content: { kind: 'template', templateName: 'promo' },
+    }).catch((e: unknown) => e);
+
+    expect(caught).toBe(err);
+    expect(signalSpy).toHaveBeenCalledWith({
+      accountId: 'acct-1',
+      phoneNumberId: 'pnid-1',
+      error: err,
+    });
+    // O sinal é agendado (não aguardado): espera a escrita acontecer.
+    await vi.waitFor(() =>
+      expect(admin.rpc).toHaveBeenCalledWith(
+        'apply_payment_signal',
+        expect.objectContaining({
+          p_account_id: 'acct-1',
+          p_waba_id: '100000000004821',
+          p_kind: 'payment_error',
+          p_phone_number_id: 'pnid-1',
+        })
+      )
+    );
+    // O número é resolvido pela config; a conta é CONFERIDA, não confiada.
+    expect(admin.configFilters).toEqual([['phone_number_id', 'pnid-1']]);
+  });
+
+  it('não espera o sinal: um sinal que nunca termina não segura o erro', async () => {
+    signalSpy.mockImplementationOnce(() => new Promise<void>(() => {}));
+    const err = paymentError();
+    sendTextMessage.mockRejectedValue(err);
+
+    await expect(
+      sendContentViaChannel(CTX, {
+        to: '+5511999999999',
+        content: { kind: 'text', text: 'oi' },
+      })
+    ).rejects.toBe(err);
+  });
+
+  it('cobre o laço de variantes (inbox, motores, API): o erro sobe intacto', async () => {
+    const admin = signalAdmin();
+    adminState.client = admin.client;
+    const err = paymentError();
+    sendTextMessage.mockRejectedValue(err);
+
+    await expect(
+      sendWithPhoneVariants({
+        ctx: CTX,
+        sanitizedPhone: '+5511999999999',
+        content: { kind: 'text', text: 'oi' },
+      })
+    ).rejects.toBe(err);
+    expect(signalSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('sucesso, ou erro que não é 131042: nenhuma escrita de cobrança', async () => {
+    const admin = signalAdmin();
+    adminState.client = admin.client;
+    sendTextMessage.mockResolvedValueOnce({ messageId: 'wamid.ok' });
+    await sendContentViaChannel(CTX, {
+      to: '+5511999999999',
+      content: { kind: 'text', text: 'oi' },
+    });
+    expect(signalSpy).not.toHaveBeenCalled();
+
+    sendTextMessage.mockRejectedValueOnce(
+      Object.assign(new Error('(#190) token'), { status: 401, code: 190 })
+    );
+    await sendContentViaChannel(CTX, {
+      to: '+5511999999999',
+      content: { kind: 'text', text: 'oi' },
+    }).catch(() => {});
+    expect(admin.rpc).not.toHaveBeenCalled();
+    expect(admin.configFilters).toHaveLength(0);
+  });
+
+  it('canal QRCode não tem cobrança da Meta: o gancho nem é chamado', async () => {
+    adapterOverrides.set('whatsapp_qr', {
+      ...qrAdapterStub,
+      sendText: vi.fn().mockRejectedValue(paymentError()),
+    });
+    const qrCtx = {
+      ...CTX,
+      channel: { ...CTX.channel, type: 'whatsapp_qr' as const },
+    };
+    await sendContentViaChannel(qrCtx, {
+      to: '+5511999999999',
+      content: { kind: 'text', text: 'oi' },
+    }).catch(() => {});
+    expect(signalSpy).not.toHaveBeenCalled();
   });
 });
 

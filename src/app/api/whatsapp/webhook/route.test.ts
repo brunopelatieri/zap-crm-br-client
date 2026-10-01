@@ -99,12 +99,43 @@ let channelRow: { id: string; name: string; status: string } | null = {
   status: 'connected',
 };
 
+/**
+ * SPEC 076 F3 — o que o webhook escreve/consulta por causa do monitor de
+ * cobrança. Cada UPDATE em `messages` e `broadcast_recipients` é
+ * gravado, as consultas à `whatsapp_config` também (para contar a
+ * memoização por número), e `rpc` responde por `rpcImpl`.
+ */
+const tableUpdates: Array<{
+  table: string;
+  payload: Record<string, unknown>;
+  filters: unknown[][];
+}> = [];
+const configQueries: unknown[][][] = [];
+let broadcastRecipient: {
+  id: string;
+  status: string;
+  contact_id: string | null;
+} | null = null;
+let billingStatusRow: Record<string, unknown> | null = null;
+let billingMonitorEnabled = true;
+const rpcImpl = vi.fn();
+/**
+ * Erro que o UPDATE de `messages` devolve para um dado payload (simula o
+ * PostgREST recusando coluna ausente). `null` = sucesso.
+ */
+let messagesUpdateError:
+  | ((
+      payload: Record<string, unknown>
+    ) => { code: string; message: string } | null)
+  | null = null;
+
 // Só a consulta de `whatsapp_config` por `phone_number_id` é exercida
 // diretamente aqui — o resto do trabalho de INGESTÃO está mockado no
 // ingest. `messages`/`broadcast_recipients` ramificam por tabela porque
 // `handleStatusUpdate` (não mockado) os lê de verdade.
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
+    rpc: (fn: string, args: unknown) => rpcImpl(fn, args),
     storage: {
       from: () => ({
         upload: () => Promise.resolve(storageUploadResult),
@@ -118,13 +149,46 @@ vi.mock('@supabase/supabase-js', () => ({
         // .maybeSingle()` read that resolves the owning conversation —
         // this fake answers both via `.then()` for the first and
         // `.maybeSingle()` for the second.
+        let rec: (typeof tableUpdates)[number] | null = null;
         const chain = {
           select: () => chain,
-          eq: () => chain,
+          eq: (...a: unknown[]) => {
+            rec?.filters.push(a);
+            return chain;
+          },
           limit: () => chain,
-          update: () => chain,
+          update: (payload: Record<string, unknown>) => {
+            rec = { table, payload, filters: [] };
+            tableUpdates.push(rec);
+            return chain;
+          },
           maybeSingle: () =>
             Promise.resolve({ data: statusMessageRow, error: null }),
+          then: (
+            onF: (v: { error: unknown }) => unknown,
+            onR?: (e: unknown) => unknown
+          ) =>
+            Promise.resolve({
+              error: rec ? (messagesUpdateError?.(rec.payload) ?? null) : null,
+            }).then(onF, onR),
+        };
+        return chain;
+      }
+      if (table === 'broadcast_recipients') {
+        let rec: (typeof tableUpdates)[number] | null = null;
+        const chain = {
+          select: () => chain,
+          eq: (...a: unknown[]) => {
+            rec?.filters.push(a);
+            return chain;
+          },
+          update: (payload: Record<string, unknown>) => {
+            rec = { table, payload, filters: [] };
+            tableUpdates.push(rec);
+            return chain;
+          },
+          maybeSingle: () =>
+            Promise.resolve({ data: broadcastRecipient, error: null }),
           then: (
             onF: (v: { error: null }) => unknown,
             onR?: (e: unknown) => unknown
@@ -132,11 +196,25 @@ vi.mock('@supabase/supabase-js', () => ({
         };
         return chain;
       }
-      if (table === 'broadcast_recipients') {
+      if (table === 'whatsapp_billing_status') {
         const chain = {
           select: () => chain,
           eq: () => chain,
-          maybeSingle: () => Promise.resolve({ data: null, error: null }),
+          maybeSingle: () =>
+            Promise.resolve({ data: billingStatusRow, error: null }),
+        };
+        return chain;
+      }
+      if (table === 'platform_settings') {
+        const chain = {
+          select: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({
+              data: {
+                whatsapp_billing_monitor_enabled: billingMonitorEnabled,
+              },
+              error: null,
+            }),
         };
         return chain;
       }
@@ -144,20 +222,45 @@ vi.mock('@supabase/supabase-js', () => ({
       // canal dono do número. Número desativado não cria conversa nem
       // decripta segredo nenhum.
       if (table === 'channels') {
+        // `.maybeSingle()`: a guarda do D-12 na ingestão. Aguardado
+        // direto (`.then`): os canais do WABA que a notificação de
+        // pagamento (SPEC 076) consulta.
         const chain = {
           select: () => chain,
           eq: () => chain,
+          neq: () => chain,
+          in: () => chain,
           maybeSingle: () =>
             Promise.resolve({
               data: channelRow,
               error: null,
             }),
+          then: (
+            onF: (v: { data: unknown; error: null }) => unknown,
+            onR?: (e: unknown) => unknown
+          ) =>
+            Promise.resolve({
+              data: channelRow ? [{ id: channelRow.id }] : [],
+              error: null,
+            }).then(onF, onR),
         };
         return chain;
       }
+      // whatsapp_config — por `phone_number_id` (ingestão e sinal de
+      // pagamento) ou por conta + WABA (canais a notificar). Thenable em
+      // vez de resolver no primeiro `.eq()`, para aceitar os dois.
+      const filters: unknown[][] = [];
+      configQueries.push(filters);
       const chain = {
         select: () => chain,
-        eq: () =>
+        eq: (...a: unknown[]) => {
+          filters.push(a);
+          return chain;
+        },
+        then: (
+          onF: (v: { data: unknown; error: null }) => unknown,
+          onR?: (e: unknown) => unknown
+        ) =>
           Promise.resolve({
             data: [
               {
@@ -165,12 +268,13 @@ vi.mock('@supabase/supabase-js', () => ({
                 account_id: 'acct-1',
                 user_id: 'user-1',
                 phone_number_id: 'pnid-1',
+                waba_id: '100000000004821',
                 access_token: 'cipher',
                 channel_id: 'chan-1',
               },
             ],
             error: null,
-          }),
+          }).then(onF, onR),
       };
       return chain;
     },
@@ -178,6 +282,7 @@ vi.mock('@supabase/supabase-js', () => ({
 }));
 
 import { POST } from './route';
+import { __resetBillingSignalStateForTests } from '@/lib/whatsapp/billing-signal';
 
 const INBOUND = {
   entry: [
@@ -224,6 +329,14 @@ beforeEach(() => {
   markRevokedByContact.mockResolvedValue(undefined);
   statusMessageRow = null;
   channelRow = { id: 'chan-1', name: 'WhatsApp Oficial', status: 'connected' };
+  tableUpdates.length = 0;
+  configQueries.length = 0;
+  messagesUpdateError = null;
+  broadcastRecipient = null;
+  billingStatusRow = null;
+  billingMonitorEnabled = true;
+  rpcImpl.mockResolvedValue({ data: false, error: null });
+  __resetBillingSignalStateForTests();
   storageUploadResult = { error: null };
   getMediaUrl.mockResolvedValue({
     url: 'https://cdn.meta.example/media-1',
@@ -567,5 +680,337 @@ describe('POST /api/whatsapp/webhook — revogação pelo contato (SPEC 074 §9.
     await afterCallbacks[0]!();
 
     expect(markRevokedByContact).not.toHaveBeenCalled();
+  });
+});
+
+describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', () => {
+  /** Um POST com N statuses num único `change` do número `pnid-1`. */
+  function statusesRequest(statuses: Array<Record<string, unknown>>): Request {
+    return request({
+      entry: [
+        {
+          // WABA segundo a Meta. Diverge de propósito do `waba_id` da
+          // config ('100000000004821'): quem vale é a config (§7.8).
+          id: '999999999990000',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '+551130000000',
+                  phone_number_id: 'pnid-1',
+                },
+                statuses,
+              },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  const FAILED_131042 = {
+    id: 'wamid.f1',
+    status: 'failed',
+    timestamp: '1790823600',
+    recipient_id: '5511999999999',
+    errors: [{ code: 131042, title: 'Business eligibility payment issue' }],
+  };
+
+  const applyCalls = () =>
+    rpcImpl.mock.calls.filter((c) => c[0] === 'apply_payment_signal');
+  const notifyCalls = () =>
+    rpcImpl.mock.calls.filter((c) => c[0] === 'notify_channel_payment_blocked');
+
+  async function run(req: Request) {
+    await POST(req);
+    await afterCallbacks[afterCallbacks.length - 1]!();
+  }
+
+  it('failed/131042 aciona o sinal com o WABA da CONFIG, o phone_number_id do evento e o carimbo da Meta', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await run(statusesRequest([FAILED_131042]));
+
+    expect(applyCalls()).toEqual([
+      [
+        'apply_payment_signal',
+        {
+          p_account_id: 'acct-1',
+          p_waba_id: '100000000004821',
+          p_kind: 'payment_error',
+          p_ts: '2026-10-01T03:00:00.000Z',
+          p_phone_number_id: 'pnid-1',
+        },
+      ],
+    ]);
+    // A conta veio do número, não do entry.id.
+    expect(configQueries[0]).toEqual([['phone_number_id', 'pnid-1']]);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('waba mismatch')
+    );
+  });
+
+  it('episódio novo com flag ligado notifica; a Meta REENVIANDO o mesmo webhook não duplica', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    // A função SQL abre o episódio na primeira vez e devolve FALSE na
+    // repetição (COALESCE/GREATEST — verificado contra Postgres na F3).
+    rpcImpl.mockImplementation(async (fn: string) => {
+      if (fn === 'notify_channel_payment_blocked')
+        return { data: 2, error: null };
+      const first = applyCalls().length === 1;
+      return { data: first, error: null };
+    });
+
+    await run(statusesRequest([FAILED_131042]));
+    // Reenvio com o retrato do processo ainda quente: barrado ANTES do
+    // banco (pendente, carimbo igual).
+    await run(statusesRequest([FAILED_131042]));
+    expect(applyCalls()).toHaveLength(1);
+
+    // Reenvio caindo em OUTRO processo (cache frio): a função SQL é
+    // chamada, devolve FALSE, e nenhuma notificação nova sai.
+    __resetBillingSignalStateForTests();
+    await run(statusesRequest([FAILED_131042]));
+    expect(applyCalls()).toHaveLength(2);
+
+    expect(notifyCalls()).toEqual([
+      [
+        'notify_channel_payment_blocked',
+        {
+          p_account_id: 'acct-1',
+          p_channel_id: 'chan-1',
+          p_waba_id: '100000000004821',
+        },
+      ],
+    ]);
+  });
+
+  it('flag DESLIGADO: o estado é gravado, nenhuma notificação é criada', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    billingMonitorEnabled = false;
+    rpcImpl.mockResolvedValue({ data: true, error: null });
+
+    await run(statusesRequest([FAILED_131042]));
+
+    expect(applyCalls()).toHaveLength(1);
+    expect(notifyCalls()).toHaveLength(0);
+  });
+
+  it('vários statuses no mesmo change: a conta é resolvida UMA vez', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    rpcImpl.mockImplementation(async (fn: string) =>
+      fn === 'apply_payment_signal'
+        ? { data: applyCalls().length === 1, error: null }
+        : { data: 1, error: null }
+    );
+
+    await run(
+      statusesRequest([
+        { ...FAILED_131042, id: 'wamid.a' },
+        { ...FAILED_131042, id: 'wamid.b', timestamp: '1790823660' },
+        { ...FAILED_131042, id: 'wamid.c', timestamp: '1790823720' },
+      ])
+    );
+
+    const byPhone = configQueries.filter((f) =>
+      f.some((a) => a[0] === 'phone_number_id')
+    );
+    expect(byPhone).toHaveLength(1);
+  });
+
+  it('delivered com pricing grava as colunas no MESMO UPDATE do status (1 escrita); status sem pricing não toca nelas', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await run(
+      statusesRequest([
+        {
+          id: 'wamid.d',
+          status: 'delivered',
+          timestamp: '1790823600',
+          recipient_id: '5511999999999',
+          pricing: {
+            billable: true,
+            pricing_model: 'PMP',
+            category: 'marketing',
+            type: 'regular',
+          },
+        },
+        {
+          id: 'wamid.r',
+          status: 'read',
+          timestamp: '1790823700',
+          recipient_id: '5511999999999',
+        },
+      ])
+    );
+
+    const msgUpdates = tableUpdates.filter((u) => u.table === 'messages');
+    expect(msgUpdates).toEqual([
+      {
+        table: 'messages',
+        payload: {
+          status: 'delivered',
+          pricing_billable: true,
+          pricing_category: 'MARKETING',
+        },
+        filters: [['message_id', 'wamid.d']],
+      },
+      // O `read` sem pricing: só o status — nada de pricing_* nulo por cima.
+      {
+        table: 'messages',
+        payload: { status: 'read' },
+        filters: [['message_id', 'wamid.r']],
+      },
+    ]);
+  });
+
+  it('086 ausente (coluna recusada): o UPDATE é REPETIDO só com o status — o espelho não cai — e o pricing fica desligado', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    messagesUpdateError = (payload) =>
+      'pricing_billable' in payload || 'pricing_category' in payload
+        ? { code: 'PGRST204', message: 'no column pricing_billable' }
+        : null;
+    const withPricing = (id: string) => ({
+      id,
+      status: 'delivered',
+      timestamp: '1790823600',
+      recipient_id: '5511999999999',
+      pricing: { billable: false, category: 'service' },
+    });
+
+    await run(
+      statusesRequest([withPricing('wamid.1'), withPricing('wamid.2')])
+    );
+
+    const payloads = tableUpdates
+      .filter((u) => u.table === 'messages')
+      .map((u) => [u.filters[0]![1], u.payload]);
+    expect(payloads).toEqual([
+      // 1º: tenta com pricing, é recusado, repete só com o status.
+      [
+        'wamid.1',
+        {
+          status: 'delivered',
+          pricing_billable: false,
+          pricing_category: 'SERVICE',
+        },
+      ],
+      ['wamid.1', { status: 'delivered' }],
+      // 2º: o pricing já está desligado — uma escrita só, sem tentar à toa.
+      ['wamid.2', { status: 'delivered' }],
+    ]);
+    // Nenhum erro "Error updating message status" para o operador.
+    expect(console.error).not.toHaveBeenCalledWith(
+      'Error updating message status:',
+      expect.anything()
+    );
+  });
+
+  it('POSTs seguidos do mesmo número: conta/WABA resolvidos uma vez só (cache de processo)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    rpcImpl.mockImplementation(async (fn: string) =>
+      fn === 'apply_payment_signal'
+        ? { data: applyCalls().length === 1, error: null }
+        : { data: 1, error: null }
+    );
+
+    for (let i = 0; i < 3; i++) {
+      await run(
+        statusesRequest([
+          {
+            ...FAILED_131042,
+            id: `wamid.${i}`,
+            timestamp: `${1790823600 + i * 60}`,
+          },
+        ])
+      );
+    }
+
+    expect(
+      configQueries.filter((f) => f.some((a) => a[0] === 'phone_number_id'))
+    ).toHaveLength(1);
+  });
+
+  it('delivered cobrável depois do último 131042 limpa; billable=false nunca', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    billingStatusRow = {
+      payment_blocked_since: '2026-10-01T02:00:00Z',
+      last_payment_error_at: '2026-10-01T02:00:00Z',
+    };
+
+    await run(
+      statusesRequest([
+        {
+          id: 'wamid.free',
+          status: 'delivered',
+          timestamp: '1790823600',
+          recipient_id: '5511999999999',
+          pricing: { billable: false, category: 'service' },
+        },
+        {
+          id: 'wamid.paid',
+          status: 'delivered',
+          timestamp: '1790823660',
+          recipient_id: '5511999999999',
+          pricing: { billable: true, category: 'marketing' },
+        },
+      ])
+    );
+
+    expect(applyCalls()).toEqual([
+      [
+        'apply_payment_signal',
+        expect.objectContaining({
+          p_kind: 'billable_ok',
+          p_ts: '2026-10-01T03:01:00.000Z',
+        }),
+      ],
+    ]);
+  });
+
+  it('falha do sinal NÃO impede o espelho em broadcast_recipients nem o fan-out', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    broadcastRecipient = { id: 'rec-1', status: 'sent', contact_id: null };
+    statusMessageRow = {
+      conversation_id: 'conv-1',
+      conversations: {
+        account_id: 'acct-1',
+        channel_id: 'chan-1',
+        channels: { type: 'whatsapp_cloud' },
+      },
+    };
+    rpcImpl.mockRejectedValue(new Error('db down'));
+
+    await run(statusesRequest([FAILED_131042]));
+
+    // O sinal foi tentado…
+    expect(applyCalls()).toHaveLength(1);
+    // …e mesmo falhando, o espelho e o fan-out aconteceram.
+    expect(tableUpdates).toContainEqual({
+      table: 'broadcast_recipients',
+      payload: {
+        status: 'failed',
+        error_message: '(#131042) Business eligibility payment issue',
+      },
+      filters: [['id', 'rec-1']],
+    });
+    expect(dispatchWebhookEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'acct-1',
+      'message.status_updated',
+      expect.objectContaining({
+        whatsapp_message_id: 'wamid.f1',
+        status: 'failed',
+      })
+    );
   });
 });

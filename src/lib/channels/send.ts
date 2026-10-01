@@ -44,6 +44,7 @@ import { resolveCloudConfig } from '@/lib/whatsapp/cloud-channels';
 import type { WhatsappConfigRow } from '@/lib/whatsapp/cloud-channels';
 import { resolveInstanceByChannelId } from '@/lib/evolution/instances';
 import { assertAccountNotBlocked } from '@/lib/platform/blocked';
+import { schedulePaymentErrorSignal } from '@/lib/whatsapp/billing-signal';
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive';
 import {
   sanitizePhoneForMeta,
@@ -453,8 +454,39 @@ export async function resolveOutboundContact(
  * método opcional que aquele canal não implementa (é o contrato descrito
  * em `types.ts`). No canal Cloud toda checagem passa, então o caminho
  * oficial não muda.
+ *
+ * Sinal de pagamento (SPEC 076 RF-07). Este é o ponto único por onde
+ * passam o inbox, a API pública, os motores, a transferência, o ingest e
+ * o disparo em massa — então é aqui que um 131042 SÍNCRONO do canal
+ * oficial liga o estado de pagamento do WABA. Best-effort e sem `await`:
+ * o erro devolvido é o MESMO objeto, relançado na hora.
  */
 export async function sendContentViaChannel(
+  ctx: ChannelContext,
+  params: {
+    to: string;
+    content: OutboundContent;
+    quotedProviderMessageId?: string | null;
+  }
+): Promise<string> {
+  try {
+    return await sendContentViaAdapter(ctx, params);
+  } catch (err) {
+    if (ctx.channel.type === 'whatsapp_cloud') {
+      // O `Channel` pode ser sintético (`cloudChannelContext`), sem id
+      // real nem WABA: o sinal resolve os dois pela `whatsapp_config`, a
+      // partir da conta + `phone_number_id` que todo contexto Cloud tem.
+      schedulePaymentErrorSignal({
+        accountId: ctx.accountId,
+        phoneNumberId: ctx.credentials.phoneNumberId,
+        error: err,
+      });
+    }
+    throw err;
+  }
+}
+
+async function sendContentViaAdapter(
   ctx: ChannelContext,
   params: {
     to: string;

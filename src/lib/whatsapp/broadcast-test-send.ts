@@ -46,6 +46,7 @@ import {
   isMediaHeaderTemplate,
 } from '@/lib/whatsapp/header-media';
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
+import { schedulePaymentErrorSignal } from '@/lib/whatsapp/billing-signal';
 import { isValidE164, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import {
@@ -280,6 +281,14 @@ export async function sendBroadcastTest(
         messageId: sent.messageId,
       });
     } catch (err) {
+      // SPEC 076 RF-07 — este envio chama a Meta direto (não passa por
+      // `sendContentViaChannel`), então o gancho do 131042 síncrono é
+      // repetido aqui. Best-effort, sem esperar.
+      schedulePaymentErrorSignal({
+        accountId,
+        phoneNumberId: config.phone_number_id,
+        error: err,
+      });
       results.push({
         contactId,
         name: contact.name ?? null,

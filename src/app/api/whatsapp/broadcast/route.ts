@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
+import { schedulePaymentErrorSignal } from '@/lib/whatsapp/billing-signal';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
@@ -260,6 +261,14 @@ export async function POST(request: Request) {
           lastError = null;
           break;
         } catch (error) {
+          // SPEC 076 RF-07 — rota que chama a Meta direto, fora de
+          // `sendContentViaChannel`: o gancho do 131042 síncrono é
+          // repetido aqui. Best-effort, sem esperar.
+          schedulePaymentErrorSignal({
+            accountId,
+            phoneNumberId: config.phone_number_id,
+            error,
+          });
           const errorMessage =
             error instanceof Error ? error.message : 'Unknown error';
           if (!isRecipientNotAllowedError(errorMessage)) {
