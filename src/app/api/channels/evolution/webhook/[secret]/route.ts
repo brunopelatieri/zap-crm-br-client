@@ -45,7 +45,11 @@ import { NextResponse, after } from 'next/server';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { decrypt } from '@/lib/whatsapp/encryption';
-import { baseMimeType, buildMediaPath } from '@/lib/storage/upload-media';
+import {
+  baseMimeType,
+  buildMediaPath,
+  storedFileNameFor,
+} from '@/lib/storage/upload-media';
 import { bindChannelToPhone } from '@/lib/evolution/instances';
 import { evolutionDebugLog } from '@/lib/evolution/debug';
 import { ensureContactIdentity } from '@/lib/evolution/contact-identity';
@@ -534,42 +538,6 @@ function extractMessageContent(
   }
 
   return null;
-}
-
-/**
- * Extensão a partir do mimetype, para a mídia que chega SEM nome.
- *
- * Áudio de voz do WhatsApp não tem `fileName` — é gravação, não arquivo.
- * Sem isto, `buildMediaPath` cai no fallback `.bin` e todo áudio, foto e
- * vídeo recebido vira `media.bin` no bucket. O player até funciona (o
- * Content-Type guardado é o que vale), mas o objeto fica opaco para
- * quem abre o bucket, e qualquer ferramenta que decida pelo sufixo erra.
- */
-const MIME_EXTENSIONS: Record<string, string> = {
-  'audio/ogg': 'ogg',
-  'audio/mpeg': 'mp3',
-  'audio/mp4': 'm4a',
-  'audio/aac': 'aac',
-  'audio/amr': 'amr',
-  'audio/wav': 'wav',
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'video/mp4': 'mp4',
-  'video/3gpp': '3gp',
-  'video/quicktime': 'mov',
-  'application/pdf': 'pdf',
-};
-
-export function storedFileNameFor(
-  filename: string | null,
-  mimeType: string | null
-): string {
-  if (filename) return filename;
-  const base = baseMimeType(mimeType);
-  const ext = base ? MIME_EXTENSIONS[base] : undefined;
-  return ext ? `media.${ext}` : 'media';
 }
 
 /**

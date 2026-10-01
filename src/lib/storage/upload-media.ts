@@ -60,6 +60,47 @@ export function baseMimeType(
 }
 
 /**
+ * Extensão a partir do mimetype, para a mídia que chega SEM nome.
+ *
+ * Áudio de voz do WhatsApp não tem `fileName` — é gravação, não arquivo.
+ * Sem isto, `buildMediaPath` cai no fallback `.bin` e todo áudio, foto e
+ * vídeo recebido vira `media.bin` no bucket. O player até funciona (o
+ * Content-Type guardado é o que vale), mas o objeto fica opaco para
+ * quem abre o bucket, e qualquer ferramenta que decida pelo sufixo erra.
+ */
+const MIME_EXTENSIONS: Record<string, string> = {
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+  'audio/amr': 'amr',
+  'audio/wav': 'wav',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/3gpp': '3gp',
+  'video/quicktime': 'mov',
+  'application/pdf': 'pdf',
+};
+
+/**
+ * Nome de arquivo a guardar quando o remetente não manda um (SPEC 048
+ * §6.5, canal Evolution/QRCode): usa o `filename` recebido quando há
+ * um, senão deriva a extensão do mimetype via {@link MIME_EXTENSIONS}.
+ */
+export function storedFileNameFor(
+  filename: string | null,
+  mimeType: string | null
+): string {
+  if (filename) return filename;
+  const base = baseMimeType(mimeType);
+  const ext = base ? MIME_EXTENSIONS[base] : undefined;
+  return ext ? `media.${ext}` : 'media';
+}
+
+/**
  * Build the account-scoped object path for an upload. Pure + exported so
  * it can be unit-tested without a Supabase client.
  *

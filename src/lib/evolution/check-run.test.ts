@@ -303,7 +303,11 @@ describe('runCheckBatch — busca de avatar (D-13)', () => {
       },
     ]);
     const { db } = makeDb({});
-    const recentFetch = new Date('2026-09-01T00:00:00Z'); // 2 dias atrás
+    // Relativo a "agora" (não data absoluta): uma data fixa sai do
+    // TTL de 30 dias assim que o relógio real a ultrapassa — já
+    // aconteceu com 2026-09-01, que virou "30 dias atrás" e passou a
+    // ser tratada como expirada em vez de recente.
+    const recentFetch = new Date(Date.now() - 2 * 86400000); // 2 dias atrás
 
     const summary = await runCheckBatch(
       db,

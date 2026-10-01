@@ -419,31 +419,37 @@ export default function BroadcastDetailPage() {
                     <span className="font-mono">{broadcast.template_name}</span>
                   </div>
                   <span>·</span>
-                {broadcast.scheduled_at ? (
-                  <>
-                    <span>
-                      {`Agendado ${new Date(broadcast.scheduled_at).toLocaleString('pt-BR', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}`}
-                    </span>
-                    <span>·</span>
+                  {broadcast.scheduled_at ? (
+                    <>
+                      <span>
+                        {`Agendado ${new Date(
+                          broadcast.scheduled_at
+                        ).toLocaleString('pt-BR', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}`}
+                      </span>
+                      <span>·</span>
+                      <span>
+                        {t('createdAt', {
+                          date: new Date(
+                            broadcast.created_at
+                          ).toLocaleDateString(),
+                        })}
+                      </span>
+                    </>
+                  ) : (
                     <span>
                       {t('createdAt', {
-                        date: new Date(broadcast.created_at).toLocaleDateString(),
+                        date: new Date(
+                          broadcast.created_at
+                        ).toLocaleDateString(),
                       })}
                     </span>
-                  </>
-                ) : (
-                  <span>
-                    {t('createdAt', {
-                      date: new Date(broadcast.created_at).toLocaleDateString(),
-                    })}
-                  </span>
-                )}
+                  )}
                 </div>
               </div>
             )}

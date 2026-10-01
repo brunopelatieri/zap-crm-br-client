@@ -1120,21 +1120,9 @@ describe('mídia recebida', () => {
     expect(currentDb.uploads[0].path).toMatch(/\.ogg$/);
   });
 
-  it('nomeia o objeto pela extensão do mimetype quando não há filename', async () => {
-    // Áudio de voz não tem `fileName` — é gravação, não arquivo. Sem
-    // derivar do mimetype, tudo virava `media.bin` no bucket.
-    const { storedFileNameFor } = await import('./route');
-
-    expect(storedFileNameFor(null, 'audio/ogg; codecs=opus')).toBe('media.ogg');
-    expect(storedFileNameFor(null, 'image/jpeg')).toBe('media.jpg');
-    // Nome explícito do provedor (documento) tem prioridade.
-    expect(storedFileNameFor('contrato.pdf', 'application/pdf')).toBe(
-      'contrato.pdf'
-    );
-    // Mimetype desconhecido não inventa extensão.
-    expect(storedFileNameFor(null, 'application/x-coisa')).toBe('media');
-    expect(storedFileNameFor(null, null)).toBe('media');
-  });
+  // `storedFileNameFor` saiu daqui para `@/lib/storage/upload-media`
+  // (route.ts só pode exportar handlers HTTP — ver teste dedicado em
+  // `upload-media.test.ts`).
 
   it('lê o proto de mídia mesmo com a caixa do campo divergindo', async () => {
     await post(

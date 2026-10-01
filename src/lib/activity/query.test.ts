@@ -365,11 +365,16 @@ describe('queryActivity — filtros', () => {
 const EVT_ID = (n: number) => `00000000-0000-0000-0000-00000000000${n}`;
 
 describe('queryActivity — paginação por cursor', () => {
-  // 5 eventos, do mais novo (5) ao mais antigo (1).
+  // 5 eventos, do mais novo (5) ao mais antigo (1), espaçados em dias
+  // relativos a "agora" — datas absolutas fixas saem da janela padrão
+  // de 30 dias assim que o relógio real passa da data em que o teste
+  // foi escrito (já aconteceu uma vez: fixture fixa em 2026-09-01,
+  // quebrou quando "agora" virou 2026-10-01 e a linha mais antiga
+  // caiu fora da janela).
   const ROWS = [5, 4, 3, 2, 1].map((n) =>
     row({
       id: EVT_ID(n),
-      created_at: `2026-09-0${n}T00:00:00.000Z`,
+      created_at: new Date(Date.now() - (5 - n) * 86400000).toISOString(),
     })
   );
 
@@ -447,12 +452,17 @@ describe('queryActivity — paginação por cursor', () => {
 // `activity`.
 describe('queryActivity — cursor é o formato compartilhado de pagination.ts', () => {
   it('aceita um cursor pré-fabricado com encodeCursor', async () => {
+    // Relativo a "agora" pelo mesmo motivo do describe acima — uma
+    // data absoluta sai da janela padrão de 30 dias assim que o
+    // relógio real a ultrapassa.
+    const createdAtFor = (n: number) =>
+      new Date(Date.now() - (3 - n) * 86400000).toISOString();
     const ROWS = [3, 2, 1].map((n) =>
-      row({ id: EVT_ID(n), created_at: `2026-09-0${n}T00:00:00.000Z` })
+      row({ id: EVT_ID(n), created_at: createdAtFor(n) })
     );
     const db = makeFakeDb(ROWS);
     const cursor = encodeCursor({
-      created_at: '2026-09-03T00:00:00.000Z',
+      created_at: createdAtFor(3),
       id: EVT_ID(3),
     });
 

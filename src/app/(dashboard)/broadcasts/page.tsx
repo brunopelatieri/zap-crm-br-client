@@ -516,17 +516,20 @@ export default function BroadcastsPage() {
                               })}
                             </p>
                           )}
-                          {broadcast.scheduled_at && broadcast.status === 'scheduled' && (
-                            <p className="text-muted-foreground mt-1 text-[10px]">
-                              {new Date(broadcast.scheduled_at).toLocaleString('pt-BR', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </p>
-                          )}
+                          {broadcast.scheduled_at &&
+                            broadcast.status === 'scheduled' && (
+                              <p className="text-muted-foreground mt-1 text-[10px]">
+                                {new Date(
+                                  broadcast.scheduled_at
+                                ).toLocaleString('pt-BR', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </p>
+                            )}
                         </TableCell>
                         <TableCell className="text-muted-foreground hidden sm:table-cell">
                           {new Date(broadcast.created_at).toLocaleDateString()}

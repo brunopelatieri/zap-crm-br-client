@@ -3,6 +3,7 @@ import {
   baseMimeType,
   buildMediaPath,
   MEDIA_MAX_BYTES_BY_KIND,
+  storedFileNameFor,
 } from './upload-media';
 
 /**
@@ -32,6 +33,27 @@ describe('baseMimeType', () => {
     expect(baseMimeType(undefined)).toBeNull();
     expect(baseMimeType('')).toBeNull();
     expect(baseMimeType('  ; charset=utf-8')).toBeNull();
+  });
+});
+
+describe('storedFileNameFor', () => {
+  it('nomeia o objeto pela extensão do mimetype quando não há filename', () => {
+    // Áudio de voz (canal Evolution/QRCode, SPEC 048 §6.5) não tem
+    // `fileName` — é gravação, não arquivo. Sem derivar do mimetype,
+    // tudo virava `media.bin` no bucket.
+    expect(storedFileNameFor(null, 'audio/ogg; codecs=opus')).toBe('media.ogg');
+    expect(storedFileNameFor(null, 'image/jpeg')).toBe('media.jpg');
+  });
+
+  it('nome explícito do provedor (documento) tem prioridade', () => {
+    expect(storedFileNameFor('contrato.pdf', 'application/pdf')).toBe(
+      'contrato.pdf'
+    );
+  });
+
+  it('mimetype desconhecido não inventa extensão', () => {
+    expect(storedFileNameFor(null, 'application/x-coisa')).toBe('media');
+    expect(storedFileNameFor(null, null)).toBe('media');
   });
 });
 
