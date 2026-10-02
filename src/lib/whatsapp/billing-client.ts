@@ -79,6 +79,42 @@ export async function fetchBillingSummary(): Promise<
   }
 }
 
+function laterThan(
+  next: string | null | undefined,
+  prev: string | null | undefined
+) {
+  if (!next) return false;
+  const n = Date.parse(next);
+  if (Number.isNaN(n)) return false;
+  if (!prev) return true;
+  const p = Date.parse(prev);
+  return Number.isNaN(p) || n > p;
+}
+
+/**
+ * O "Atualizar" trouxe leitura NOVA da Meta? A rota responde 200 também
+ * quando nada foi lido — recuo vigente (`next_retry_at`, que vence até o
+ * `refresh=1`) ou a Meta falhou e voltou o retrato anterior com `stale`.
+ *
+ * "Status atualizado" fala do STATUS DE ENVIO: o carimbo dele andou → sim.
+ * Se só o consumo andou (os recuos dos dois campos são independentes), só
+ * vale quando o painel não segue com erro/`stale` do status de envio —
+ * senão o toast contradiria o aviso "não foi possível atualizar agora".
+ */
+export function refreshAdvanced(
+  prev: ChannelBillingDto | null,
+  next: ChannelBillingDto
+): boolean {
+  if (laterThan(next.send_status.checked_at, prev?.send_status.checked_at)) {
+    return true;
+  }
+  return (
+    laterThan(next.spend?.checked_at, prev?.spend?.checked_at) &&
+    !next.stale &&
+    next.error?.field !== 'health'
+  );
+}
+
 export interface PaymentAckResult {
   cleared: boolean;
   cleared_at?: string;

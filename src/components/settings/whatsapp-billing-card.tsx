@@ -35,6 +35,7 @@ import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import {
   fetchChannelBilling,
   postPaymentAck,
+  refreshAdvanced,
   type BillingFetchResult,
 } from '@/lib/whatsapp/billing-client';
 import type { ChannelBillingDto } from '@/lib/whatsapp/billing-dto';
@@ -79,8 +80,21 @@ export function WhatsAppBillingCard({
   const [hidden, setHidden] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  /** Resposta 429 do próprio "Atualizar": até quando esperar. */
+  /**
+   * Resposta 429 do próprio "Atualizar" (limite por usuário ou 1 leitura
+   * forçada por WABA a cada 60 s — nossos, não da Meta): até quando esperar.
+   * Some sozinho quando o horário passa.
+   */
   const [throttledUntil, setThrottledUntil] = useState<string | null>(null);
+  useEffect(() => {
+    if (!throttledUntil) return;
+    const ms = Date.parse(throttledUntil) - Date.now();
+    const timer = setTimeout(
+      () => setThrottledUntil(null),
+      Number.isFinite(ms) ? Math.max(0, ms) : 0
+    );
+    return () => clearTimeout(timer);
+  }, [throttledUntil]);
   const [ackOpen, setAckOpen] = useState(false);
   const [acking, setAcking] = useState(false);
 
@@ -96,7 +110,9 @@ export function WhatsAppBillingCard({
 
   /** Aplica um resultado de leitura. Devolve `true` se virou dado novo. */
   const apply = useCallback(
-    (res: BillingFetchResult<ChannelBillingDto>): boolean => {
+    (
+      res: BillingFetchResult<ChannelBillingDto>
+    ): res is { status: 'ok'; data: ChannelBillingDto } => {
       if (res.status === 'ok') {
         setData(res.data);
         setLoadError(false);
@@ -133,16 +149,29 @@ export function WhatsAppBillingCard({
     setRefreshing(true);
     setThrottledUntil(null);
     const res = await fetchChannelBilling(channelId, { refresh: true });
-    if (mine !== seq.current) return;
+    // Antes do teste de `seq`: uma busca mais nova (ex.: a releitura do
+    // "Já regularizei") descarta ESTA resposta, mas o botão não pode ficar
+    // preso em "Atualizando…".
     setRefreshing(false);
+    if (mine !== seq.current) return;
     if (res.status === 'throttled') {
       setThrottledUntil(
         new Date(Date.now() + res.retryAfterSeconds * 1000).toISOString()
       );
       return;
     }
-    if (apply(res)) toast.success(t('refreshed'));
-    else if (res.status === 'error') toast.error(t('loadFailed'));
+    const prev = data;
+    if (!apply(res)) {
+      if (res.status === 'error') toast.error(t('loadFailed'));
+      return;
+    }
+    // 200 nem sempre é leitura nova: em recuo, ou com a Meta falhando, a
+    // rota devolve o retrato anterior.
+    if (refreshAdvanced(prev, res.data)) {
+      toast.success(t('refreshed'));
+    } else {
+      toast.info(t('refreshNotUpdated'));
+    }
   }
 
   async function handleAck() {
@@ -206,9 +235,8 @@ export function WhatsAppBillingCard({
 
   const { spend } = data;
   const checkedAt = data.send_status.checked_at;
-  const rateLimitedAt =
-    throttledUntil ??
-    (data.error?.kind === 'rate_limit' ? data.next_retry_at : null);
+  const metaRateLimitedAt =
+    data.error?.kind === 'rate_limit' ? data.next_retry_at : null;
   const paymentDate = formatDateTime(
     data.payment.last_error_at ?? data.payment.since,
     dateFnsLocale
@@ -269,10 +297,16 @@ export function WhatsAppBillingCard({
             </p>
           )}
 
-          {rateLimitedAt ? (
+          {throttledUntil ? (
+            <p className="text-sm text-amber-600 dark:text-amber-300">
+              {t('refreshThrottled', {
+                time: formatClock(throttledUntil, dateFnsLocale),
+              })}
+            </p>
+          ) : metaRateLimitedAt ? (
             <p className="text-sm text-amber-600 dark:text-amber-300">
               {t('rateLimited', {
-                time: formatClock(rateLimitedAt, dateFnsLocale),
+                time: formatClock(metaRateLimitedAt, dateFnsLocale),
               })}
             </p>
           ) : (

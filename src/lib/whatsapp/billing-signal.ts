@@ -307,6 +307,30 @@ function invalidateSession(phoneNumberId: string): void {
   sessionCache.delete(phoneNumberId);
 }
 
+/**
+ * Descarta TODOS os retratos de sessão deste processo. Chamado quando o
+ * estado de pagamento muda por fora do sinal — a limpeza manual ("Já
+ * regularizei", `billing-server.ts`). Sem isto, por até
+ * {@link SESSION_TTL_MS} o retrato ainda diria "pendente" e os filtros
+ * (`SYNC_COALESCE_MS`, "erro igual ou mais antigo que o último") pulariam
+ * o 131042 que deveria ABRIR o episódio novo — e, se a rajada terminasse
+ * dentro da janela, o alerta nunca voltaria.
+ *
+ * Tudo, e não só o WABA limpo: as entradas são promessas (o alvo só se
+ * conhece depois de resolvidas), a ação é rara e o custo é uma releitura
+ * por número no próximo sinal.
+ *
+ * Limite conhecido: vale só para ESTE processo. Outra instância (ou o
+ * worker do disparo) mantém o retrato até {@link SESSION_TTL_MS} e pode
+ * pular, nesse intervalo, o 131042 que reabriria o episódio — o mesmo
+ * tipo de limite aceito para {@link unnotified}. Fechar de vez exigiria
+ * tirar o atalho "pendente" do caminho de `payment_error` (mais uma ida ao
+ * banco por falha de disparo) ou levar `payment_cleared_at` para a sessão.
+ */
+export function invalidatePaymentSignalCache(): void {
+  sessionCache.clear();
+}
+
 // ============================================================
 // Notificação em falta (retry no processo)
 // ============================================================

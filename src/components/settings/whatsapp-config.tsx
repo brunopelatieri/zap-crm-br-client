@@ -129,6 +129,10 @@ export function WhatsAppConfig() {
   const [billingByChannel, setBillingByChannel] = useState<
     Record<string, ChannelBillingSummaryDto>
   >({});
+  // Só a resposta da busca MAIS NOVA do resumo vale: `fetchChannels` roda
+  // várias vezes seguidas (remover, definir padrão), e um resumo lento de
+  // uma chamada anterior não pode sobrescrever o selo atual.
+  const billingSeq = useRef(0);
 
   const fetchChannels = useCallback(async () => {
     setLoadingList(true);
@@ -137,7 +141,9 @@ export function WhatsAppConfig() {
       const payload = await res.json();
       setChannels((payload.channels ?? []) as CloudNumber[]);
       // Sem await: o selo chega depois e nunca atrasa a lista.
+      const mine = ++billingSeq.current;
       fetchBillingSummary().then((res) => {
+        if (mine !== billingSeq.current) return;
         if (res.status !== 'ok') {
           setBillingByChannel({});
           return;

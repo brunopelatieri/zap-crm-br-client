@@ -49,6 +49,7 @@ import {
   __resetBillingSignalStateForTests,
   applyPaymentSignal,
   createWebhookPaymentSignals,
+  invalidatePaymentSignalCache,
   isPaymentMethodError,
   notePricingSchemaMissing,
   parseMetaTimestamp,
@@ -976,6 +977,79 @@ describe('signalPaymentErrorFromSend (RF-07)', () => {
       error: payment(),
     });
     expect(adminState.calls).toBe(0);
+  });
+
+  it('depois do "Já regularizei" (cache invalidado), o 131042 seguinte chega à função mesmo dentro da janela de coalescência', async () => {
+    // Banco: pendente depois do 1º erro; limpo depois do clique manual.
+    const tables = {
+      billingRow: null as Record<string, unknown> | null,
+    };
+    const { db, rpcs } = makeDb({
+      table: (op) => standardTables({ flag: false, ...tables })(op),
+      rpc: () => ({ data: true }),
+    });
+    adminState.client = db;
+
+    await signalPaymentErrorFromSend({
+      accountId: 'acct-1',
+      phoneNumberId: 'pnid-7781',
+      error: payment(),
+      now: NOW,
+    });
+    expect(rpcs.filter((c) => c.fn === 'apply_payment_signal')).toHaveLength(1);
+
+    // O admin limpou à mão (billing-server.acknowledgePayment).
+    tables.billingRow = {
+      payment_blocked_since: null,
+      last_payment_error_at: '2026-10-01T14:01:00.000Z',
+    };
+    invalidatePaymentSignalCache();
+
+    // O cartão ainda não passou: novo 131042 2 s depois. Com o retrato
+    // velho ("pendente") ele cairia no SYNC_COALESCE e o episódio novo
+    // nunca abriria.
+    await signalPaymentErrorFromSend({
+      accountId: 'acct-1',
+      phoneNumberId: 'pnid-7781',
+      error: payment(),
+      now: new Date(NOW.getTime() + 2_000),
+    });
+    expect(rpcs.filter((c) => c.fn === 'apply_payment_signal')).toHaveLength(2);
+  });
+
+  it('depois do "Já regularizei", o 131042 do WEBHOOK com ts ≤ último carimbo também chega à função', async () => {
+    const tables = {
+      billingRow: {
+        payment_blocked_since: '2026-10-01T14:01:00.000Z',
+        last_payment_error_at: '2026-10-01T14:01:00.000Z',
+      } as Record<string, unknown> | null,
+    };
+    const { db, rpcs } = makeDb({
+      table: (op) => standardTables({ flag: false, ...tables })(op),
+      rpc: () => ({ data: true }),
+    });
+    const signals = createWebhookPaymentSignals(db, {
+      phoneNumberId: 'pnid-7781',
+    });
+    const failed = (tsSeconds: number) => ({
+      id: `wamid.${tsSeconds}`,
+      status: 'failed',
+      timestamp: String(tsSeconds),
+      errors: [{ code: 131042 }],
+    });
+    // 14:00:30 — anterior ao carimbo pendente (14:01:00): o filtro poupa.
+    await signals.handleStatus(failed(1790863230));
+    expect(rpcs).toHaveLength(0);
+
+    // Limpeza manual às 14:00:40; novo 131042 real às 14:00:50 (ainda
+    // ≤ 14:01:00, o carimbo com margem do envio síncrono).
+    tables.billingRow = {
+      payment_blocked_since: null,
+      last_payment_error_at: '2026-10-01T14:01:00.000Z',
+    };
+    invalidatePaymentSignalCache();
+    await signals.handleStatus(failed(1790863250));
+    expect(rpcs.filter((c) => c.fn === 'apply_payment_signal')).toHaveLength(1);
   });
 });
 

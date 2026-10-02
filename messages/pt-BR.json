@@ -3297,6 +3297,8 @@
         "neverChecked": "Ainda não verificado",
         "stale": "Não foi possível atualizar agora; mostrando dados de {ago}.",
         "rateLimited": "A Meta pediu para esperar. Tente novamente após {time}.",
+        "refreshThrottled": "Muitas atualizações seguidas. Tente novamente após {time}.",
+        "refreshNotUpdated": "Não foi possível obter uma leitura nova da Meta agora; mostrando o último dado.",
         "loadFailed": "Não foi possível carregar o status",
         "retry": "Tentar de novo",
         "spendUnavailable": "Consumo indisponível",

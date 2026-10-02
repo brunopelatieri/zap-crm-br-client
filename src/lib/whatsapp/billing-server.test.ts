@@ -29,6 +29,16 @@ vi.mock('@/lib/supabase/admin', () => ({
   },
 }));
 
+// Só para provar que a limpeza manual descarta o retrato de processo do
+// sinal de pagamento; o resto do módulo roda de verdade.
+const { signalSpy } = vi.hoisted(() => ({ signalSpy: { invalidate: 0 } }));
+vi.mock('./billing-signal', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./billing-signal')>()),
+  invalidatePaymentSignalCache: () => {
+    signalSpy.invalidate++;
+  },
+}));
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
@@ -1261,6 +1271,17 @@ describe('acknowledgePayment', () => {
       last_payment_error_at: PENDING.last_payment_error_at,
     });
     expect(billingWrites().every((w) => w.client === 'admin')).toBe(true);
+  });
+
+  it('limpeza que de fato limpou descarta o retrato de processo do sinal (e só ela)', async () => {
+    signalSpy.invalidate = 0;
+    seed(PENDING);
+    expect((await ack()).status).toBe('ok');
+    expect(signalSpy.invalidate).toBe(1);
+
+    // Segundo clique: nada limpo, nada a descartar.
+    await ack({ userId: 'user-2' });
+    expect(signalSpy.invalidate).toBe(1);
   });
 
   it('sem pendência: cleared false e a linha fica como estava', async () => {

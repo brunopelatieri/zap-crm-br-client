@@ -4,7 +4,9 @@ import {
   fetchBillingSummary,
   fetchChannelBilling,
   postPaymentAck,
+  refreshAdvanced,
 } from './billing-client';
+import type { ChannelBillingDto } from './billing-dto';
 
 function mockFetch(status: number, body: unknown, rejectJson = false) {
   const fn = vi.fn().mockResolvedValue({
@@ -121,5 +123,61 @@ describe('postPaymentAck', () => {
     expect((await postPaymentAck(CH)).status).toBe('error');
     mockFetch(200, {});
     expect((await postPaymentAck(CH)).status).toBe('error');
+  });
+});
+
+describe('refreshAdvanced — o "Atualizar" leu algo de novo?', () => {
+  const dto = (health: string | null, spend?: string | null) =>
+    ({
+      send_status: { overall: 'AVAILABLE', checked_at: health, problems: [] },
+      ...(spend !== undefined
+        ? {
+            spend: {
+              available: true,
+              currency: 'USD',
+              currency_changed: false,
+              period_start: '2026-10-01',
+              checked_at: spend,
+              total: 1,
+              by_category: [],
+            },
+          }
+        : {}),
+    }) as unknown as ChannelBillingDto;
+
+  it('carimbo do status de envio andou → true', () => {
+    expect(
+      refreshAdvanced(dto('2026-10-01T10:00:00Z'), dto('2026-10-01T10:05:00Z'))
+    ).toBe(true);
+  });
+
+  it('só o consumo andou (status em recuo) → true', () => {
+    expect(
+      refreshAdvanced(
+        dto('2026-10-01T10:00:00Z', '2026-10-01T10:00:00Z'),
+        dto('2026-10-01T10:00:00Z', '2026-10-01T10:05:00Z')
+      )
+    ).toBe(true);
+  });
+
+  it('só o consumo andou, mas o status de envio segue com erro/stale → false (o toast não contradiz o aviso)', () => {
+    const prev = dto('2026-10-01T10:00:00Z', '2026-10-01T10:00:00Z');
+    const next = {
+      ...dto('2026-10-01T10:00:00Z', '2026-10-01T10:05:00Z'),
+      stale: true,
+      error: { field: 'health', kind: 'transient', code: null, at: null },
+    } as unknown as ChannelBillingDto;
+    expect(refreshAdvanced(prev, next)).toBe(false);
+  });
+
+  it('nada andou (recuo vigente, ou a Meta falhou e veio o retrato antigo) → false', () => {
+    const same = dto('2026-10-01T10:00:00Z', '2026-10-01T10:00:00Z');
+    expect(refreshAdvanced(same, same)).toBe(false);
+  });
+
+  it('nunca lido e continua sem leitura → false; primeira leitura → true', () => {
+    expect(refreshAdvanced(dto(null), dto(null))).toBe(false);
+    expect(refreshAdvanced(null, dto('2026-10-01T10:05:00Z'))).toBe(true);
+    expect(refreshAdvanced(dto(null), dto('2026-10-01T10:05:00Z'))).toBe(true);
   });
 });

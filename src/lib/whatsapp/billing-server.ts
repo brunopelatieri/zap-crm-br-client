@@ -83,6 +83,7 @@ import {
   isSchemaMissingError,
   readBillingMonitorFlag,
 } from './billing-schema';
+import { invalidatePaymentSignalCache } from './billing-signal';
 
 const TABLE = 'whatsapp_billing_status';
 
@@ -950,6 +951,11 @@ export async function acknowledgePayment(
   }
 
   if (!data || data.length === 0) return { status: 'ok', cleared: false };
+
+  // O retrato de processo do sinal (billing-signal.ts) ainda diz
+  // "pendente": sem descartá-lo, os filtros dele pulariam o 131042 que
+  // deve abrir o episódio NOVO se o cartão ainda não tiver passado.
+  invalidatePaymentSignalCache();
 
   console.log(
     `[billing-monitor] payment cleared manually waba=${maskId(wabaId)} by=${options.userId}`

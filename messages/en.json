@@ -3297,6 +3297,8 @@
         "neverChecked": "Not checked yet",
         "stale": "Could not refresh right now; showing data from {ago}.",
         "rateLimited": "Meta asked us to wait. Try again after {time}.",
+        "refreshThrottled": "Too many refreshes in a row. Try again after {time}.",
+        "refreshNotUpdated": "Couldn't get a new reading from Meta right now; showing the last data.",
         "loadFailed": "Could not load the status",
         "retry": "Try again",
         "spendUnavailable": "Usage unavailable",
