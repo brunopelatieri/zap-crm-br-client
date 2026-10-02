@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronRight, Loader2 } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 import { createClient } from '@/lib/supabase/client';
@@ -9,6 +9,9 @@ import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { THEMES } from '@/lib/themes';
 import { CURRENCIES } from '@/lib/currency';
+import { fetchBillingSummary } from '@/lib/whatsapp/billing-client';
+import { isBillingProblem } from '@/lib/whatsapp/billing-format';
+import type { SendState } from '@/lib/whatsapp/billing-monitor';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -29,6 +32,8 @@ interface OverviewCounts {
 interface WhatsAppStatus {
   configured: boolean;
   connected: boolean;
+  /** Pior estado de envio dos números (SPEC 076); `null` = sem monitor. */
+  worstSendState: SendState | null;
 }
 
 export function SettingsOverview({
@@ -48,6 +53,7 @@ export function SettingsOverview({
   const t = useTranslations('Settings.overview');
   const tRoles = useTranslations('Settings.roles');
   const tSections = useTranslations('Settings.sections');
+  const tBilling = useTranslations('Settings.whatsapp.billing');
   const tCurrencies = useTranslations('Currencies');
 
   const [counts, setCounts] = useState<OverviewCounts | null>(null);
@@ -145,16 +151,24 @@ export function SettingsOverview({
       // `whatsapp_config` que existia aqui usava `.maybeSingle()` — com
       // dois números ela devolveria `PGRST116` e o cartão diria "não
       // configurado" numa conta que tem dois números no ar.
+      // O resumo do monitor de cobrança vem só do banco (§9.2) e falha em
+      // silêncio: flag desligado ou erro = o tile fica como sempre foi.
       const health = await Promise.allSettled([
         fetch('/api/whatsapp/config', { cache: 'no-store' }).then((r) =>
           r.json()
         ),
+        fetchBillingSummary(),
       ]);
       if (cancelled) return;
       const payload = health[0].status === 'fulfilled' ? health[0].value : null;
+      const billing =
+        health[1].status === 'fulfilled' && health[1].value.status === 'ok'
+          ? health[1].value.data
+          : null;
       setWhatsapp({
         configured: (payload?.channels?.length ?? 0) > 0,
         connected: !!payload?.connected,
+        worstSendState: billing?.worst_state ?? null,
       });
       setWhatsappLoading(false);
     })();
@@ -193,6 +207,17 @@ export function SettingsOverview({
       loading: whatsappLoading,
       subtitle: !whatsapp?.configured ? (
         t('notSetup')
+      ) : isBillingProblem(whatsapp.worstSendState) ? (
+        // Problema de envio vence o "Conectado": é o que o usuário precisa
+        // ver sem abrir a aba (SPEC 076 §11.1). O clique no tile já leva
+        // à seção do WhatsApp.
+        <>
+          <AlertTriangle
+            aria-hidden
+            className="size-3 shrink-0 text-amber-500"
+          />{' '}
+          {tBilling(`state.${whatsapp.worstSendState as SendState}`)}
+        </>
       ) : whatsapp.connected ? (
         <>
           <StatusDot tone="ok" /> {t('connected')}

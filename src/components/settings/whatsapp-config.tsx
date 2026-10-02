@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  type ReactNode,
+} from 'react';
 import { toast } from 'sonner';
 import {
   Eye,
@@ -24,7 +30,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { useAccountPlan } from '@/hooks/use-account-plan';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -38,6 +44,11 @@ import {
 } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SettingsPanelHead } from './settings-panel-head';
+import { WhatsAppBillingCard } from './whatsapp-billing-card';
+import { BillingStateBadge } from './whatsapp-billing-state-badge';
+import { fetchBillingSummary } from '@/lib/whatsapp/billing-client';
+import type { ChannelBillingSummaryDto } from '@/lib/whatsapp/billing-dto';
+import { formatMoney } from '@/lib/whatsapp/billing-format';
 import {
   Accordion,
   AccordionItem,
@@ -46,6 +57,13 @@ import {
 } from '@/components/ui/accordion';
 
 const MASKED_TOKEN = '••••••••••••••••';
+
+/** Realce das instruções de configuração: tag `<strong>` nas mensagens i18n. */
+const richStrong = {
+  strong: (chunks: ReactNode) => (
+    <strong className="text-foreground">{chunks}</strong>
+  ),
+};
 
 /**
  * Um número oficial como a rota o descreve (SPEC 064 §5/F7).
@@ -87,6 +105,7 @@ type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
  */
 export function WhatsAppConfig() {
   const t = useTranslations('Settings.whatsapp');
+  const locale = useLocale();
   const {
     user,
     accountId,
@@ -105,6 +124,11 @@ export function WhatsAppConfig() {
   const [probingId, setProbingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
+  // Resumo do monitor de cobrança por número (SPEC 076 §9.2). Vazio com o
+  // flag desligado ou se a leitura falhar: a lista só fica sem o selo.
+  const [billingByChannel, setBillingByChannel] = useState<
+    Record<string, ChannelBillingSummaryDto>
+  >({});
 
   const fetchChannels = useCallback(async () => {
     setLoadingList(true);
@@ -112,6 +136,16 @@ export function WhatsAppConfig() {
       const res = await fetch('/api/whatsapp/config', { cache: 'no-store' });
       const payload = await res.json();
       setChannels((payload.channels ?? []) as CloudNumber[]);
+      // Sem await: o selo chega depois e nunca atrasa a lista.
+      fetchBillingSummary().then((res) => {
+        if (res.status !== 'ok') {
+          setBillingByChannel({});
+          return;
+        }
+        setBillingByChannel(
+          Object.fromEntries(res.data.channels.map((c) => [c.channel_id, c]))
+        );
+      });
     } catch (err) {
       console.error('fetchChannels error:', err);
       toast.error(t('list.loadFailed'));
@@ -389,12 +423,28 @@ export function WhatsAppConfig() {
                   >
                     {t(`list.status.${c.status}` as 'list.status.connected')}
                   </Badge>
+                  {billingByChannel[c.channel_id] && (
+                    <BillingStateBadge
+                      state={billingByChannel[c.channel_id].state}
+                    />
+                  )}
                 </div>
                 <p className="text-muted-foreground text-sm">
                   {c.identifier_is_phone
                     ? c.identifier
                     : t('list.identifierPending')}
                 </p>
+                {billingByChannel[c.channel_id]?.spend_total != null && (
+                  <p className="text-muted-foreground text-xs">
+                    {t('billing.spendShort', {
+                      amount: formatMoney(
+                        locale,
+                        billingByChannel[c.channel_id].currency,
+                        billingByChannel[c.channel_id].spend_total as number
+                      ),
+                    })}
+                  </p>
+                )}
                 <p className="text-muted-foreground text-xs">
                   {t('list.tierAndCooldown', {
                     tier: c.messaging_limit_tier ?? t('list.tierUnknown'),
@@ -1035,6 +1085,15 @@ function CloudNumberDetail({
           </Alert>
         )}
 
+        {/* Status de envio e consumo (SPEC 076) — some sozinho com o flag
+            desligado; número ainda não salvo não tem canal para consultar. */}
+        {channelId && (
+          <WhatsAppBillingCard
+            channelId={channelId}
+            canEditSettings={canEditSettings}
+          />
+        )}
+
         {/* API Credentials */}
         <Card>
           <CardHeader>
@@ -1391,9 +1450,9 @@ function CloudNumberDetail({
                 <AccordionContent className="text-muted-foreground">
                   <ol className="list-inside list-decimal space-y-1 text-sm">
                     <li>{t('step3_1')}</li>
-                    <li dangerouslySetInnerHTML={{ __html: t('step3_2') }} />
-                    <li dangerouslySetInnerHTML={{ __html: t('step3_3') }} />
-                    <li dangerouslySetInnerHTML={{ __html: t('step3_4') }} />
+                    <li>{t.rich('step3_2', richStrong)}</li>
+                    <li>{t.rich('step3_3', richStrong)}</li>
+                    <li>{t.rich('step3_4', richStrong)}</li>
                   </ol>
                 </AccordionContent>
               </AccordionItem>
@@ -1411,8 +1470,8 @@ function CloudNumberDetail({
                   <ol className="list-inside list-decimal space-y-1 text-sm">
                     <li>{t('step4_1')}</li>
                     <li>{t('step4_2')}</li>
-                    <li dangerouslySetInnerHTML={{ __html: t('step4_3') }} />
-                    <li dangerouslySetInnerHTML={{ __html: t('step4_4') }} />
+                    <li>{t.rich('step4_3', richStrong)}</li>
+                    <li>{t.rich('step4_4', richStrong)}</li>
                     <li>{t('step4_5')}</li>
                   </ol>
                 </AccordionContent>
