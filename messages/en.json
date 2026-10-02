@@ -480,7 +480,8 @@
         "connected": "{actor} connected the channel {label}",
         "disconnected": "{actor} disconnected the channel {label}",
         "deleted": "{actor} removed the channel {label}",
-        "default_changed": "{actor} made {label} the default channel"
+        "default_changed": "{actor} made {label} the default channel",
+        "payment_acknowledged": "{actor} marked the payment issue on {label} as resolved"
       },
       "member": {
         "invited": "{actor} invited someone to the team",

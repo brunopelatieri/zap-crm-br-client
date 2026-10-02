@@ -45,6 +45,14 @@ vi.mock('@/lib/auth/account', async (importOriginal) => {
 
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: () => h.admin }));
 
+// Q-7: o registro de atividade é só observado (o insert real é da SPEC 075).
+const { recordActivityMock } = vi.hoisted(() => ({
+  recordActivityMock: vi.fn(),
+}));
+vi.mock('@/lib/activity/record', () => ({
+  recordActivity: recordActivityMock,
+}));
+
 import { __resetRateLimitForTests } from '@/lib/rate-limit';
 import {
   BILLING_ROW_DEFAULTS,
@@ -222,6 +230,33 @@ describe('POST /api/whatsapp/billing/payment-ack', () => {
       PENDING_SINCE
     );
     errorSpy.mockRestore();
+  });
+
+  it('Q-7: limpeza que limpou registra channel.payment_acknowledged (ator, canal e rótulo)', async () => {
+    signIn('admin', 'user-who-clicked');
+    await post({ channel_id: CHANNEL });
+
+    expect(recordActivityMock).toHaveBeenCalledTimes(1);
+    expect(recordActivityMock.mock.calls[0]![1]).toMatchObject({
+      accountId: ACCOUNT,
+      resourceType: 'channel',
+      action: 'channel.payment_acknowledged',
+      resourceId: CHANNEL,
+      resourceLabel: 'Principal',
+      channelId: CHANNEL,
+      channelType: 'whatsapp_cloud',
+      actor: { kind: 'user', userId: 'user-who-clicked', role: 'admin' },
+    });
+  });
+
+  it('Q-7: sem pendência, clique duplo, agent ou flag desligado não registram nada', async () => {
+    state.whatsapp_billing_status[0]!.payment_blocked_since = null;
+    await post({ channel_id: CHANNEL });
+
+    signIn('agent');
+    await post({ channel_id: CHANNEL });
+
+    expect(recordActivityMock).not.toHaveBeenCalled();
   });
 
   it('owner também pode', async () => {

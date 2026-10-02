@@ -1262,6 +1262,7 @@ describe('acknowledgePayment', () => {
       status: 'ok',
       cleared: true,
       clearedAt: NOW.toISOString(),
+      channelName: 'Principal',
     });
     expect(stored()).toMatchObject({
       payment_blocked_since: null,

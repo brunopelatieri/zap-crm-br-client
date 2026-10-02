@@ -867,7 +867,13 @@ function scheduleBackgroundRefresh(
 
 export type PaymentAckResult =
   | { status: 'ok'; cleared: false }
-  | { status: 'ok'; cleared: true; clearedAt: string }
+  | {
+      status: 'ok';
+      cleared: true;
+      clearedAt: string;
+      /** Nome do canal, para o rótulo do registro de atividade (Q-7). */
+      channelName: string | null;
+    }
   | { status: 'not_found' };
 
 /**
@@ -895,7 +901,7 @@ export async function acknowledgePayment(
   // credencial zerada impede de limpar um alerta antigo.
   const { data: channel, error: channelError } = await db
     .from('channels')
-    .select('id, type, status')
+    .select('id, name, type, status')
     .eq('id', channelId)
     .eq('account_id', accountId)
     .maybeSingle();
@@ -960,7 +966,12 @@ export async function acknowledgePayment(
   console.log(
     `[billing-monitor] payment cleared manually waba=${maskId(wabaId)} by=${options.userId}`
   );
-  return { status: 'ok', cleared: true, clearedAt };
+  return {
+    status: 'ok',
+    cleared: true,
+    clearedAt,
+    channelName: (channel.name as string | null) ?? null,
+  };
 }
 
 // ============================================================

@@ -73,6 +73,8 @@ export const ACTIVITY_CATALOG = {
     'channel.disconnected',
     'channel.deleted',
     'channel.default_changed',
+    // SPEC 076 Q-7: "Já regularizei" do monitor de cobrança (ação humana).
+    'channel.payment_acknowledged',
   ],
   member: [
     'member.invited',

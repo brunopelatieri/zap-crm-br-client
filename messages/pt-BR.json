@@ -480,7 +480,8 @@
         "connected": "{actor} conectou o canal {label}",
         "disconnected": "{actor} desconectou o canal {label}",
         "deleted": "{actor} removeu o canal {label}",
-        "default_changed": "{actor} tornou {label} o canal padrão"
+        "default_changed": "{actor} tornou {label} o canal padrão",
+        "payment_acknowledged": "{actor} marcou como regularizado o pagamento do canal {label}"
       },
       "member": {
         "invited": "{actor} convidou alguém para a equipe",

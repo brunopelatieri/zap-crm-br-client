@@ -12,9 +12,9 @@
  *
  * Flag desligado → 404 para todo papel. Mensagens em inglês.
  *
- * Pendência (Q-7): registrar a ação em `account_activity_log` (SPEC 075)
- * exige ação nova no catálogo fechado `ACTIVITY_CATALOG` e as chaves de
- * texto do feed (i18n) — escopo da F5, não desta rota.
+ * Q-7: a limpeza que de fato limpou entra no registro de atividade
+ * (SPEC 075, `channel.payment_acknowledged`). Clique duplo (`cleared:
+ * false`) e episódios automáticos não registram nada.
  */
 
 import { NextResponse } from 'next/server';
@@ -31,6 +31,7 @@ import {
   checkRateLimit,
   rateLimitResponse,
 } from '@/lib/rate-limit';
+import { recordActivity } from '@/lib/activity/record';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
   acknowledgePayment,
@@ -85,6 +86,16 @@ export async function POST(request: Request) {
     if (!result.cleared) {
       return NextResponse.json({ cleared: false }, { status: 200 });
     }
+    void recordActivity(supabase, {
+      accountId,
+      resourceType: 'channel',
+      action: 'channel.payment_acknowledged',
+      resourceId: channelId.trim(),
+      resourceLabel: result.channelName,
+      channelId: channelId.trim(),
+      channelType: 'whatsapp_cloud',
+      actor: { kind: 'user', userId, role },
+    });
     return NextResponse.json(
       { cleared: true, cleared_at: result.clearedAt },
       { status: 200 }
