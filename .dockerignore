@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.local.example
+.claude
+.mcp.json
+docs
+supabase
+n8n_automation
+mcp-server
+test-results
+coverage
+*.md
+npm-debug.log*

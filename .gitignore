@@ -5,6 +5,7 @@
 /n8n_automation
 /supabase
 *.md
+/deploy
 
 # dependências
 /node_modules
