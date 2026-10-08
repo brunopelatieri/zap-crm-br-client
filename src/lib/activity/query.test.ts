@@ -172,12 +172,21 @@ function makeFakeDb(rows: Row[]) {
 
 const ACCOUNT_ID = 'acct-1';
 
+// Data PADRÃO das linhas de teste: relativa a "agora", calculada UMA vez.
+// Era a data fixa '2026-09-01T12:00:00.000Z' — e `queryActivity` sem
+// `from` só olha os últimos 30 dias, então os testes de filtro passaram
+// até 2026-10-01 e começaram a falhar sozinhos quando a data fixa saiu da
+// janela (a lógica da query nunca esteve errada). Calculada uma vez para
+// todas as linhas continuarem com o MESMO `created_at` (empate resolvido
+// pelo `id`, como antes).
+const DEFAULT_CREATED_AT = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
 function row(overrides: Partial<Row> & { account_id?: string }): Row {
   return {
     id: 'evt-1',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     account_id: ACCOUNT_ID as any,
-    created_at: '2026-09-01T12:00:00.000Z',
+    created_at: DEFAULT_CREATED_AT,
     actor_kind: 'user',
     actor_user_id: 'user-1',
     actor_name: 'Bruno',
@@ -455,8 +464,11 @@ describe('queryActivity — cursor é o formato compartilhado de pagination.ts',
     // Relativo a "agora" pelo mesmo motivo do describe acima — uma
     // data absoluta sai da janela padrão de 30 dias assim que o
     // relógio real a ultrapassa.
+    // Armazenar em variável para garantir que chamadas múltiplas usem
+    // o MESMO Date.now() (se chamado separadamente, ms variam).
+    const now = Date.now();
     const createdAtFor = (n: number) =>
-      new Date(Date.now() - (3 - n) * 86400000).toISOString();
+      new Date(now - (3 - n) * 86400000).toISOString();
     const ROWS = [3, 2, 1].map((n) =>
       row({ id: EVT_ID(n), created_at: createdAtFor(n) })
     );

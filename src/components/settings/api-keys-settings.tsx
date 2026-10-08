@@ -418,7 +418,7 @@ function CreateKeyDialog({
                   não depois. Ver docs/public-api.md, "Scope is the
                   account, never a single agent". */}
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-                <p className="text-xs text-amber-200">
+                <p className="text-xs">
                   {t.rich('accountScopeWarning', {
                     bold: (chunks: React.ReactNode) => (
                       <span className="font-semibold">{chunks}</span>

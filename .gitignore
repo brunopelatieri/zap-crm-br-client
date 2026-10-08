@@ -5,7 +5,9 @@
 /n8n_automation
 /supabase
 *.md
-/deploy
+# Stack de produção com segredos reais — barreira própria, além de /docs
+# acima (e do .gitignore dentro da pasta, que viaja com ela).
+/docs/deploy/
 
 # dependências
 /node_modules

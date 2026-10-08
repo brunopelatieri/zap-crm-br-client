@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   parseListParams,
   encodeCursor,
@@ -52,6 +52,47 @@ describe('encode/decodeCursor round-trip', () => {
     expect(decodeCursor(encodeCursor(row))).toEqual({
       createdAt: '2026-06-30T12:00:00.123Z',
       id: 'abcdef01-2345-4678-8abc-def012345678',
+    });
+  });
+
+  it('gera o MESMO cursor que Buffer#toString("base64url") — cursores já emitidos continuam valendo', () => {
+    const row = {
+      created_at: '2026-06-30T12:00:00.123Z',
+      id: 'abcdef01-2345-4678-8abc-def012345678',
+    };
+    expect(encodeCursor(row)).toBe(
+      Buffer.from(`${row.created_at}|${row.id}`, 'utf8').toString('base64url')
+    );
+  });
+
+  describe('sem Buffer (navegador)', () => {
+    // O widget do dashboard roda `queryActivity` no navegador, onde o
+    // `Buffer` do bundler (polyfill `buffer@5`) não conhece 'base64url' —
+    // `TypeError: Unknown encoding: base64url`. Aqui o `Buffer` some de vez:
+    // se alguém trouxer a dependência de volta, estes testes quebram.
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('encodeCursor e decodeCursor não dependem de Buffer', () => {
+      const row = {
+        created_at: '2026-06-30T12:00:00.123Z',
+        id: 'abcdef01-2345-4678-8abc-def012345678',
+      };
+      const esperado = Buffer.from(`${row.created_at}|${row.id}`).toString(
+        'base64url'
+      );
+      vi.stubGlobal('Buffer', undefined);
+
+      const cursor = encodeCursor(row);
+      expect(cursor).toBe(esperado);
+      expect(decodeCursor(cursor)).toEqual({
+        createdAt: row.created_at,
+        id: row.id,
+      });
+    });
+
+    it('decodeCursor devolve null (não lança) para base64 inválido', () => {
+      vi.stubGlobal('Buffer', undefined);
+      expect(decodeCursor('@@@!!!')).toBeNull();
     });
   });
 

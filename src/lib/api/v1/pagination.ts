@@ -50,11 +50,38 @@ export function parseListParams(request: Request): ListParams {
   return { limit, cursor: decodeCursor(url.searchParams.get('cursor')) };
 }
 
+// base64url SEM `Buffer`, de propósito. Este módulo não é só de servidor:
+// `lib/activity/query.ts` o importa e o widget "Atividade recente" do
+// dashboard (Client Component) chama `queryActivity` NO NAVEGADOR. Lá o
+// `Buffer` é o polyfill `buffer@5` do bundler, que não conhece a
+// codificação 'base64url' (`TypeError: Unknown encoding: base64url`) — e
+// só estoura quando a página tem mais linhas que o `limit`, que é quando
+// `buildPage` precisa gerar o próximo cursor. `btoa`/`atob` +
+// `TextEncoder`/`TextDecoder` existem no navegador e no Node >= 20, e
+// produzem os mesmos bytes que `Buffer#toString('base64url')`.
+function toBase64Url(text: string): string {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(text)) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function fromBase64Url(value: string): string {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  return new TextDecoder().decode(
+    Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  );
+}
+
 /** Encode a row's `(created_at, id)` into an opaque cursor string. */
 export function encodeCursor(row: { created_at: string; id: string }): string {
-  return Buffer.from(`${row.created_at}|${row.id}`, 'utf8').toString(
-    'base64url'
-  );
+  return toBase64Url(`${row.created_at}|${row.id}`);
 }
 
 // A cursor is only ever minted by `encodeCursor` from a real row's
@@ -71,7 +98,7 @@ const UUID_RE =
 export function decodeCursor(value: string | null): Cursor | null {
   if (!value) return null;
   try {
-    const decoded = Buffer.from(value, 'base64url').toString('utf8');
+    const decoded = fromBase64Url(value);
     const sep = decoded.indexOf('|');
     if (sep === -1) return null;
     const createdAt = decoded.slice(0, sep);

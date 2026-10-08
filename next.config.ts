@@ -70,6 +70,16 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  /**
+   * Saída `standalone` (só o necessário para rodar: `.next/standalone/server.js`
+   * + as dependências que o file tracing encontrou) — usada pela imagem Docker
+   * (Dockerfile liga `NEXT_OUTPUT=standalone`), que cai de ~2 GB para algumas
+   * centenas de MB. Condicional de propósito: `next dev`, `npm run build` e
+   * hospedagens que rodam `next start` (Hostinger) seguem exatamente como
+   * antes — `next start` não é o modo de servir um build standalone.
+   */
+  output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
+
   images: {
     remotePatterns: [
       {
