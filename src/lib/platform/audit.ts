@@ -46,7 +46,13 @@ export type PlatformAuditAction =
   // em /settings. `accountId`/`targetUserId` vão sempre `null`: a
   // conta e o login do titular já não existem quando esta linha é
   // gravada (ver `payload` para os dados preservados).
-  | 'account.delete';
+  | 'account.delete'
+  // SPEC 078 — as quatro operações novas do console: alterar o
+  // vencimento, registrar/estornar pagamento manual e editar nome/e-mail.
+  | 'billing.period_end.set'
+  | 'billing.payment.manual'
+  | 'billing.payment.reverse'
+  | 'user.profile_update';
 
 export function consoleActorTag(ownerEmail: string): string {
   return `console:${ownerEmail}`;

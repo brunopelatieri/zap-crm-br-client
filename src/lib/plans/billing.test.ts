@@ -7,6 +7,7 @@ import {
   describeCycleChange,
   effectiveMonthlyCents,
   graceEnd,
+  hasBillingCycle,
   isExpired,
   resolveExpiryOnPlanChange,
   yearlyPriceCents,
@@ -261,5 +262,33 @@ describe('resolveExpiryOnPlanChange', () => {
       now
     );
     expect(result).toEqual({ kind: 'cleared' });
+  });
+});
+
+describe('hasBillingCycle', () => {
+  it.each([
+    ['monthly', 100, true],
+    ['yearly', 100, true],
+    ['monthly', 0, false],
+    ['none', 100, false],
+    ['custom', 100, false],
+  ] as const)('%s com preço %i → %s', (billingPeriod, priceCents, expected) => {
+    expect(hasBillingCycle({ billingPeriod, priceCents })).toBe(expected);
+  });
+
+  it('concorda com computePeriodEnd (mesma regra, uma só fonte)', () => {
+    for (const billingPeriod of [
+      'monthly',
+      'yearly',
+      'none',
+      'custom',
+    ] as const) {
+      for (const priceCents of [0, 100]) {
+        const plan = { billingPeriod, priceCents };
+        expect(computePeriodEnd(new Date(), 'monthly', plan) !== null).toBe(
+          hasBillingCycle(plan)
+        );
+      }
+    }
   });
 });

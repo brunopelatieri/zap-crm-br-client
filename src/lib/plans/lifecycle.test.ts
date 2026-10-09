@@ -36,6 +36,12 @@ interface Options {
    * uma por conta) já devolveria como existentes.
    */
   existingDedupeKeys?: string[];
+  /**
+   * `false` simula o `UPDATE ... WHERE current_period_end = <lido>`
+   * (SPEC 078 §3.3) não casando linha nenhuma — alguém moveu o
+   * vencimento depois da leitura do lote.
+   */
+  updateAffectsRows?: boolean;
 }
 
 /**
@@ -43,8 +49,14 @@ interface Options {
  * porque `account_plans` precisa responder `select` (a lista) e
  * `update` (por conta) de formas diferentes na MESMA corrida.
  */
-function makeDb({ accountPlanRows, existingDedupeKeys = [] }: Options) {
+function makeDb({
+  accountPlanRows,
+  existingDedupeKeys = [],
+  updateAffectsRows = true,
+}: Options) {
   const updates: { table: string; payload: Record<string, unknown> }[] = [];
+  /** Filtros `.eq(coluna, valor)` de cada UPDATE em `account_plans`. */
+  const updateFilters: [string, unknown][][] = [];
   const inserts: { table: string; payload: Record<string, unknown> }[] = [];
   /** Toda tabela tocada, na ordem — usado para provar que
    *  `platform_audit_log` é lida em BLOCO (uma vez), não uma vez por
@@ -82,7 +94,20 @@ function makeDb({ accountPlanRows, existingDedupeKeys = [] }: Options) {
           select: () => chain({ data: accountPlanRows, error: null }),
           update: (payload: Record<string, unknown>) => {
             updates.push({ table, payload });
-            return { eq: () => Promise.resolve({ data: null, error: null }) };
+            const filters: [string, unknown][] = [];
+            updateFilters.push(filters);
+            const c = {
+              eq: (column: string, value: unknown) => {
+                filters.push([column, value]);
+                return c;
+              },
+              select: () =>
+                Promise.resolve({
+                  data: updateAffectsRows ? [{ account_id: 'x' }] : [],
+                  error: null,
+                }),
+            };
+            return c;
           },
         };
       }
@@ -120,6 +145,7 @@ function makeDb({ accountPlanRows, existingDedupeKeys = [] }: Options) {
   return {
     client: client as unknown as SupabaseClient,
     updates,
+    updateFilters,
     inserts,
     fromCalls,
   };
@@ -359,6 +385,87 @@ describe('runPlanLifecycle', () => {
       client,
       NOW
     );
+  });
+
+  // SPEC 078 §3.3 — concorrência otimista: o UPDATE só vale se o
+  // vencimento ainda é o que o lote leu.
+  it('o UPDATE de past_due filtra por current_period_end lido', async () => {
+    const { client, updateFilters } = makeDb({
+      accountPlanRows: [
+        {
+          account_id: 'acct-1',
+          plan_id: 'plan-pro',
+          status: 'active',
+          billing_cycle: 'monthly',
+          current_period_end: '2026-08-20T12:00:00.000Z',
+          cancel_at_period_end: false,
+          grace_until: null,
+          limit_overrides: {},
+          plans: { code: 'professional' },
+        },
+      ],
+    });
+    await runPlanLifecycle(NOW, client);
+    expect(updateFilters[0]).toEqual([
+      ['account_id', 'acct-1'],
+      ['current_period_end', '2026-08-20T12:00:00.000Z'],
+      ['status', 'active'],
+    ]);
+  });
+
+  it('vencimento movido depois da leitura (UPDATE com zero linhas): não marca past_due, não emite evento', async () => {
+    const { client, inserts } = makeDb({
+      updateAffectsRows: false,
+      accountPlanRows: [
+        {
+          account_id: 'acct-1',
+          plan_id: 'plan-pro',
+          status: 'active',
+          billing_cycle: 'monthly',
+          current_period_end: '2026-08-20T12:00:00.000Z',
+          cancel_at_period_end: false,
+          grace_until: null,
+          limit_overrides: {},
+          plans: { code: 'professional' },
+        },
+      ],
+    });
+    const result = await runPlanLifecycle(NOW, client);
+    expect(result.expired).toBe(0);
+    expect(result.errors).toBe(0);
+    expect(inserts.some((i) => i.table === 'account_plan_events')).toBe(false);
+    expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    expect(emitSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('cancelamento agendado com vencimento movido (zero linhas): não faz downgrade, não emite evento', async () => {
+    const { client, updateFilters, inserts } = makeDb({
+      updateAffectsRows: false,
+      accountPlanRows: [
+        {
+          account_id: 'acct-1',
+          plan_id: 'plan-pro',
+          status: 'active',
+          billing_cycle: 'monthly',
+          current_period_end: '2026-08-20T12:00:00.000Z',
+          cancel_at_period_end: true,
+          grace_until: null,
+          limit_overrides: {},
+          plans: { code: 'professional' },
+        },
+      ],
+    });
+    const result = await runPlanLifecycle(NOW, client);
+    expect(result.canceledApplied).toBe(0);
+    expect(result.errors).toBe(0);
+    expect(updateFilters[0]).toContainEqual([
+      'current_period_end',
+      '2026-08-20T12:00:00.000Z',
+    ]);
+    expect(updateFilters[0]).toContainEqual(['status', 'active']);
+    expect(inserts.some((i) => i.table === 'account_plan_events')).toBe(false);
+    expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    expect(emitSystemEvent).not.toHaveBeenCalled();
   });
 
   it('já past_due (não active/trialing) não reprocessa o ramo de vencido de novo', async () => {

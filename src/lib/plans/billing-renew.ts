@@ -24,6 +24,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import type { PaymentMethod } from './manual-billing';
+
 export interface RenewInput {
   accountId: string;
   paymentRef: string;
@@ -33,6 +35,16 @@ export interface RenewInput {
   externalRef?: string | null;
   /** Nota livre do operador. */
   note?: string | null;
+  /**
+   * SPEC 078 §4.3 — quem registrou (`'console:<email>'`). Omitido, a
+   * função grava `'api:billing-renew'`, que é o que separa "o sistema
+   * externo renovou" de "registrei à mão" no histórico de pagamentos.
+   */
+  actor?: string | null;
+  /** Forma do pagamento (`PaymentMethod`) — registro informativo (D-7). */
+  method?: PaymentMethod | null;
+  /** Valor em centavos — registro informativo, não concilia (D-7). */
+  amountCents?: number | null;
 }
 
 export interface RenewedPlan {
@@ -58,6 +70,11 @@ export async function renewAccountPlan(
   db: SupabaseClient,
   input: RenewInput
 ): Promise<RenewResult> {
+  // Os três parâmetros da 089 só saem quando informados: a rota de
+  // máquina (`/api/admin/.../billing/renew`) não os conhece, e o mesmo
+  // payload de 6 nomes continua válido para a função de 9 parâmetros
+  // (todos `DEFAULT NULL`) — e também para um banco que ainda não
+  // recebeu a migração.
   const { data, error } = await db.rpc('apply_plan_renewal', {
     p_account_id: input.accountId,
     p_payment_ref: input.paymentRef,
@@ -65,6 +82,9 @@ export async function renewAccountPlan(
     p_periods: input.periods,
     p_external_ref: input.externalRef ?? null,
     p_note: input.note ?? null,
+    ...(input.actor != null && { p_actor: input.actor }),
+    ...(input.method != null && { p_method: input.method }),
+    ...(input.amountCents != null && { p_amount_cents: input.amountCents }),
   });
 
   if (error) {

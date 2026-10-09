@@ -81,9 +81,18 @@ export const ACTIVITY_CATALOG = {
     'member.joined',
     'member.role_changed',
     'member.removed',
+    // SPEC 078 §8.1 — o console do proprietário editou nome/e-mail.
+    'member.profile_updated',
   ],
   export: [],
-  plan: ['plan.changed', 'plan.renewed', 'plan.requested'],
+  plan: [
+    'plan.changed',
+    'plan.renewed',
+    'plan.requested',
+    // SPEC 078 §8.1 — vencimento alterado à mão / pagamento estornado.
+    'plan.period_changed',
+    'plan.payment_reversed',
+  ],
   tag: [],
   webhook: ['webhook.ingest_failed'],
 } as const satisfies Record<ActivityResourceType, readonly string[]>;

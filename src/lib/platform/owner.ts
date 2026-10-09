@@ -22,6 +22,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 
+import { normalizeEmail } from '@/lib/auth/email';
 import { createClient } from '@/lib/supabase/server';
 
 export interface PlatformOwnerContext {
@@ -30,11 +31,8 @@ export interface PlatformOwnerContext {
   userId: string;
 }
 
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
-
-function parseOwnerEmails(raw: string | undefined): string[] {
+/** `PLATFORM_OWNER_EMAILS` (lista separada por vírgula) já normalizada. */
+export function parseOwnerEmails(raw: string | undefined): string[] {
   if (!raw) return [];
   return raw
     .split(',')

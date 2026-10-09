@@ -2533,7 +2533,8 @@
           "plan.cancel_reverted",
           "plan.canceled_applied",
           "plan.grace_ended",
-          "plan.renewed"
+          "plan.renewed",
+          "plan.period_changed"
         ]
       },
       "WebhookEndpoint": {

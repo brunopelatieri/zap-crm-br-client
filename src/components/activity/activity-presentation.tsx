@@ -108,6 +108,12 @@ export function actorLabel(
   entry: Pick<ActivityFeedEntry, 'actorName' | 'actorKind'>,
   t: ReturnType<typeof useTranslations>
 ): string {
+  // SPEC 078 §8.1 — o console do proprietário grava `system`/`platform`;
+  // o cliente lê "Suporte da plataforma" (traduzido), não a palavra crua
+  // do banco.
+  if (entry.actorKind === 'system' && entry.actorName === 'platform') {
+    return t('actors.platform');
+  }
   const frozen = entry.actorName?.trim();
   if (frozen) return frozen;
   // `user` sem nome congelado não deveria existir (o helper e a trigger

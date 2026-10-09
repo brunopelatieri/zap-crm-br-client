@@ -265,6 +265,36 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+/**
+ * Aviso ao endereço ANTIGO depois que o suporte troca o e-mail de acesso
+ * de um usuário (SPEC 078 §5.5, D-11). Troca de e-mail é a forma clássica
+ * de tomada de conta; o titular antigo precisa ter como perceber.
+ *
+ * Diferente dos demais renderizadores, o destinatário aqui é o CLIENTE,
+ * não o mantenedor. Por isso o corpo é deliberadamente enxuto: NÃO traz o
+ * endereço novo (o aviso não pode virar um canal para confirmar a quem a
+ * conta foi entregue), nem o nome da conta, nem link do console. A data é
+ * a de São Paulo, o mesmo calendário do restante do console.
+ */
+export function renderEmailChangedNotice(changedAt: Date): RenderedEmail {
+  const date = changedAt.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'America/Sao_Paulo',
+  });
+  const subject = '[ZAP CRM BR] O e-mail de acesso da sua conta foi alterado';
+  const sentences = [
+    `O e-mail de acesso da sua conta no ZAP CRM BR foi alterado pelo suporte em ${date}.`,
+    'Se você não reconhece esta alteração, responda a este e-mail.',
+  ];
+  return {
+    subject,
+    text: sentences.join('\n\n'),
+    html: sentences.map((s) => `<p>${escapeHtml(s)}</p>`).join('\n'),
+  };
+}
+
 export function renderSystemEmail(payload: SystemEventPayload): RenderedEmail {
   const accountName = payload.account?.name ?? 'Conta';
   const accountId = payload.account?.id ?? null;

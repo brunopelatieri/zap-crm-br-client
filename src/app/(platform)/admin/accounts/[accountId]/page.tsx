@@ -14,7 +14,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Pencil } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
@@ -32,10 +32,29 @@ import { PlanUsageBars } from '@/components/plan/plan-usage-bars';
 import { BlockToggle } from '@/components/platform/block-toggle';
 import { DeleteAccountButton } from '@/components/platform/delete-account-button';
 import { ChangePlanDialog } from '@/components/platform/change-plan-dialog';
+import { ChangePeriodEndDialog } from '@/components/platform/change-period-end-dialog';
+import { RecordPaymentDialog } from '@/components/platform/record-payment-dialog';
+import { PaymentsCard } from '@/components/platform/payments-card';
+import {
+  EditUserIdentityDialog,
+  type EditableMember,
+} from '@/components/platform/edit-user-identity-dialog';
+import { formatSpDate } from '@/components/platform/console-format';
 import { AccountRetentionPanel } from '@/components/retention/retention-panel';
 import { ChannelLimitsPanel } from '@/components/platform/channel-limits-panel';
 import { Button } from '@/components/ui/button';
-import type { AccountDetail, AccountMember } from '@/lib/platform/accounts';
+import {
+  AUDIT_EVENTS_LIMIT,
+  PLAN_EVENTS_LIMIT,
+  type AccountAuditEvent,
+  type AccountDetail,
+  type AccountMember,
+} from '@/lib/platform/accounts';
+import {
+  describeAuditEvent,
+  mergeAccountHistory,
+} from '@/lib/platform/audit-feed';
+import type { AccountPayment } from '@/lib/plans/payments';
 import type { PlanUsage } from '@/lib/plans/types';
 
 interface AccountDetailResponse {
@@ -52,6 +71,12 @@ interface AccountDetailResponse {
     reason: string | null;
     created_at: string;
   }[];
+  /** SPEC 078 §9.4 — o que o console fez nesta conta. */
+  auditEvents: AccountAuditEvent[];
+  /** SPEC 078 §4.4 — `null` = a leitura dos pagamentos falhou. */
+  payments: AccountPayment[] | null;
+  /** SPEC 078 §9.3 — membros que SÃO o proprietário da plataforma. */
+  platformOwnerUserIds: string[];
   self: {
     /** A conta aberta é a do próprio proprietário (§4.4). */
     isOwnAccount: boolean;
@@ -74,6 +99,8 @@ function formatDateTime(iso: string, locale: string): string {
 
 function AccountDetailContent({ accountId }: { accountId: string }) {
   const t = useTranslations('Platform.accountDetail');
+  const tAudit = useTranslations('Platform.audit');
+  const tPay = useTranslations('Platform.payments');
   const tPlan = useTranslations('Plan');
   const tBlock = useTranslations('Platform.block');
   const locale = useLocale();
@@ -83,6 +110,11 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
   const [data, setData] = useState<AccountDetailResponse | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [changingPlan, setChangingPlan] = useState(false);
+  const [changingPeriodEnd, setChangingPeriodEnd] = useState(false);
+  const [recordingPayment, setRecordingPayment] = useState(false);
+  const [editingMember, setEditingMember] = useState<EditableMember | null>(
+    null
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,8 +155,26 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
     return <p className="text-muted-foreground text-sm">{t('notFound')}</p>;
   }
 
-  const { account, usage, events, self } = data;
+  const { account, usage, events, auditEvents, self } = data;
   const owner = account.members.find((m) => m.role === 'owner') ?? null;
+  const platformOwnerIds = new Set(data.platformOwnerUserIds);
+
+  // SPEC 078 §9.4: eventos de plano e ações do console, intercalados.
+  const history = mergeAccountHistory(events, auditEvents, {
+    plan: PLAN_EVENTS_LIMIT,
+    audit: AUDIT_EVENTS_LIMIT,
+  });
+
+  const describeAudit = (event: AccountAuditEvent) => {
+    const { key, values } = describeAuditEvent(event, {
+      date: (iso) => formatSpDate(iso, locale),
+      method: (code) =>
+        tPay.has(`methods.${code}`) ? tPay(`methods.${code}`) : code,
+      field: (code) =>
+        tAudit(code === 'email' ? 'fieldEmail' : 'fieldFullName'),
+    });
+    return tAudit(key, values);
+  };
 
   return (
     <div className="space-y-6">
@@ -179,13 +229,41 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>{t('planSection')}</CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setChangingPlan(true)}
-          >
-            {t('changePlan')}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Sem ciclo não há vencimento (D-1): o motivo vai no wrapper,
+                porque `title` num botão desabilitado não aparece. */}
+            <span
+              title={account.hasBillingCycle ? undefined : t('noCycleHint')}
+            >
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!account.hasBillingCycle}
+                onClick={() => setChangingPeriodEnd(true)}
+              >
+                {t('changePeriodEnd')}
+              </Button>
+            </span>
+            <span
+              title={account.hasBillingCycle ? undefined : t('noCycleHint')}
+            >
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!account.hasBillingCycle}
+                onClick={() => setRecordingPayment(true)}
+              >
+                {t('recordPayment')}
+              </Button>
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setChangingPlan(true)}
+            >
+              {t('changePlan')}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="grid gap-2 text-sm sm:grid-cols-2">
           <div>
@@ -204,7 +282,7 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
           <div>
             {account.currentPeriodEnd
               ? t('expiresAt', {
-                  date: formatDate(account.currentPeriodEnd, locale),
+                  date: formatSpDate(account.currentPeriodEnd, locale),
                 })
               : t('noExpiration')}
           </div>
@@ -222,6 +300,15 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
           ) : null}
         </CardContent>
       </Card>
+
+      {account.hasBillingCycle ? (
+        <PaymentsCard
+          accountId={account.accountId}
+          currentPeriodEnd={account.currentPeriodEnd}
+          payments={data.payments}
+          onChanged={load}
+        />
+      ) : null}
 
       {usage ? (
         <Card>
@@ -272,18 +359,36 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
                     )}
                   </TableCell>
                   <TableCell>
-                    <BlockToggle
-                      target="user"
-                      id={member.userId}
-                      blocked={member.blockedAt !== null}
-                      isAccountOwner={member.role === 'owner'}
-                      disabledReason={
-                        self.ownUserId === member.userId
-                          ? tBlock('selfBlockDisabled')
-                          : null
-                      }
-                      onChanged={load}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="icon-sm"
+                        variant="outline"
+                        aria-label={t('editMember')}
+                        title={t('editMember')}
+                        onClick={() =>
+                          setEditingMember({
+                            userId: member.userId,
+                            fullName: member.fullName,
+                            email: member.email,
+                            role: member.role,
+                          })
+                        }
+                      >
+                        <Pencil />
+                      </Button>
+                      <BlockToggle
+                        target="user"
+                        id={member.userId}
+                        blocked={member.blockedAt !== null}
+                        isAccountOwner={member.role === 'owner'}
+                        disabledReason={
+                          self.ownUserId === member.userId
+                            ? tBlock('selfBlockDisabled')
+                            : null
+                        }
+                        onChanged={load}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -297,31 +402,80 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
           <CardTitle>{t('historySection')}</CardTitle>
         </CardHeader>
         <CardContent>
-          {events.length === 0 ? (
+          {history.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t('noEvents')}</p>
           ) : (
             <ul className="space-y-2 text-sm">
-              {events.map((event) => (
-                <li key={event.id} className="text-muted-foreground">
+              {history.map((item) => (
+                <li
+                  key={`${item.kind}-${item.event.id}`}
+                  className="text-muted-foreground"
+                >
                   <span className="text-foreground">
-                    {formatDateTime(event.created_at, locale)}
+                    {formatDateTime(item.at, locale)}
                   </span>{' '}
-                  — {event.actor} —{' '}
-                  {event.from_plan_code || event.to_plan_code
-                    ? t('eventChange', {
-                        from: event.from_plan_code ?? '—',
-                        to: event.to_plan_code ?? '—',
-                      })
-                    : t('eventChange', {
-                        from: event.from_status ?? '—',
-                        to: event.to_status ?? '—',
-                      })}
+                  — {item.event.actor} —{' '}
+                  {item.kind === 'audit'
+                    ? describeAudit(item.event)
+                    : item.event.from_plan_code || item.event.to_plan_code
+                      ? t('eventChange', {
+                          from: item.event.from_plan_code ?? '—',
+                          to: item.event.to_plan_code ?? '—',
+                        })
+                      : t('eventChange', {
+                          from: item.event.from_status ?? '—',
+                          to: item.event.to_status ?? '—',
+                        })}
                 </li>
               ))}
             </ul>
           )}
         </CardContent>
       </Card>
+
+      {changingPeriodEnd ? (
+        <ChangePeriodEndDialog
+          accountId={account.accountId}
+          accountName={account.accountName}
+          currentPeriodEnd={account.currentPeriodEnd}
+          billingCycle={account.billingCycle}
+          status={account.status}
+          cancelAtPeriodEnd={account.cancelAtPeriodEnd}
+          onClose={() => setChangingPeriodEnd(false)}
+          onChanged={() => {
+            setChangingPeriodEnd(false);
+            void load();
+          }}
+        />
+      ) : null}
+
+      {recordingPayment ? (
+        <RecordPaymentDialog
+          accountId={account.accountId}
+          accountName={account.accountName}
+          currentPeriodEnd={account.currentPeriodEnd}
+          billingCycle={account.billingCycle}
+          accountBlocked={account.blockedAt !== null}
+          cancelAtPeriodEnd={account.cancelAtPeriodEnd}
+          onClose={() => setRecordingPayment(false)}
+          onChanged={() => {
+            setRecordingPayment(false);
+            void load();
+          }}
+        />
+      ) : null}
+
+      {editingMember ? (
+        <EditUserIdentityDialog
+          member={editingMember}
+          isPlatformOwner={platformOwnerIds.has(editingMember.userId)}
+          onClose={() => setEditingMember(null)}
+          onChanged={() => {
+            setEditingMember(null);
+            void load();
+          }}
+        />
+      ) : null}
 
       {changingPlan ? (
         <ChangePlanDialog

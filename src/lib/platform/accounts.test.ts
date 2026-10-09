@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { getAccountDetail, listAccounts } from './accounts';
+import {
+  getAccountAuditEvents,
+  getAccountDetail,
+  listAccounts,
+} from './accounts';
 
 // ------------------------------------------------------------
 // getAccountDetail
@@ -65,8 +69,99 @@ const PLAN_ROW = {
   current_period_end: '2026-09-01T00:00:00Z',
   cancel_at_period_end: false,
   grace_until: null,
-  plans: { code: 'professional', name: 'Profissional' },
+  plans: {
+    code: 'professional',
+    name: 'Profissional',
+    billing_period: 'monthly',
+    price_cents: 34900,
+  },
 };
+
+describe('getAccountDetail — hasBillingCycle', () => {
+  const withPlan = (plans: Record<string, unknown>) =>
+    getAccountDetail(
+      makeDetailDb({
+        account: ACCOUNT_ROW,
+        plan: { ...PLAN_ROW, plans: { code: 'x', name: 'X', ...plans } },
+      }),
+      'acct-1'
+    );
+
+  it.each([
+    [{ billing_period: 'monthly', price_cents: 100 }, true],
+    [{ billing_period: 'yearly', price_cents: 100 }, true],
+    [{ billing_period: 'monthly', price_cents: 0 }, false],
+    [{ billing_period: 'none', price_cents: 100 }, false],
+    [{ billing_period: 'custom', price_cents: 100 }, false],
+  ])(
+    '%j → %s (mesma regra de computePeriodEnd e do banco)',
+    async (plans, expected) => {
+      expect((await withPlan(plans))?.hasBillingCycle).toBe(expected);
+    }
+  );
+});
+
+describe('getAccountAuditEvents', () => {
+  function makeAuditDb(result: {
+    data: unknown;
+    error: { message: string } | null;
+  }) {
+    const calls: Record<string, unknown> = {};
+    const chain: Record<string, unknown> = {
+      select: () => chain,
+      eq: (column: string, value: unknown) => {
+        calls.eq = [column, value];
+        return chain;
+      },
+      in: (column: string, values: unknown) => {
+        calls.in = [column, values];
+        return chain;
+      },
+      order: () => chain,
+      limit: (n: number) => {
+        calls.limit = n;
+        return Promise.resolve(result);
+      },
+    };
+    const client = {
+      from: (table: string) => {
+        calls.table = table;
+        return chain;
+      },
+    } as unknown as SupabaseClient;
+    return { client, calls };
+  }
+
+  it('lê só as ações do console desta conta, até 50', async () => {
+    const { client, calls } = makeAuditDb({
+      data: [{ id: 'a1' }],
+      error: null,
+    });
+    expect(await getAccountAuditEvents(client, 'acct-1')).toEqual([
+      { id: 'a1' },
+    ]);
+    expect(calls.table).toBe('platform_audit_log');
+    expect(calls.eq).toEqual(['account_id', 'acct-1']);
+    expect(calls.in).toEqual([
+      'action',
+      [
+        'billing.period_end.set',
+        'billing.payment.manual',
+        'billing.payment.reverse',
+        'billing.renew',
+        'user.profile_update',
+      ],
+    ]);
+    expect(calls.limit).toBe(50);
+  });
+
+  it('erro de leitura devolve lista vazia (o histórico não derruba o detalhe)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = makeAuditDb({ data: null, error: { message: 'boom' } });
+    expect(await getAccountAuditEvents(client, 'acct-1')).toEqual([]);
+    spy.mockRestore();
+  });
+});
 
 describe('getAccountDetail', () => {
   it('devolve null quando a conta não existe', async () => {
@@ -115,6 +210,7 @@ describe('getAccountDetail', () => {
       currentPeriodEnd: '2026-09-01T00:00:00Z',
       cancelAtPeriodEnd: false,
       graceUntil: null,
+      hasBillingCycle: true,
       members: [
         {
           userId: 'u1',

@@ -78,6 +78,64 @@ describe('renewAccountPlan', () => {
     expect(calls[0].args.p_note).toBeNull();
   });
 
+  // SPEC 078 §4.3 — os três parâmetros da 089.
+  it('actor/method/amountCents chegam à RPC com os nomes p_actor/p_method/p_amount_cents', async () => {
+    const { client, calls } = makeRpcClient(() => ({
+      data: [{ applied: true, current_period_end: null, status: 'active' }],
+      error: null,
+    }));
+    await renewAccountPlan(client, {
+      accountId: 'acct-1',
+      paymentRef: 'E2E123',
+      paidAt: '2026-10-09T15:00:00.000Z',
+      periods: 1,
+      actor: 'console:bruno@zapcrmbr.com',
+      method: 'pix',
+      amountCents: 34900,
+    });
+    expect(calls[0].args).toMatchObject({
+      p_actor: 'console:bruno@zapcrmbr.com',
+      p_method: 'pix',
+      p_amount_cents: 34900,
+    });
+  });
+
+  it('valor 0 é repassado (0 não é "ausente")', async () => {
+    const { client, calls } = makeRpcClient(() => ({
+      data: [{ applied: true, current_period_end: null, status: 'active' }],
+      error: null,
+    }));
+    await renewAccountPlan(client, {
+      accountId: 'acct-1',
+      paymentRef: 'cortesia-1',
+      paidAt: null,
+      periods: 1,
+      amountCents: 0,
+    });
+    expect(calls[0].args.p_amount_cents).toBe(0);
+  });
+
+  it('a rota de máquina (sem os campos novos) continua mandando só os 6 nomes antigos', async () => {
+    const { client, calls } = makeRpcClient(() => ({
+      data: [{ applied: true, current_period_end: null, status: 'active' }],
+      error: null,
+    }));
+    await renewAccountPlan(client, {
+      accountId: 'acct-1',
+      paymentRef: 'fatura-1',
+      paidAt: null,
+      periods: 1,
+    });
+    expect(Object.keys(calls[0].args).sort()).toEqual([
+      'p_account_id',
+      'p_external_ref',
+      'p_note',
+      'p_paid_at',
+      'p_payment_ref',
+      'p_periods',
+    ]);
+  });
+
   it('applied=true na linha devolvida vira status "applied" com o plano atualizado', async () => {
     const { client } = makeRpcClient(() => ({
       data: [

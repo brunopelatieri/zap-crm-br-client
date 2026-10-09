@@ -342,7 +342,7 @@ async function processOne(
         billingPeriod: defaultPlan.billing_period,
         priceCents: defaultPlan.price_cents,
       });
-      const { error: updateErr } = await db
+      const { data: downgraded, error: updateErr } = await db
         .from('account_plans')
         .update({
           plan_id: defaultPlan.id,
@@ -355,7 +355,10 @@ async function processOne(
           updated_by: LIFECYCLE_ACTOR,
           updated_at: now.toISOString(),
         })
-        .eq('account_id', row.account_id);
+        .eq('account_id', row.account_id)
+        .eq('current_period_end', periodEnd)
+        .eq('status', row.status)
+        .select('account_id');
       if (updateErr) {
         console.error(
           '[plans/lifecycle] downgrade update failed:',
@@ -364,6 +367,10 @@ async function processOne(
         result.errors++;
         return;
       }
+      // SPEC 078 §3.3 — zero linhas: o vencimento OU o status mudou
+      // depois da leitura do lote (o operador empurrou a data, suspendeu
+      // a conta, ou uma renovação chegou). Sem evento, sem contagem; a próxima corrida reavalia.
+      if (!downgraded || downgraded.length === 0) return;
 
       await db.from('account_plan_events').insert({
         account_id: row.account_id,
@@ -407,7 +414,12 @@ async function processOne(
     }
 
     const graceUntil = graceEnd(periodEnd, graceDays);
-    const { error: updateErr } = await db
+    // Concorrência otimista (SPEC 078 §3.3): só marca `past_due` se o
+    // vencimento E o status ainda são os que o lote leu. Sem isto, a
+    // conta cairia em atraso com vencimento futuro quando o operador (ou
+    // uma renovação) empurra a data entre a leitura e esta escrita — ou
+    // desfaria uma suspensão/cancelamento manual feito nesse intervalo.
+    const { data: markedPastDue, error: updateErr } = await db
       .from('account_plans')
       .update({
         status: 'past_due',
@@ -415,7 +427,10 @@ async function processOne(
         updated_by: LIFECYCLE_ACTOR,
         updated_at: now.toISOString(),
       })
-      .eq('account_id', row.account_id);
+      .eq('account_id', row.account_id)
+      .eq('current_period_end', periodEnd)
+      .eq('status', row.status)
+      .select('account_id');
     if (updateErr) {
       console.error(
         '[plans/lifecycle] past_due update failed:',
@@ -424,6 +439,7 @@ async function processOne(
       result.errors++;
       return;
     }
+    if (!markedPastDue || markedPastDue.length === 0) return;
 
     // Achado de code review: `to_plan_code` é `NOT NULL` no schema
     // (067) — o plano não muda nesta transição (só o status), mas a

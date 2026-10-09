@@ -23,6 +23,7 @@ import { writePlatformAudit } from '@/lib/platform/audit';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { emitSystemEvent } from '@/lib/notifications/emit';
 import { renewAccountPlan } from '@/lib/plans/billing-renew';
+import { resolveDuplicateRef } from '@/lib/plans/payments';
 import { recordActivity } from '@/lib/activity/record';
 
 interface RenewBody {
@@ -104,10 +105,43 @@ export async function POST(
     );
   }
 
-  // A retentativa do sistema externo é comportamento esperado — 200,
-  // nunca 409 (§6.2 passo 1).
+  // A retentativa do sistema externo É comportamento esperado — 200,
+  // nunca 409 (§6.2 passo 1) — mas só quando o `paymentRef` já é um
+  // pagamento vigente DESTA conta. `payment_ref` é UNIQUE na tabela
+  // inteira: se a linha é de outra conta, ou foi estornada, nada foi
+  // aplicado e responder `already_applied` faria o sistema externo dar o
+  // pagamento por lançado.
   if (result.status === 'already_applied') {
-    return NextResponse.json({ status: 'already_applied' });
+    switch (await resolveDuplicateRef(db, accountId, body.paymentRef)) {
+      case 'same_payment':
+        return NextResponse.json({ status: 'already_applied' });
+      case 'other_account':
+        return NextResponse.json(
+          {
+            error:
+              "'paymentRef' is already registered for another account; nothing was applied",
+            code: 'payment_ref_in_use',
+          },
+          { status: 409 }
+        );
+      case 'reversed':
+        return NextResponse.json(
+          {
+            error:
+              "'paymentRef' belongs to a payment that was reversed by the platform operator; nothing was applied",
+            code: 'payment_ref_reversed',
+          },
+          { status: 409 }
+        );
+      default:
+        return NextResponse.json(
+          {
+            error:
+              "'paymentRef' is already in use and its owner could not be checked",
+          },
+          { status: 500 }
+        );
+    }
   }
 
   await writePlatformAudit(db, {
@@ -126,13 +160,15 @@ export async function POST(
     resourceType: 'plan',
     action: 'plan.renewed',
     actor: { kind: 'system', name: 'billing' },
-    metadata: { payment_ref: body.paymentRef, periods },
+    metadata: { payment_ref: body.paymentRef, periods, source: 'api' },
   });
 
   await dispatchWebhookEvent(db, accountId, 'plan.renewed', {
     paymentRef: body.paymentRef,
     periods,
     currentPeriodEnd: result.accountPlan.currentPeriodEnd,
+    // SPEC 078 §10 — o mesmo evento também nasce no console.
+    source: 'api',
   });
   await emitSystemEvent(
     {

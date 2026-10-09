@@ -12,8 +12,14 @@ import { NextResponse } from 'next/server';
 
 import { requirePlatformOwner } from '@/lib/platform/owner';
 import { loadOwnerSelfRefs } from '@/lib/platform/owner-profile';
-import { getAccountDetail } from '@/lib/platform/accounts';
+import {
+  PLAN_EVENTS_LIMIT,
+  getAccountAuditEvents,
+  getAccountDetail,
+} from '@/lib/platform/accounts';
+import { isPlatformOwnerEmail } from '@/lib/platform/owner';
 import { getAccountPlan } from '@/lib/plans/account-plan';
+import { listAccountPayments } from '@/lib/plans/payments';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const NOT_FOUND = NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -39,24 +45,37 @@ export async function GET(
   // conveniência, não garantia.
   const self = await loadOwnerSelfRefs(db, ownerUserId);
 
-  const [detail, planSnapshot, events] = await Promise.all([
-    getAccountDetail(db, accountId),
-    getAccountPlan(accountId, db).catch((err) => {
-      console.error(
-        '[GET /api/platform/accounts/[accountId]] getAccountPlan error:',
-        err
-      );
-      return null;
-    }),
-    db
-      .from('account_plan_events')
-      .select(
-        'id, from_plan_code, to_plan_code, from_status, to_status, actor, reason, created_at'
-      )
-      .eq('account_id', accountId)
-      .order('created_at', { ascending: false })
-      .limit(20),
-  ]);
+  const [detail, planSnapshot, events, auditEvents, payments] =
+    await Promise.all([
+      getAccountDetail(db, accountId),
+      getAccountPlan(accountId, db).catch((err) => {
+        console.error(
+          '[GET /api/platform/accounts/[accountId]] getAccountPlan error:',
+          err
+        );
+        return null;
+      }),
+      db
+        .from('account_plan_events')
+        .select(
+          'id, from_plan_code, to_plan_code, from_status, to_status, actor, reason, created_at'
+        )
+        .eq('account_id', accountId)
+        .order('created_at', { ascending: false })
+        .limit(PLAN_EVENTS_LIMIT),
+      getAccountAuditEvents(db, accountId),
+      // Os pagamentos viajam junto com o detalhe: o card os mostra e decide
+      // "Desfazer" contra o MESMO `currentPeriodEnd` lido aqui, sem uma
+      // segunda ida ao servidor depois da primeira. Falha vira `null` (o
+      // card mostra o erro) — não derruba o resto do detalhe.
+      listAccountPayments(db, accountId).catch((err) => {
+        console.error(
+          '[GET /api/platform/accounts/[accountId]] listAccountPayments error:',
+          err
+        );
+        return null;
+      }),
+    ]);
 
   if (!detail) {
     return NextResponse.json({ error: 'Account not found' }, { status: 404 });
@@ -67,6 +86,16 @@ export async function GET(
     usage: planSnapshot?.usage ?? null,
     quotasEnforced: planSnapshot?.quotasEnforced ?? false,
     events: events.data ?? [],
+    // SPEC 078 §9.4 — o que o console fez nesta conta, intercalado com
+    // `events` pelo card "Histórico".
+    auditEvents,
+    // SPEC 078 §4.4 — `null` = a leitura falhou.
+    payments,
+    // SPEC 078 §9.3 — membros que SÃO o proprietário da plataforma: o
+    // diálogo de edição trava o campo de e-mail deles.
+    platformOwnerUserIds: detail.members
+      .filter((m) => isPlatformOwnerEmail(m.email))
+      .map((m) => m.userId),
     self: {
       isOwnAccount: self.ownerAccountId === accountId,
       ownUserId: self.ownerUserId,

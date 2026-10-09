@@ -24,7 +24,8 @@ export const WEBHOOK_EVENTS = [
   'plan.cancel_reverted', // self-service reverted a scheduled cancellation
   'plan.canceled_applied', // a scheduled cancellation took effect at period end
   'plan.grace_ended', // the grace period after past_due ended (D-7: does not block)
-  'plan.renewed', // POST /api/admin/accounts/{id}/billing/renew advanced the period
+  'plan.renewed', // a payment (external system or platform console) advanced the period
+  'plan.period_changed', // the platform console set the plan due date by hand (SPEC 078)
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -44,7 +45,10 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
     'A scheduled plan cancellation took effect at period end',
   'plan.grace_ended':
     'The past_due grace period ended (access is not revoked by this alone)',
-  'plan.renewed': 'An external payment renewed the account plan period',
+  'plan.renewed':
+    'A payment (external system or platform console) renewed the account plan period',
+  'plan.period_changed':
+    'The platform operator changed the account plan due date or billing cycle',
 };
 
 /** Type-narrow an unknown value into a valid `WebhookEvent`. */

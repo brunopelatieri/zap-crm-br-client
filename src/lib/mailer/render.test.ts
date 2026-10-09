@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderSystemEmail } from './render';
+import { renderEmailChangedNotice, renderSystemEmail } from './render';
 import {
   buildEventPayload,
   type SystemEventType,
@@ -226,5 +226,31 @@ describe('renderSystemEmail — account.deleted (SPEC 073 §5.4, um caso à part
     expect(renderSystemEmail(adminPayload).subject).toContain(
       'foi excluída pelo console do proprietário'
     );
+  });
+});
+
+describe('renderEmailChangedNotice (SPEC 078 §5.5, D-11)', () => {
+  const rendered = renderEmailChangedNotice(new Date('2026-10-09T15:00:00Z'));
+
+  it('diz que o e-mail de acesso foi alterado pelo suporte, na data de São Paulo', () => {
+    expect(rendered.subject).toContain('e-mail de acesso');
+    expect(rendered.text).toContain('alterado pelo suporte em 09/10/2026');
+  });
+
+  it('a data é a de São Paulo, não a de UTC (02:00 UTC ainda é o dia anterior)', () => {
+    const late = renderEmailChangedNotice(new Date('2026-10-10T02:00:00Z'));
+    expect(late.text).toContain('09/10/2026');
+  });
+
+  it('orienta a responder, sem trazer o endereço novo, a conta nem link do console', () => {
+    expect(rendered.text).toContain('responda a este e-mail');
+    expect(rendered.text).not.toContain('@');
+    expect(rendered.text).not.toContain('/admin');
+    expect(rendered.html).not.toContain('<a ');
+  });
+
+  it('HTML mínimo: parágrafos, sem imagem remota nem CSS externo', () => {
+    expect(rendered.html).toContain('<p>');
+    expect(rendered.html).not.toMatch(/<img|<link|@import|http/i);
   });
 });

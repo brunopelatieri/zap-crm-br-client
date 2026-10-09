@@ -27,15 +27,25 @@ export function computePeriodEnd(
   cycle: BillingCycle,
   plan: Pick<Plan, 'billingPeriod' | 'priceCents'>
 ): Date | null {
-  if (!vencePorCiclo(plan.billingPeriod) || plan.priceCents === 0) {
-    return null;
-  }
+  if (!hasBillingCycle(plan)) return null;
   const start = typeof startedAt === 'string' ? new Date(startedAt) : startedAt;
   return cycle === 'yearly' ? addYears(start, 1) : addMonths(start, 1);
 }
 
 function vencePorCiclo(billingPeriod: BillingPeriod): boolean {
   return billingPeriod === 'monthly' || billingPeriod === 'yearly';
+}
+
+/**
+ * O plano vence por ciclo (mensal/anual, preço > 0)? A regra única de
+ * `computePeriodEnd`, do console (alterar vencimento / registrar
+ * pagamento) e das funções do banco (`set_plan_period_end`,
+ * `apply_plan_renewal`).
+ */
+export function hasBillingCycle(
+  plan: Pick<Plan, 'billingPeriod' | 'priceCents'>
+): boolean {
+  return vencePorCiclo(plan.billingPeriod) && plan.priceCents > 0;
 }
 
 /** `plan.yearlyDiscountPercent ?? padrão da plataforma` (D-5). */

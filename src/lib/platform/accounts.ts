@@ -19,7 +19,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { AccountPlanStatus } from '@/lib/plans/types';
+import { hasBillingCycle } from '@/lib/plans/billing';
+import type { AccountPlanStatus, BillingPeriod } from '@/lib/plans/types';
 
 export interface AccountListFilters {
   /** Busca por nome da conta (ILIKE). */
@@ -239,6 +240,12 @@ export interface AccountDetail {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
+  /**
+   * O plano atual vence por ciclo (mensal/anual, preço > 0)? Só então
+   * "alterar vencimento" e "registrar pagamento" fazem sentido (SPEC 078
+   * D-1) — mesma regra de `computePeriodEnd` e do banco.
+   */
+  hasBillingCycle: boolean;
   members: AccountMember[];
 }
 
@@ -256,7 +263,7 @@ export async function getAccountDetail(
       db
         .from('account_plans')
         .select(
-          'status, billing_cycle, started_at, current_period_end, cancel_at_period_end, grace_until, plans:plan_id (code, name)'
+          'status, billing_cycle, started_at, current_period_end, cancel_at_period_end, grace_until, plans:plan_id (code, name, billing_period, price_cents)'
         )
         .eq('account_id', accountId)
         .maybeSingle(),
@@ -272,6 +279,8 @@ export async function getAccountDetail(
   const plan = planRow.plans as unknown as {
     code: string;
     name: string;
+    billing_period: string;
+    price_cents: number;
   } | null;
 
   return {
@@ -288,6 +297,12 @@ export async function getAccountDetail(
     currentPeriodEnd: planRow.current_period_end,
     cancelAtPeriodEnd: planRow.cancel_at_period_end,
     graceUntil: planRow.grace_until,
+    hasBillingCycle:
+      plan !== null &&
+      hasBillingCycle({
+        billingPeriod: plan.billing_period as BillingPeriod,
+        priceCents: plan.price_cents,
+      }),
     members: (memberRows ?? []).map((m) => ({
       userId: m.user_id as string,
       fullName: m.full_name as string | null,
@@ -296,4 +311,55 @@ export async function getAccountDetail(
       blockedAt: m.blocked_at as string | null,
     })),
   };
+}
+
+/** Linha de `platform_audit_log` como o card "Histórico" a consome. */
+export interface AccountAuditEvent {
+  id: string;
+  actor: string;
+  action: string;
+  target_user_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+/**
+ * Ações do console que aparecem no "Histórico" da conta (SPEC 078 §9.4).
+ * Lista fechada de propósito: `platform_audit_log` também guarda avisos
+ * de ciclo de vida do cron (`plan.lifecycle_notice`) e bloqueios, que
+ * não pertencem a este card.
+ */
+export const ACCOUNT_HISTORY_AUDIT_ACTIONS = [
+  'billing.period_end.set',
+  'billing.payment.manual',
+  'billing.payment.reverse',
+  'billing.renew',
+  'user.profile_update',
+] as const;
+
+/** Quantos eventos de plano o detalhe traz (`account_plan_events`). */
+export const PLAN_EVENTS_LIMIT = 20;
+/** Quantas ações do console o detalhe traz (`platform_audit_log`). */
+export const AUDIT_EVENTS_LIMIT = 50;
+
+export async function getAccountAuditEvents(
+  db: SupabaseClient,
+  accountId: string
+): Promise<AccountAuditEvent[]> {
+  const { data, error } = await db
+    .from('platform_audit_log')
+    .select('id, actor, action, target_user_id, payload, created_at')
+    .eq('account_id', accountId)
+    .in('action', [...ACCOUNT_HISTORY_AUDIT_ACTIONS])
+    .order('created_at', { ascending: false })
+    .limit(AUDIT_EVENTS_LIMIT);
+  if (error) {
+    // O histórico é complementar: falhar aqui não derruba o detalhe.
+    console.error(
+      '[platform/accounts] audit events read failed:',
+      error.message
+    );
+    return [];
+  }
+  return (data ?? []) as unknown as AccountAuditEvent[];
 }
