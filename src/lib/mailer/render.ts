@@ -266,6 +266,21 @@ function escapeHtml(value: string): string {
 }
 
 /**
+ * Aviso de caixa de spam em TODO e-mail do sistema (exigência do produto):
+ * Hotmail e Gmail costumam jogar avisos automáticos no spam, e um link de
+ * confirmação ou de recuperação perdido trava o acesso. Sem URL e sem "@"
+ * no texto — `render.test.ts` trava essas regras.
+ */
+const SPAM_NOTICE_LEAD = 'IMPORTANTE: verifique também a pasta de spam.';
+const SPAM_NOTICE_BODY =
+  'Este e-mail pode cair na pasta de spam ou lixo eletrônico (Hotmail, Gmail e outros provedores). Se encontrá-lo lá, marque-o como “Não é spam” (Gmail) ou “Não é lixo eletrônico” (Outlook/Hotmail), para que os próximos avisos importantes do ZAP CRM BR cheguem à sua caixa de entrada.';
+const SPAM_NOTICE_TEXT = `${SPAM_NOTICE_LEAD} ${SPAM_NOTICE_BODY}`;
+
+function spamNoticeHtml(): string {
+  return `<div style="margin:16px 0;padding:12px 14px;border:1px solid #F5C518;background-color:#FFF8E1;border-radius:8px;"><p style="margin:0;"><strong>${escapeHtml(SPAM_NOTICE_LEAD)}</strong> ${escapeHtml(SPAM_NOTICE_BODY)}</p></div>`;
+}
+
+/**
  * Aviso ao endereço ANTIGO depois que o suporte troca o e-mail de acesso
  * de um usuário (SPEC 078 §5.5, D-11). Troca de e-mail é a forma clássica
  * de tomada de conta; o titular antigo precisa ter como perceber.
@@ -284,14 +299,16 @@ export function renderEmailChangedNotice(changedAt: Date): RenderedEmail {
     timeZone: 'America/Sao_Paulo',
   });
   const subject = '[ZAP CRM BR] O e-mail de acesso da sua conta foi alterado';
-  const sentences = [
-    `O e-mail de acesso da sua conta no ZAP CRM BR foi alterado pelo suporte em ${date}.`,
-    'Se você não reconhece esta alteração, responda a este e-mail.',
-  ];
+  const changed = `O e-mail de acesso da sua conta no ZAP CRM BR foi alterado pelo suporte em ${date}.`;
+  const reply = 'Se você não reconhece esta alteração, responda a este e-mail.';
   return {
     subject,
-    text: sentences.join('\n\n'),
-    html: sentences.map((s) => `<p>${escapeHtml(s)}</p>`).join('\n'),
+    text: [changed, SPAM_NOTICE_TEXT, reply].join('\n\n'),
+    html: [
+      `<p>${escapeHtml(changed)}</p>`,
+      spamNoticeHtml(),
+      `<p>${escapeHtml(reply)}</p>`,
+    ].join('\n'),
   };
 }
 
@@ -313,6 +330,8 @@ export function renderSystemEmail(payload: SystemEventPayload): RenderedEmail {
     `Conta: ${accountName}`,
     `Evento: ${actionSubject}`,
     '',
+    SPAM_NOTICE_TEXT,
+    '',
     ...lines,
   ];
   if (link) {
@@ -323,6 +342,7 @@ export function renderSystemEmail(payload: SystemEventPayload): RenderedEmail {
   const htmlLines = [
     `<p><strong>Conta:</strong> ${escapeHtml(accountName)}</p>`,
     `<p><strong>Evento:</strong> ${escapeHtml(actionSubject)}</p>`,
+    spamNoticeHtml(),
     lines.length > 0
       ? `<ul>${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`
       : '',

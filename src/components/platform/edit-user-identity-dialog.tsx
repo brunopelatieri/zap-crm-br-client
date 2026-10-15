@@ -164,6 +164,7 @@ export function EditUserIdentityDialog({
                   <p className="font-medium">{t('ownerWarning')}</p>
                 ) : null}
                 <p>{t('immediateWarning')}</p>
+                <p>{t('oldEmailSpamWarning')}</p>
                 <p>{t('sessionsWarning')}</p>
               </AlertDescription>
             </Alert>

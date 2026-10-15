@@ -254,3 +254,37 @@ describe('renderEmailChangedNotice (SPEC 078 §5.5, D-11)', () => {
     expect(rendered.html).not.toMatch(/<img|<link|@import|http/i);
   });
 });
+
+describe('aviso de spam em todo e-mail do sistema (exigência do produto)', () => {
+  const LEAD = 'verifique também a pasta de spam';
+
+  for (const { type, data } of CASES) {
+    it(`${type}: texto e HTML trazem o aviso e como marcar como não spam`, () => {
+      const payload = buildEventPayload(
+        {
+          type,
+          accountId: account.id,
+          account,
+          actor: 'console:bruno@zapcrmbr.com',
+          data,
+        },
+        now
+      );
+      const email = renderSystemEmail(payload);
+
+      expect(email.text).toContain(LEAD);
+      expect(email.html).toContain(LEAD);
+      expect(email.text).toContain('Não é spam');
+      expect(email.html).toContain('Não é spam');
+    });
+  }
+
+  it('troca de e-mail pelo suporte: texto e HTML trazem o aviso', () => {
+    const email = renderEmailChangedNotice(now);
+
+    expect(email.text).toContain(LEAD);
+    expect(email.html).toContain(LEAD);
+    expect(email.text).toContain('Não é spam');
+    expect(email.html).toContain('Não é spam');
+  });
+});

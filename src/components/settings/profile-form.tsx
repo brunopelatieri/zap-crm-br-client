@@ -7,6 +7,7 @@ import { Loader2, Upload, Trash2, Mail, CircleAlert } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { EMAIL_RE } from '@/lib/auth/email';
 import { useAuth } from '@/hooks/use-auth';
+import { EmailSpamNotice } from '@/components/email-spam-notice';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -290,6 +291,7 @@ export function ProfileForm() {
                   </span>
                 </p>
               )}
+              {emailChangePending && <EmailSpamNotice className="mt-2" />}
             </div>
 
             {/* Read-only block */}

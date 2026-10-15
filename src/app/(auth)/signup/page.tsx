@@ -17,6 +17,7 @@ import {
 } from '@/lib/auth/password-policy';
 import { isPublicSignupEnabled } from '@/lib/auth/signup-flag';
 import { PasswordStrengthMeter } from '@/components/auth/password-strength-meter';
+import { EmailSpamNotice } from '@/components/email-spam-notice';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -163,7 +164,8 @@ function SignupPageInner() {
               })}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <EmailSpamNotice />
             <Link
               href={
                 inviteToken
