@@ -9,6 +9,8 @@
     "passwordLabel": "Senha",
     "forgotPassword": "Esqueceu a senha?",
     "passwordPlaceholder": "Digite sua senha",
+    "showPassword": "Mostrar senha",
+    "hidePassword": "Ocultar senha",
     "signingIn": "Entrando...",
     "signIn": "Entrar",
     "noAccount": "Não tem uma conta?",
