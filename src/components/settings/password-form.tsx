@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Loader2, KeyRound } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
+import { isSamePasswordError } from '@/lib/auth/error-messages';
 import { useAuth } from '@/hooks/use-auth';
 import {
   evaluatePassword,
@@ -74,6 +75,10 @@ export function PasswordForm() {
         password: normalizePassword(next),
       });
       if (updateError) {
+        if (isSamePasswordError(updateError)) {
+          toast.error(t('errorSamePassword'));
+          return;
+        }
         toast.error(
           t('passwordUpdateFailed', { message: updateError.message })
         );

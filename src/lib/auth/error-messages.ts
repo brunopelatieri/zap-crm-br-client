@@ -9,6 +9,9 @@ const CODE_TO_MESSAGE_KEY: Record<string, string> = {
   email_exists: 'errorUserExists',
   identity_already_exists: 'errorUserExists',
   weak_password: 'errorWeakPassword',
+  // Nova senha igual à atual. Sem entrada aqui o erro cai no `errorGeneric`
+  // ("solicite um novo link"), e o usuário acha que o link está com problema.
+  same_password: 'errorSamePassword',
   email_address_invalid: 'errorInvalidEmail',
   email_address_not_authorized: 'errorInvalidEmail',
   over_email_send_rate_limit: 'errorRateLimit',
@@ -32,6 +35,14 @@ export function getAuthErrorMessageKey(error: unknown): string {
     return CODE_TO_MESSAGE_KEY[error.code];
   }
   return 'errorGeneric';
+}
+
+/**
+ * `true` quando o Supabase recusou a nova senha por ser igual à atual.
+ * Usado pela tela de Configurações, que mostra o erro como toast próprio.
+ */
+export function isSamePasswordError(error: unknown): boolean {
+  return isAuthApiError(error) && error.code === 'same_password';
 }
 
 /**
