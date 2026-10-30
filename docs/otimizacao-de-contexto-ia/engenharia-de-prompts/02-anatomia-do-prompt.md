@@ -17,44 +17,36 @@ Total: **15–35 linhas**. Se passou de 60, provavelmente você está colando o 
 
 ## Exemplo anotado
 
-```markdown
+```text
 # MODO
-
-Executor. Implementar a fase F2 da SPEC 081 — não replanejar. ← (1)
+Executor. Implementar a fase F2 da SPEC 081 — não replanejar.          ← (1)
 
 # OBJETIVO
-
-O contato entra com telefone + senha e cai em /area-do-contato, ← (2)
+O contato entra com telefone + senha e cai em /area-do-contato,          ← (2)
 vendo só as próprias conversas.
 
 # LEIA (e só isto)
-
-- docs/spec-081-area-do-contato.md: §5 (modelo), §7.F2, Anexo B ← (3)
+- docs/spec-081-area-do-contato.md: §5 (modelo), §7.F2, Anexo B          ← (3)
 - docs/context/auth-e-conta.md
-  Não leia outras SPECs. Não explore src/app/(dashboard)/.
+Não leia outras SPECs. Não explore src/app/(dashboard)/.
 
 # TRAVAS
-
-- Escreva só em src/app/(contato)/, src/lib/contact-auth/ e nos ← (4)
+- Escreva só em src/app/(contato)/, src/lib/contact-auth/ e nos            ← (4)
   testes co-locados, e em messages/*.json.
 - Sem migração nesta fase (o schema é da F1, já aplicada).
 
 # ENTREGÁVEIS
-
-Os 6 arquivos listados em §7.F2 "Saídas". ← (5)
+Os 6 arquivos listados em §7.F2 "Saídas".                                  ← (5)
 
 # PRONTO QUANDO
-
-npm run typecheck && npm run i18n:check && npm run test -- contact-auth ← (6)
+npm run typecheck && npm run i18n:check && npm run test -- contact-auth    ← (6)
 passam, e o teste "contato não vê conversa de outro contato" existe.
 
 # DÚVIDAS
-
-Assuma, registre como D-n no fim do relatório e siga. ← (7)
+Assuma, registre como D-n no fim do relatório e siga.                      ← (7)
 
 # AO TERMINAR
-
-Diff resumido por arquivo (≤ 20 linhas), saída dos comandos, D-n novas, ← (8)
+Diff resumido por arquivo (≤ 20 linhas), saída dos comandos, D-n novas,    ← (8)
 comando de commit pronto. PARE.
 ```
 
