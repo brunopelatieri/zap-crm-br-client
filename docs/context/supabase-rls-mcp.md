@@ -18,7 +18,7 @@
 1. **Pergunte qual projeto** antes de qualquer operação. Lista e projeto padrão: [`status.md` → Banco](./status.md#banco--supabase).
 2. **Confirme com o mantenedor** antes de migração, DML, DDL, deploy de Edge Function ou criar/mexer em branch — em qualquer projeto.
 3. Rode `get_project_url` no projeto escolhido **antes** de escrever e confira que é o esperado.
-4. **Nunca** chame o projeto `ranch` nem um conector Supabase identificado só por UUID (sem nome): no app desktop o `ranch` pode aparecer assim. Os conectores do claude.ai são desligados a partir de sessão nova (detalhe em `status.md`); se ainda aparecerem ferramentas `mcp__<UUID>__*`, não as use.
+4. Use **só** os MCPs `vn` e `rs`; nunca um conector Supabase identificado só por UUID (sem nome). Os conectores do claude.ai são desligados a partir de sessão nova (detalhe em `status.md`); se ainda aparecerem ferramentas `mcp__<UUID>__*`, não as use.
 5. Leitura (`list_tables`, `execute_sql` com `SELECT`) também só no projeto confirmado.
 6. Depois de DDL, rode `get_advisors` (tipo **security**) **no projeto confirmado** e trate o que for novo.
 

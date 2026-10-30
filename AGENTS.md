@@ -23,7 +23,7 @@
 
 ## Convenções obrigatórias
 
-**Supabase (MCP) — qual projeto:** pergunte sempre qual projeto usar (`vn` é o padrão; `rs`; lista atual em `status.md`). Confirme com o mantenedor antes de migração, DML, DDL, deploy de Edge Function ou branch, em qualquer projeto. Antes de ler ou escrever, rode `get_project_url` no projeto escolhido e confira que é o esperado. **Nunca** use o projeto `ranch` nem conector Supabase sem nome (só UUID). Detalhe: [`supabase-rls-mcp.md`](./docs/context/supabase-rls-mcp.md).
+**Supabase (MCP) — qual projeto:** pergunte sempre qual projeto usar (`vn` é o padrão; `rs`; lista atual em `status.md`). Confirme com o mantenedor antes de migração, DML, DDL, deploy de Edge Function ou branch, em qualquer projeto. Antes de ler ou escrever, rode `get_project_url` no projeto escolhido e confira que é o esperado. Use **só** os MCPs `vn` e `rs` do `.mcp.json` — nunca outro projeto nem conector Supabase sem nome (só UUID). Detalhe: [`supabase-rls-mcp.md`](./docs/context/supabase-rls-mcp.md).
 
 **Clientes Supabase — escolher o certo importa (RLS depende disso):**
 
