@@ -18,7 +18,7 @@
 1. **Pergunte qual projeto** antes de qualquer operação. Lista e projeto padrão: [`status.md` → Banco](./status.md#banco--supabase).
 2. **Confirme com o mantenedor** antes de migração, DML, DDL, deploy de Edge Function ou criar/mexer em branch — em qualquer projeto.
 3. Rode `get_project_url` no projeto escolhido **antes** de escrever e confira que é o esperado.
-4. Use **só** os MCPs `vn` e `rs`; nunca um conector Supabase identificado só por UUID (sem nome). Os conectores do claude.ai são desligados a partir de sessão nova (detalhe em `status.md`); se ainda aparecerem ferramentas `mcp__<UUID>__*`, não as use.
+4. Use **só** os MCPs listados em [`status.md`](./status.md) (hoje, só `vn`); nunca um conector Supabase identificado só por UUID (sem nome). Os conectores do claude.ai são desligados a partir de sessão nova (detalhe em `status.md`); se ainda aparecerem ferramentas `mcp__<UUID>__*`, não as use.
 5. Leitura (`list_tables`, `execute_sql` com `SELECT`) também só no projeto confirmado.
 6. Depois de DDL, rode `get_advisors` (tipo **security**) **no projeto confirmado** e trate o que for novo.
 
@@ -49,7 +49,7 @@ Modelos para ler (não copiar): `supabase/migrations/044_messaging_limit_and_quo
 ## Verificação e diagnóstico
 
 - `scripts/verify-039-rls.sql`, `scripts/verify-040-media.sql`: conferências (não migração) para o SQL Editor do projeto confirmado; a PARTE A só lê.
-- Supabase por cliente / consolidar projetos: [PRD 077](../prd-077-supabase-dedicado-por-cliente.md) (§2.2: como o código fala com o banco).
+- Outra URL com outro Supabase (instância por URL): [PRD 077](../prd-077-supabase-dedicado-por-cliente.md) (§2: como o código fala com o banco) e [SPEC 080](../spec-080-instancia-por-url.md).
 
 ## Armadilha conhecida
 

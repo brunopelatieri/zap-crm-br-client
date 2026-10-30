@@ -203,8 +203,8 @@ Ordem recomendada, do menor para o maior raio de impacto:
    **cuidado**: isso pode colidir com o índice único `(account_id, phone_normalized)` se dois
    registros diferentes normalizarem para o mesmo valor (ex.: um com `+`, outro sem, do mesmo
    número). Rodar `merge_duplicate_contacts()` (migração 022) de novo antes do `UPDATE`, ou tratar
-   colisões manualmente. **Confirmar com o mantenedor antes de aplicar em qualquer um dos três
-   projetos Supabase (vn/rs/jh)** — ver `AGENTS.md`.
+   colisões manualmente. **Confirmar com o mantenedor antes de aplicar no projeto Supabase
+   confirmado** — ver `AGENTS.md`.
 4. **(Opcional, decisão de produto)** Adicionar CHECK constraint em `contacts.phone` garantindo
    dígitos-only (`phone ~ '^[1-9]\d{6,14}$'` ou similar) — fecha a lacuna do item 5. Exige a
    migração de dados do passo 3 concluída primeiro, senão quebra em produção.
