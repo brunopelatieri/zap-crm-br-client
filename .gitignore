@@ -8,6 +8,8 @@
 # dela, que a regra `*.md` acima esconderia. A imagem Docker não leva docs/:
 # o .dockerignore é uma allowlist que nunca a inclui.
 !/docs/**/*.md
+!/CLAUDE.md
+!/AGENTS.md
 # Stack de produção com segredos reais (chaves do Supabase, ENCRYPTION_KEY,
 # chave global da Evolution) — NUNCA versionar. Fica por último para vencer a
 # exceção acima (e o .gitignore dentro da pasta, que viaja com ela, repete a
@@ -58,7 +60,11 @@ yarn-error.log*
 next-env.d.ts
 
 # Claude Code local — credenciais e configurações locais
-/.claude
+/.claude/*
+!/.claude/rules/
+!/.claude/skills/
+!/.claude/rules/**/*.md
+!/.claude/skills/**/*.md
 .claude/mcp.json
 .mcp.json
 

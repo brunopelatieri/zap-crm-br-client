@@ -1,2 +1,10 @@
 !/docs
 !/docs/**
+!/supabase
+!/supabase/**
+!/scripts
+!/scripts/**
+!/n8n_automation
+!/n8n_automation/**
+!/AGENTS.md
+!/CLAUDE.md
