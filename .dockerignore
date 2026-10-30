@@ -6,6 +6,10 @@
 # preenchida, dumps do banco) vira camada visível para quem baixar a imagem.
 # Arquivo novo na raiz NÃO entra sozinho — se o build quebrar por falta de um,
 # libere-o aqui de propósito.
+#
+# docs/ (inclusive docs/deploy), supabase/, n8n_automation/, scripts/,
+# mcp-server/ e os .md da raiz ficam de fora por não estarem liberados abaixo —
+# versionar docs/ no git não muda nada aqui.
 
 *
 
@@ -35,3 +39,11 @@
 **/.DS_Store
 **/node_modules
 **/.next
+
+# Testes (vitest) não vão para produção: fora do contexto, mudar um teste não
+# invalida o cache do `next build`, e o type-check do build fica menor.
+# (A rota src/app/api/ai/test/ é uma PASTA, não casa com `*.test.*`.)
+**/*.test.ts
+**/*.test.tsx
+**/__tests__
+**/*.md
