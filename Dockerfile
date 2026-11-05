@@ -58,22 +58,38 @@ RUN --mount=type=cache,target=/app/.next/cache npm run build
 # minificador resolveu no build subiria "configurada" mas ignorando a stack.
 RUN node docker/runtime-env.mjs --verify-build
 
-# O npm instala o libvips do `sharp` (otimização do next/image) para glibc E para
-# musl; a imagem final é Debian (glibc), então a variante musl (~17 MB) é peso morto.
-RUN rm -rf .next/standalone/node_modules/@img/*-linuxmusl-*
+# O `sharp` (com o libvips, ~18 MB) só serve ao otimizador do next/image, que a saída
+# standalone desliga (`images.unoptimized` no next.config.ts). Ele continua no pacote
+# porque o rastreio do Next o inclui mesmo sem uso.
+RUN rm -rf .next/standalone/node_modules/sharp .next/standalone/node_modules/@img
+
+# ---- node-bin ----
+# O binário oficial do Node sem os símbolos de depuração nativos (~18 MB a menos).
+# Não afeta o Node nem o stack trace do JavaScript; só o backtrace de um crash em C++.
+FROM node:22-bookworm-slim AS node-bin
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends binutils \
+ && strip --strip-all /usr/local/bin/node \
+ && /usr/local/bin/node --version
 
 # ---- run ----
-# Mesma base Debian da node:22-bookworm-slim, mas SÓ com o binário do Node (que já
-# embute OpenSSL, ICU completo para pt-BR e as CAs da Mozilla). npm, npx, corepack
-# e yarn ficam de fora: o servidor não os usa, e cada um é superfície de CVE a menos.
-FROM debian:bookworm-slim AS run
-COPY --from=deps /usr/local/bin/node /usr/local/bin/node
+# Só o que o Node precisa do sistema: glibc, libstdc++ e tzdata, do mesmo Debian 12
+# da node:22-bookworm-slim. O binário já embute OpenSSL, ICU completo para pt-BR e as
+# CAs da Mozilla. npm, npx, corepack, apt e perl ficam de fora: cada um é superfície
+# de CVE a menos.
+FROM gcr.io/distroless/cc-debian12 AS run
+
+# O distroless não tem shell, mas o CMD abaixo, o console do Portainer e um eventual
+# healthcheck da stack dependem de um. BusyBox estático: ~1 MB e sem dependências.
+COPY --from=busybox:1.37.0-musl /bin /bin
+COPY --from=node-bin /usr/local/bin/node /usr/local/bin/node
+
 # Usuário `node` com o mesmo UID/GID 1000 da imagem oficial (volumes e permissões
-# continuam iguais) + diretório de cache de imagens/ISR gravável por ele.
-RUN groupadd --gid 1000 node \
- && useradd --uid 1000 --gid node --shell /bin/sh --create-home node \
- && mkdir -p /app/.next/cache \
- && chown -R node:node /app
+# continuam iguais) + diretório de cache de ISR gravável por ele.
+RUN echo 'node:x:1000:1000::/home/node:/bin/sh' >> /etc/passwd \
+ && echo 'node:x:1000:' >> /etc/group \
+ && mkdir -p /home/node /app/.next/cache \
+ && chown -R node:node /home/node /app
 
 WORKDIR /app
 ENV NODE_ENV=production \

@@ -81,6 +81,12 @@ const nextConfig: NextConfig = {
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
 
   images: {
+    /**
+     * A imagem Docker não carrega o `sharp` (~18 MB). Ele atenderia só ao
+     * logo da sidebar, um WebP de 4 KB: toda a mídia da aplicação já usa
+     * `unoptimized`, porque vem de URL assinada ou de host externo.
+     */
+    unoptimized: process.env.NEXT_OUTPUT === 'standalone',
     remotePatterns: [
       {
         protocol: 'https',
