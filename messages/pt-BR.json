@@ -3205,6 +3205,8 @@
       "headerSamplePlaceholder": "Valor de exemplo para '{{1}}' (obrigatório para revisão da Meta)",
       "uploadImage": "Enviar imagem",
       "uploadHint": "JPEG ou PNG, ≤5 MB",
+      "headerPreviewAlt": "Prévia da imagem do cabeçalho",
+      "headerPreviewUnavailable": "Não foi possível carregar a prévia da imagem. Confira o link ou envie a imagem de novo.",
       "mediaUrlPlaceholder": "https://… (ou cole um link público {format})",
       "imageHint": "Envie um JPEG/PNG (≤5 MB, recomendado ≥800×418 px) ou cole um link público HTTPS — nós enviamos para revisão da Meta automaticamente.",
       "mediaHint": "Precisa ser um link HTTPS publicamente acessível. A Meta o busca uma vez durante a revisão, então precisa continuar acessível por ~24h.",

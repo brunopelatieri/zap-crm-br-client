@@ -19,6 +19,7 @@ import {
   uploadAccountMedia,
   MEDIA_MAX_BYTES_BY_KIND,
 } from '@/lib/storage/upload-media';
+import { useMediaSrc } from '@/lib/storage/use-media-src';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -163,6 +164,40 @@ async function parseJsonResponse(
   return res.json().catch(() => {
     throw new Error(`Unexpected response (HTTP ${res.status})`);
   });
+}
+
+/**
+ * Prévia da imagem do cabeçalho no formulário do template.
+ *
+ * O campo guarda a URL do bucket `chat-media`, privado desde a migração
+ * 040, ou um link externo colado pelo usuário. Só `useMediaSrc` sabe
+ * assinar o primeiro caso; um `<img>` direto nessa URL aparece quebrado.
+ */
+function HeaderImagePreview({ url }: { url: string }) {
+  const t = useTranslations('Settings.templates');
+  const { src, loading, error } = useMediaSrc(url);
+  // Guarda QUAL `src` falhou: ao trocar o link, a nova tentativa recomeça.
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+
+  if (loading) {
+    return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+  }
+  if (error || !src || brokenSrc === src) {
+    return (
+      <p className="text-muted-foreground text-[11px]">
+        {t('headerPreviewUnavailable')}
+      </p>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={t('headerPreviewAlt')}
+      onError={() => setBrokenSrc(src)}
+      className="border-border max-h-40 rounded-md border object-contain"
+    />
+  );
 }
 
 export function TemplateManager() {
@@ -1175,14 +1210,10 @@ export function TemplateManager() {
                     }
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                   />
-                  {form.header_format === 'image' && form.header_media_url && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={form.header_media_url}
-                      alt="Header sample"
-                      className="border-border max-h-28 rounded-md border object-contain"
-                    />
-                  )}
+                  {form.header_format === 'image' &&
+                    form.header_media_url.trim() && (
+                      <HeaderImagePreview url={form.header_media_url.trim()} />
+                    )}
                   <p className="text-muted-foreground text-[11px] leading-relaxed">
                     {form.header_format === 'image'
                       ? t('imageHint')
