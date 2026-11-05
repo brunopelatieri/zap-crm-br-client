@@ -32,7 +32,15 @@ export async function ensureImageHeaderHandle(
    *
    * Ausente para URL externa colada pelo usuário, que já é pública.
    */
-  fetchUrl?: string | null
+  fetchUrl?: string | null,
+  /**
+   * `whatsapp_config.app_id` do canal que está enviando (migração 092).
+   *
+   * A sessão de upload é aberta no App dono do token. O token é por
+   * canal, então um número sob outro App da Meta precisa do App ID dele;
+   * `META_APP_ID` é só o App padrão da instância.
+   */
+  channelAppId?: string | null
 ): Promise<void> {
   if (payload.header_type !== 'image') return;
   if (payload.header_handle) return; // already have one
@@ -40,10 +48,10 @@ export async function ensureImageHeaderHandle(
 
   const downloadUrl = fetchUrl || payload.header_media_url;
 
-  const appId = process.env.META_APP_ID;
+  const appId = channelAppId?.trim() || process.env.META_APP_ID;
   if (!appId) {
     throw new Error(
-      'Image-header templates need META_APP_ID set (used for Meta’s Resumable Upload). Add it to your environment, or remove the image header.'
+      'Image-header templates need a Meta App ID (used for Meta’s Resumable Upload). Set the App ID on this WhatsApp number, set META_APP_ID in your environment, or remove the image header.'
     );
   }
 

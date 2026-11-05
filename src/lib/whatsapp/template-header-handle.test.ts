@@ -79,6 +79,41 @@ describe('ensureImageHeaderHandle', () => {
     expect(p.header_handle).toBe('HANDLE123');
   });
 
+  // Migração 092: token e App são do canal. Um número sob outro App da
+  // Meta abre a sessão de upload no App dele, não no padrão da instância.
+  it('prefers the channel App ID over META_APP_ID', async () => {
+    vi.stubEnv('META_APP_ID', 'env-app');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse())
+    );
+    await ensureImageHeaderHandle(payload(), 'tok', null, 'channel-app');
+    expect(vi.mocked(uploadResumableMedia).mock.calls[0][0].appId).toBe(
+      'channel-app'
+    );
+  });
+
+  it('falls back to META_APP_ID when the channel has no App ID', async () => {
+    vi.stubEnv('META_APP_ID', 'env-app');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse())
+    );
+    await ensureImageHeaderHandle(payload(), 'tok', null, null);
+    expect(vi.mocked(uploadResumableMedia).mock.calls[0][0].appId).toBe(
+      'env-app'
+    );
+  });
+
+  it('uses the channel App ID when META_APP_ID is unset', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse())
+    );
+    await ensureImageHeaderHandle(payload(), 'tok', null, 'channel-app');
+    expect(uploadResumableMedia).toHaveBeenCalledOnce();
+  });
+
   it('rejects a non-image content type', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
     vi.stubGlobal(

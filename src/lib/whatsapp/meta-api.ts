@@ -604,7 +604,10 @@ export async function sendTemplateMessage(
 // See https://developers.facebook.com/docs/graph-api/guides/upload
 
 export interface UploadResumableMediaArgs {
-  /** Meta App id (env META_APP_ID) — resumable upload is app-scoped. */
+  /**
+   * Meta App id — resumable upload is app-scoped. Comes from the channel
+   * (`whatsapp_config.app_id`), falling back to env META_APP_ID.
+   */
   appId: string;
   accessToken: string;
   fileName: string;

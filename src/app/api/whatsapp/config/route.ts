@@ -21,6 +21,7 @@ import {
   nextCloudChannelName,
   reconcileCloudChannel,
   removeCloudChannel,
+  resolveAppIdOnSave,
   resolveSaveTarget,
   saveCloudConfigRow,
   updateCloudChannelOnSave,
@@ -349,6 +350,7 @@ export async function GET(request: Request) {
       is_default: c.isDefault,
       phone_number_id: c.phoneNumberId,
       waba_id: c.wabaId,
+      app_id: c.appId,
       registered_at: c.registeredAt,
       last_registration_error: c.lastRegistrationError,
       subscribed_apps_at: c.subscribedAppsAt,
@@ -435,6 +437,7 @@ export async function POST(request: Request) {
       access_token,
       verify_token,
       app_secret,
+      app_id,
       pin,
       name,
     } = body;
@@ -493,11 +496,13 @@ export async function POST(request: Request) {
     // Antes da Meta, de propósito: é o alvo que decide se a quota do
     // plano sequer precisa ser consultada.
     let target;
+    let appId: string | null;
     try {
       target = await resolveSaveTarget(supabase, accountId, {
         channelId: typeof channel_id === 'string' ? channel_id : null,
         phoneNumberId: phone_number_id,
       });
+      appId = resolveAppIdOnSave(app_id, target.config?.app_id, target.mode);
     } catch (err) {
       if (err instanceof CloudChannelError) {
         return NextResponse.json(
@@ -719,6 +724,7 @@ export async function POST(request: Request) {
       access_token: encryptedAccessToken,
       verify_token: encryptedVerifyToken,
       app_secret: encryptedAppSecret,
+      app_id: appId,
       status: registrationError ? 'disconnected' : 'connected',
       connected_at: registrationError ? null : now,
       registered_at: registrationError ? null : registeredAt,

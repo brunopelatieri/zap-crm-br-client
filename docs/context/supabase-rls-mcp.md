@@ -31,7 +31,7 @@
 
 ## Privilégios de função em `public` (D-19)
 
-O Supabase mantém `ALTER DEFAULT PRIVILEGES` que concede `EXECUTE` **nominalmente** a `anon` e `authenticated` em toda função nova de `public`. Por isso `REVOKE … FROM PUBLIC` sozinho **não** fecha a função.
+O Supabase mantém `ALTER DEFAULT PRIVILEGES` que concede `EXECUTE` **nominalmente** a `anon` e `authenticated` em toda função nova de `public`. Por isso, até a 091, `REVOKE … FROM PUBLIC` sozinho **não** fechava a função. A 091 tira os dois do padrão, mas toda função ainda nasce com `EXECUTE` implícito de `PUBLIC`: sem o `REVOKE … FROM PUBLIC` ela fica aberta, e só o advisor pega. A 091 só vale em banco onde foi aplicada, então mantenha os dois comandos abaixo.
 
 - **Toda função nova:** `REVOKE ALL ON FUNCTION … FROM PUBLIC;` **e** `… FROM anon;` (dois comandos).
 - **A sessão do usuário chama** (RPC da rota ou do browser): `GRANT EXECUTE … TO authenticated, service_role;` — o escopo de conta é uma guarda no corpo.
@@ -43,12 +43,15 @@ Modelos para ler (não copiar): `supabase/migrations/044_messaging_limit_and_quo
 ## Policies com `is_account_member` / `can_*` (D-20)
 
 - Escreva policy que usa `is_account_member(…)`, `can_access_conversation`, `can_write_conversation` ou `can_access_contact_notes` com `TO authenticated`.
-- Isso é **defesa em profundidade**, não garantia de ACL: essas funções só têm `GRANT EXECUTE … TO authenticated, service_role` (017, 069, 039) e **nenhum** `REVOKE` de `PUBLIC`/`anon` nas migrações — `anon` provavelmente ainda executa. Quem barra hoje é `auth.uid()`, nulo para `anon`.
+- A 090 revoga o `EXECUTE` de `anon` nesses predicados. Onde ela foi aplicada, uma tabela que `anon` precise ler **não pode** ter policy `PUBLIC` que chame um deles: o Postgres checa `EXECUTE` de toda função das policies permissivas ao iniciar o executor, sem curto-circuito pelo `OR`, e o `SELECT` anônimo dá `42501`. Foi o caso de `plans_select_own` (corrigida na 090). Nunca devolva o `EXECUTE` a `anon`: mova a policy para `TO authenticated`.
+- Em tabela de tenant, o `SELECT` anônimo passa de 0 linhas para `42501`. Continua fail-closed.
+- Tabela e sequência novas não dão nada a `anon` depois da 091: leitura sem login exige `GRANT SELECT … TO anon` na própria migração.
 - Antes de afirmar algo sobre essa ACL, verifique no projeto escolhido: `SELECT has_function_privilege('anon', 'public.is_account_member(uuid, account_role_enum)', 'EXECUTE');` (idem para as `can_*`). Fechar a ACL é migração própria, com confirmação.
 
 ## Verificação e diagnóstico
 
 - `scripts/verify-039-rls.sql`, `scripts/verify-040-media.sql`: conferências (não migração) para o SQL Editor do projeto confirmado; a PARTE A só lê.
+- `scripts/verify-090-rpc-grants.sql`: só lê. Mostra o que `anon` executa, o privilégio padrão e as policies de `plans`, antes da 090 e depois da 091.
 - Outra URL com outro Supabase (instância por URL): [PRD 077](../prd-077-supabase-dedicado-por-cliente.md) (§2: como o código fala com o banco) e [SPEC 080](../spec-080-instancia-por-url.md).
 
 ## Armadilha conhecida

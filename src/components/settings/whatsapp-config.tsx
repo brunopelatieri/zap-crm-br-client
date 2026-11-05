@@ -84,6 +84,7 @@ interface CloudNumber {
   is_default: boolean;
   phone_number_id: string | null;
   waba_id: string | null;
+  app_id: string | null;
   registered_at: string | null;
   last_registration_error: string | null;
   subscribed_apps_at: string | null;
@@ -577,6 +578,7 @@ function CloudNumberDetail({
   const [wabaId, setWabaId] = useState(initial?.waba_id || '');
   const [accessToken, setAccessToken] = useState(initial ? MASKED_TOKEN : '');
   const [verifyToken, setVerifyToken] = useState('');
+  const [appId, setAppId] = useState(initial?.app_id || '');
   const [appSecret, setAppSecret] = useState('');
   const [showAppSecret, setShowAppSecret] = useState(false);
   const [pin, setPin] = useState('');
@@ -695,6 +697,7 @@ function CloudNumberDetail({
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim() || null,
         verify_token: verifyToken.trim() || null,
+        app_id: appId.trim() || null,
         app_secret: appSecret.trim() || null,
         pin: pin.trim() || null,
         // Idempotência (§5): com o id, o salvamento atualiza ESTE
@@ -1185,6 +1188,25 @@ function CloudNumberDetail({
               />
               <p className="text-muted-foreground text-xs">
                 {t('webhookVerifyTokenHint')}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">
+                {t('appId')}
+                <span className="text-muted-foreground ml-1">
+                  {t('optional')}
+                </span>
+              </Label>
+              <Input
+                inputMode="numeric"
+                placeholder={t('appIdPlaceholder')}
+                value={appId}
+                onChange={(e) => setAppId(e.target.value.replace(/\D/g, ''))}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {t('appIdHint')}
               </p>
             </div>
 

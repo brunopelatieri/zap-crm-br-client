@@ -60,7 +60,7 @@ type ChannelRow = any;
  * daqui. Nenhum dos dois carrega segredo.
  */
 export const CONFIG_DECISION_COLUMNS =
-  'id, channel_id, phone_number_id, waba_id, registered_at, status';
+  'id, channel_id, phone_number_id, waba_id, app_id, registered_at, status';
 
 /**
  * Onde este salvamento vai cair. Resolvido ANTES de falar com a Meta,
@@ -102,6 +102,40 @@ export class CloudChannelError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * O `app_id` que este salvamento grava (migração 092).
+ *
+ * Diferente do `app_secret`, a tela pré-preenche este campo, então um
+ * valor vazio é uma escolha do operador: "volte ao `META_APP_ID` da
+ * instância". Só duas situações preservam o que está salvo:
+ *
+ *   - campo ausente: bundle antigo em cache, que não conhece o campo;
+ *   - reativação (`readopt`): o canal desativado não aparece na lista, e
+ *     o formulário de reconexão abre em branco sem o operador ter decidido
+ *     nada. É o mesmo cuidado que a rota tem com o `waba_id` (D-12).
+ */
+export function resolveAppIdOnSave(
+  input: unknown,
+  existing: string | null | undefined,
+  mode: SaveTarget['mode']
+): string | null {
+  const current = existing ?? null;
+  if (input === undefined) return current;
+
+  const value = typeof input === 'string' ? input.trim() : input;
+  if (value === null || value === '') {
+    return mode === 'readopt' ? current : null;
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    throw new CloudChannelError(
+      'app_id must contain digits only.',
+      400,
+      'invalid_app_id'
+    );
+  }
+  return value;
 }
 
 /**

@@ -478,6 +478,8 @@ export interface WhatsAppConfig {
   waba_id?: string;
   access_token: string;
   verify_token?: string;
+  /** Meta App id for this number. NULL falls back to env META_APP_ID. */
+  app_id?: string | null;
   status: 'connected' | 'disconnected';
   connected_at?: string;
   /**

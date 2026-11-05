@@ -76,6 +76,8 @@ export interface CloudChannelSummary {
    */
   phoneNumberId: string | null;
   wabaId: string | null;
+  /** App da Meta deste número; `null` usa o `META_APP_ID` da instância. */
+  appId: string | null;
   /** `POST /register` da Meta já concluído neste número. */
   registeredAt: string | null;
   lastRegistrationError: string | null;
@@ -97,7 +99,7 @@ export interface CloudChannelSummary {
  * que as colunas são nomeadas uma a uma, e não `*`.
  */
 const CONFIG_SUMMARY_COLUMNS =
-  'channel_id, phone_number_id, waba_id, registered_at, last_registration_error, subscribed_apps_at, broadcast_cooldown_days, messaging_limit_tier';
+  'channel_id, phone_number_id, waba_id, app_id, registered_at, last_registration_error, subscribed_apps_at, broadcast_cooldown_days, messaging_limit_tier';
 
 /**
  * Todos os números oficiais da conta, **do padrão para o mais novo**.
@@ -164,6 +166,7 @@ export async function listCloudChannels(
         isDefault: Boolean(c.is_default),
         phoneNumberId: (config?.phone_number_id ?? null) as string | null,
         wabaId: (config?.waba_id ?? null) as string | null,
+        appId: (config?.app_id ?? null) as string | null,
         registeredAt: (config?.registered_at ?? null) as string | null,
         lastRegistrationError: (config?.last_registration_error ?? null) as
           string | null,

@@ -169,6 +169,7 @@ export async function PATCH(
       // OWN `waba_id`, never the account's default channel: on a
       // multi-WABA account those can be two different numbers.
       let accessToken: string;
+      let channelAppId: string | null;
       try {
         const { config } = await resolveCloudConfigForWaba(
           supabase,
@@ -176,6 +177,7 @@ export async function PATCH(
           (existing.waba_id as string | null) ?? null
         );
         accessToken = decrypt(config.access_token);
+        channelAppId = (config.app_id as string | null) ?? null;
       } catch (e) {
         if (e instanceof ChannelNotConfiguredError) {
           // `read_failed` é a CONSULTA falhando, não "sem WhatsApp
@@ -209,7 +211,12 @@ export async function PATCH(
           supabase,
           payload.header_media_url
         );
-        await ensureImageHeaderHandle(payload, accessToken, headerFetchUrl);
+        await ensureImageHeaderHandle(
+          payload,
+          accessToken,
+          headerFetchUrl,
+          channelAppId
+        );
       } catch (e) {
         return NextResponse.json(
           {

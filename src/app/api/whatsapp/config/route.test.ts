@@ -662,6 +662,54 @@ describe('POST — idempotência e criação (§5)', () => {
     expect(state.whatsapp_config[0].app_secret).toBe('enc(secret-app-c)');
   });
 
+  // Migração 092: o App ID é pré-preenchido na tela, então vazio é uma
+  // escolha ("volte ao padrão da instância"), diferente do App Secret.
+  describe('App ID do canal', () => {
+    const base = {
+      phone_number_id: '892352847302912',
+      access_token: 'token-novo',
+    };
+
+    it('grava o App ID enviado', async () => {
+      await post({ ...base, app_id: ' 1497613362044778 ' });
+
+      expect(state.whatsapp_config[0].app_id).toBe('1497613362044778');
+    });
+
+    it('campo ausente preserva o valor salvo', async () => {
+      state.whatsapp_config[0].app_id = '1497613362044778';
+
+      await post(base);
+
+      expect(state.whatsapp_config[0].app_id).toBe('1497613362044778');
+    });
+
+    it('vazio volta ao App padrão da instância', async () => {
+      state.whatsapp_config[0].app_id = '1497613362044778';
+
+      await post({ ...base, app_id: null });
+
+      expect(state.whatsapp_config[0].app_id).toBeNull();
+    });
+
+    it('vazio ao reativar um canal desativado preserva o valor salvo', async () => {
+      state.channels[0].status = 'disabled';
+      state.whatsapp_config[0].access_token = '';
+      state.whatsapp_config[0].app_id = '1497613362044778';
+
+      await post({ ...base, app_id: null });
+
+      expect(state.whatsapp_config[0].app_id).toBe('1497613362044778');
+    });
+
+    it('valor que não é só dígitos é 400 e não fala com a Meta', async () => {
+      const res = await post({ ...base, app_id: '149761-abc' });
+
+      expect(res.status).toBe(400);
+      expect(verifyPhoneNumber).not.toHaveBeenCalled();
+    });
+  });
+
   it('canal explícito de outra conta é 404', async () => {
     state.channels[0].account_id = 'acct-2';
     const res = await post({

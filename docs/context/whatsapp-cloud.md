@@ -22,6 +22,7 @@ UI: `src/components/broadcasts/`, `src/components/interactive/`, abas de templat
 5. **Janela de 24 h** vem de `session-window.ts` (minutos; fechamento exclusivo) — não recalcule no componente. Fora dela só template aprovado (`template-approval.ts` guarda `status = 'APPROVED'`).
 6. **Token é criptografado** (`encryption.ts`, AES-GCM; CBC só lê legado). Nunca logue nem devolva ao navegador.
 7. **Graph:** `META_API_VERSION` em `meta-api.ts` é a versão geral; o monitor usa constante **própria** (`billing-graph.ts`, D-3 da SPEC 076). Não unifique sem validar o payload.
+8. **App da Meta também é do canal:** `whatsapp_config.app_id` (092) e `app_secret` (073) ficam nulos no App padrão da instância (`META_APP_ID`, `META_APP_SECRET`) e são preenchidos quando o número está sob outro App. O `app_id` abre o Resumable Upload do cabeçalho de imagem (`ensureImageHeaderHandle`); App ID errado ou de outro App dá `(#100) Unsupported post request` com subcode 33, antes de o template existir.
 
 ## Disparos
 

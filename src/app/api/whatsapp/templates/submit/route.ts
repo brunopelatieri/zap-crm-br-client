@@ -283,7 +283,12 @@ export async function POST(request: Request) {
           supabase,
           payload.header_media_url
         );
-        await ensureImageHeaderHandle(payload, accessToken, headerFetchUrl);
+        await ensureImageHeaderHandle(
+          payload,
+          accessToken,
+          headerFetchUrl,
+          config.app_id
+        );
       } catch (e) {
         return NextResponse.json(
           {
