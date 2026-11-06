@@ -1166,7 +1166,10 @@ describe('sendAndPersistOutbound', () => {
       ).rejects.toBeInstanceOf(ColdSendLimitError);
 
       expect(qrAdapterStub.sendText).not.toHaveBeenCalled();
-      expect(db.ops.some((o) => o.table === 'messages')).toBe(false);
+      // A leitura da última mensagem do contato acontece; a bolha, não.
+      expect(
+        db.ops.some((o) => o.table === 'messages' && o.verb === 'insert')
+      ).toBe(false);
     });
 
     it('envio frio dentro do teto: entrega e grava origin=engine em channel_cold_sends', async () => {
@@ -1211,12 +1214,14 @@ describe('sendAndPersistOutbound', () => {
     });
 
     it('conversa viva (não fria): entrega e NÃO grava consumo', async () => {
+      // O caso real do QRCode: `last_customer_message_at` é NULL para
+      // sempre (só canal com janela o grava), e o contato escreveu há
+      // uma hora. Lido da âncora, isto contava como frio e consumia a
+      // cota a cada resposta de automação/flow/IA.
       const db = dbWithQrConversation({
-        'conversations.select': {
+        'messages.select': {
           data: {
-            channel_id: 'chan-qr-1',
-            // Dentro das últimas `silenceHours` — não é frio.
-            last_customer_message_at: new Date().toISOString(),
+            created_at: new Date(Date.now() - 3_600_000).toISOString(),
           },
           error: null,
         },
@@ -1237,11 +1242,54 @@ describe('sendAndPersistOutbound', () => {
         },
       });
 
+      expect(qrAdapterStub.sendText).toHaveBeenCalledTimes(1);
+      // O consumo iria por supabaseAdmin() — conferir só `db` passaria
+      // mesmo com o bug.
       expect(
-        db.ops.some(
+        [...db.ops, ...adminDb.ops].some(
           (o) => o.table === 'channel_cold_sends' && o.verb === 'insert'
         )
       ).toBe(false);
+      const inbound = db.ops.find(
+        (o) => o.table === 'messages' && o.verb === 'select'
+      );
+      expect(inbound?.filters).toContainEqual([
+        'eq',
+        'sender_type',
+        'customer',
+      ]);
+    });
+
+    it('contato calado além de silenceHours: frio, e o teto estourado nega', async () => {
+      const db = dbWithQrConversation({
+        'messages.select': {
+          data: {
+            created_at: new Date(
+              Date.now() - (COLD_SEND_DEFAULTS.silenceHours + 1) * 3_600_000
+            ).toISOString(),
+          },
+          error: null,
+        },
+        'channel_cold_sends.select': { count: COLD_SEND_DEFAULTS.perDay },
+      });
+
+      await expect(
+        sendAndPersistOutbound({
+          db: db.client,
+          accountId: 'acct-1',
+          origin: 'automation',
+          conversationId: 'conv-1',
+          contactId: 'contact-1',
+          content: { kind: 'text', text: 'oi' },
+          persist: {
+            senderType: 'bot',
+            contentType: 'text',
+            contentText: 'oi',
+            previewText: 'oi',
+          },
+        })
+      ).rejects.toBeInstanceOf(ColdSendLimitError);
+      expect(qrAdapterStub.sendText).not.toHaveBeenCalled();
     });
 
     it('canal Cloud: não paga a consulta extra nem toca channel_cold_sends', async () => {
@@ -1322,12 +1370,13 @@ describe('sendAndPersistOutbound', () => {
       );
       expect(insert?.payload).toMatchObject({ channel_id: 'chan-qr-1' });
 
-      // E a `conversations` consultada por `channel_id` NUNCA acontece
-      // — a única leitura de `conversations` é a âncora do teto de
-      // envio frio, sem filtro de canal envolvido.
+      // E a `conversations` consultada por `channel_id` NUNCA acontece.
+      // (O teto de envio frio lê a última mensagem do contato em
+      // `messages`, não a âncora de `conversations` — então nenhuma
+      // leitura de `conversations` sobra neste caminho.)
       expect(
         db.ops.some((o) => o.table === 'conversations' && o.verb === 'select')
-      ).toBe(true);
+      ).toBe(false);
 
       // SPEC 065 §11 — `channel` explícito é sempre `'resource'`: é o
       // desvio ESCOLHENDO ignorar o canal da conversa, não a conversa

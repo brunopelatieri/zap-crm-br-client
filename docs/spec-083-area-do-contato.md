@@ -1,0 +1,595 @@
+# SPEC 083 — Área do contato: porte do Valen Ranch para o ZAP CRM BR, com liberação por plano
+
+**PRD:** [`docs/prd-082-area-do-contato.md`](./prd-082-area-do-contato.md)
+**Origem:** Valen Ranch, `main` em `e778c97` (SPEC 084, roteiro de teste manual da 084 e SPEC 085 daquele repositório)
+**Status:** **F1 feita no código em 2026-11-05** — porte por arquivo (§10.1), guarda de plano (§8.4, `plan-gate.ts` + 403 nas rotas), adaptações (§8.3), migrações 093–096 e seeds escritos localmente (fora do git, **não aplicados no `vn`**), `INDEX.md` e `auth-e-conta.md`. Gate local: `typecheck` ✓ · `i18n:check` ✓ (3.682 chaves) · `lint` 0 erros / 7 avisos pré-existentes na árvore versionada · `test` 299 arquivos / 4.354 testes ✓ · `format:check` só o baseline de `docs/` · `build` ✓ com as 15 rotas de `/area` no manifesto. Próxima fase: F2 (§5.1, §5.2, §5.5 no `vn`, com confirmação do mantenedor) · **Data:** 2026-11-05
+**Pré-requisito em produção:** [`SPEC 081`](./spec-081-aperto-de-rpcs-definer-e-privilegios-padrao.md) aplicada no `vn` (PRD 082 D-8)
+**Migrações:** `093_contact_portal.sql`, `094_contact_portal_public_account.sql`, `095_contact_portal_limit_locks.sql` (portadas) e `096_contact_portal_plan_gate_strict.sql` (só do ZAP)
+
+> `/supabase` e `/scripts` estão no `.gitignore`: migrações e seeds são copiados à mão e não entram em commit. Só esta SPEC, o PRD e os `.md` de contexto vão para o Git.
+
+---
+
+## 1. Resumo
+
+O contato de uma conta entra em `/area` com telefone e senha. A credencial é **do contato** (uma por conta), fica num schema Postgres próprio e usa bcrypt. A sessão é um token opaco num cookie `Path=/area`. O contato **nunca** vira usuário do Supabase Auth: não ganha `auth.users`, `profiles`, JWT nem papel Postgres, então nenhuma policy ou grant da CRM o alcança.
+
+O código de primeiro acesso e de recuperação sai pelo WhatsApp da própria conta e nunca fica em claro no banco do inbox. A entrega é **a porta**: entrar, primeiro acesso, recuperação, escolher conta, painel vazio e minha conta. Nenhum recurso dentro da área logada (PRD 082 §3.1 e D-5).
+
+O que muda em relação ao Ranch:
+
+1. **Liberação por plano** (PRD 082 D-1…D-4): chave `contact_portal_enabled`, guarda fail-closed `plan_feature_strict()`, aviso na aba, 403 na rota, resposta neutra na área. §5.4 e §8.4.
+2. **Numeração:** migrações 093–095 (o Ranch usa 094–096) e uma quarta, 096, só do ZAP.
+3. **Adaptações de nome** (cookie, `sessionStorage`, textos). §8.3.
+
+A SPEC 085 do Ranch entra junto (§9): toda página passa a sair com `Cache-Control: private, no-store`. Sem isso, a página de um contato pode ser servida a outro por um cache compartilhado.
+
+## 2. Estado de partida (medido em 2026-11-05)
+
+### 2.1. Fatos
+
+| Fato                  | Valor                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ponto comum           | Commit `ea146e5` (2026-10-22), ancestral dos dois repositórios                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `src/` e `messages/`  | Desde `ea146e5`, o ZAP mudou `src/` só em `37af386` e `f8a5c75` (App ID da Meta por canal, `src/lib/whatsapp/`); o resto é docs, contexto e Docker                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Dependências          | `package.json` idêntico. A feature não adiciona pacote                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Variáveis de ambiente | Nenhuma nova. `NEXT_PUBLIC_SITE_URL` já é obrigatória na imagem do ZAP e é trocada ao subir por `docker/runtime-env.mjs`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Migrações             | ZAP vai até `092` (`092_whatsapp_config_app_id.sql`); próximo número livre `093` ([`status.md`](./context/status.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `supabase/`           | **Fora do git** nos dois repositórios. Migrações e seeds são copiados à mão; não vêm em patch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `scripts/`            | Fora do git no ZAP (linha `/scripts` do `.gitignore`). Existe no checkout                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Repo público          | `github.com/brunopelatieri/zap-crm-br` está em `938db2f` (2026-09-09) e **não contém** `ea146e5`. O destino desta SPEC é o `zap-crm-br-client`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Modelo de instância   | Um app e um Supabase: `zap.local.ia.br` + `vn`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Registro no `vn`      | Para em 085, embora os objetos de 086–089 e 092 existam. `list_migrations` **não serve** para conferir versão no `vn`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Chaves de recurso     | As cinco de `FEATURE_KEYS` não são aplicadas por nenhuma rota nem RPC (PRD 082 §2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Fonte do porte        | `E:\Documentos\008_Valen\ranch_decrapeted` (checkout do Ranch, **sem `.git`**: o mantenedor renomeou a pasta e a desvinculou do GitHub em 2026-11-05 sem alterar conteúdo, então o disco é o `main` do Ranch). Os hashes citados aqui não são verificáveis nele; a feature está inteira no disco: `src/lib/contact-portal/` (26 arquivos), `src/app/(portal)/` (18), `src/components/contact-portal/` (7), migrações 094–096, seeds com `contact_portal_enabled: false`, `docs/spec-084-area-do-contato.md` e `docs/spec-085-cache-control-das-paginas.md`. `src/` difere do ZAP em 55 arquivos e 12 caminhos só do Ranch; só parte disso é a feature (§10.1) |
+
+### 2.2. Ensaio do porte
+
+Feito num clone temporário do ZAP, sem tocar nos dois repositórios: os 8 commits da feature aplicaram **sem nenhum conflito**, limitados a `src`, `messages` e `next.config.ts`. Todos os arquivos da feature ficaram idênticos aos do Ranch.
+
+Depois das adaptações de cookie, chave de `sessionStorage`, nomes de migração e seeds, o clone deu:
+
+| Etapa          | Resultado                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `typecheck`    | Passou                                                                                                                                                                         |
+| `i18n:check`   | Passou, com 3.676 chaves nos dois idiomas                                                                                                                                      |
+| `lint`         | 0 erros e 7 avisos                                                                                                                                                             |
+| `test`         | 298 arquivos e 4.326 testes passaram, inclusive o contrato de limites contra as migrações renumeradas                                                                          |
+| `build`        | Passou; as 15 rotas de `/area` aparecem no manifesto                                                                                                                           |
+| `format:check` | Falhou em 1.158 arquivos pelo fim de linha do clone (`core.autocrlf=true` com `endOfLine: lf`), não pelo conteúdo. Os `.ts`/`.tsx` alterados passaram com `--end-of-line auto` |
+
+**O ensaio é anterior a este documento e usou `git am`, que não está mais disponível** (o checkout do Ranch perdeu o `.git`; §10.1 troca o método por porte por arquivo). Não cobriu: os commits `37af386` e `f8a5c75` (que tocam `src/lib/whatsapp/meta-api.ts`, também alterado pela feature; esperar conflito pequeno em `rawComponents`), a guarda por plano (§5.4, §8.4), a migração 096, os textos adaptados e o número de chaves i18n final (3.555 hoje + 126 da feature + as do plano = conferir no gate).
+
+**Não ensaiado em banco:** as migrações não rodaram em nenhum banco do ZAP. As pré-condições do §7.1 existem para cobrir isso.
+
+## 3. Decisões de execução
+
+As decisões de produto estão no PRD 082 (D-1…D-11). As que são só de execução:
+
+| ID   | Decisão                                                                                                    | Motivo                                                                                                                                                                                                       |
+| ---- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| E-1  | Elegibilidade numa função só (`account_is_eligible`), reconferida a cada requisição                        | Conta elegível = `plan_feature_strict(account_id, 'contact_portal_enabled')` + `settings.enabled` + `accounts.blocked_at IS NULL`. Acesso elegível = conta elegível + `access.blocked_at IS NULL`. Sem cache |
+| E-2  | Guarda de plano numa migração separada (096), depois das três portadas                                     | 093–095 ficam byte a byte iguais às do Ranch, salvo o aviso de origem; a 096 `CREATE OR REPLACE` só `account_is_eligible` e cria `plan_feature_strict`                                                       |
+| E-3  | Telefone: até dois candidatos (canônico de 13 dígitos e legado de 12); o primeiro é a chave dos contadores | `phone_normalized` é só "tirar não dígitos", e há celulares sem o nono dígito                                                                                                                                |
+| E-4  | Código e senha numa tela só, sem ticket intermediário                                                      | Menos estado entre telas                                                                                                                                                                                     |
+| E-5  | O código nasce no Node (`crypto.randomInt`, seis dígitos), o hash no banco                                 | Em claro, só na memória da rota até o envio                                                                                                                                                                  |
+| E-6  | Custo do bcrypt: senha `bf` 10, código `bf` 8. Sem candidato, roda um `crypt` de mesmo custo               | Tempo constante entre contato e não contato. Medido no Ranch: bf 10 ≈ 74 ms e bf 8 ≈ 18 ms (compute Micro, ~27 logins/s). Medir no `vn`                                                                      |
+| E-7  | IP: primeiro valor de `x-forwarded-for`; o banco guarda só `sha256(ip)`                                    | Limite por IP sem guardar IP                                                                                                                                                                                 |
+| E-8  | Sem variável de ambiente nova; limites são constantes em `src/lib/contact-portal/limits.ts`                | Uma fonte, testável                                                                                                                                                                                          |
+| E-9  | Sem cron novo; vencidos são apagados dentro das próprias funções                                           | Nenhuma linha nova em `cron-jobs.sql`                                                                                                                                                                        |
+| E-10 | Erro de plano na rota da conta: `403` com `{ error: 'FEATURE_NOT_IN_PLAN' }`                               | Mensagem em inglês, como toda `/api/**`; a UI traduz                                                                                                                                                         |
+
+## 4. Comportamento
+
+### 4.1. Jornadas
+
+| Jornada | Gatilho                                                             | Resultado                                                                                 |
+| ------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **J1**  | Usuário clica em "Enviar acesso" na ficha ou no painel da conversa  | Contato recebe código (válido por 24 h) e link, digita o código, cria a senha e entra     |
+| **J2**  | Contato envia a palavra-chave (padrão `SENHA`) ao número da conta   | Resposta com código e link na mesma conversa. Sem automação, flow ou IA                   |
+| **J3**  | Contato abre `/area/c/<código>` ou `/area` e pede o primeiro acesso | Código sai pela conta do endereço; em `/area`, pela conta da conversa mais recente        |
+| **J4**  | Telefone + senha                                                    | Uma conta: painel. Várias: tela de escolher conta                                         |
+| **J5**  | "Esqueci minha senha"                                               | Igual à J3. Redefine só o acesso da conta que entregou o código e encerra as sessões dele |
+
+Quem não é contato, ou cuja conta não é elegível, recebe a mesma resposta: "Se este número tiver acesso, enviamos um código pelo WhatsApp."
+
+### 4.2. Telas (`src/app/(portal)/area/`, fora de busca e sem o shell da CRM)
+
+| URL                                        | Conteúdo                                                                                 |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `/area`                                    | Entrar, genérico                                                                         |
+| `/area/c/<código>`                         | Entrar com o nome da conta. Código inválido dá 404; conta não elegível mostra o genérico |
+| `/area/c/<código>/codigo`                  | Destino do link da mensagem: lê `#c=`, preenche o campo e tira o fragmento da barra      |
+| `/area/primeiro-acesso`, `/area/recuperar` | Telefone → envio do código. Aceitam `?conta=<código>`                                    |
+| `/area/codigo`                             | Código + nova senha + confirmação + aceite, numa tela só                                 |
+| `/area/escolher-conta`                     | Só quando a senha vale em mais de uma conta                                              |
+| `/area/painel`                             | Saudação, nome da conta e bloco "Em breve" (texto genérico, §8.3)                        |
+| `/area/minha-conta`                        | Nome, telefone mascarado, trocar senha, sair, sair de todos os aparelhos                 |
+
+O telefone passa da tela de pedir código para a de digitar código por `sessionStorage`, nunca pela URL. A tela de código usa o medidor de senha e a regra de `password-policy.ts`.
+
+### 4.3. Lado da conta e papéis
+
+| Ação                                                                      | viewer | agent | admin+ |
+| ------------------------------------------------------------------------- | ------ | ----- | ------ |
+| Ver estado (sem acesso, convite enviado, ativo, bloqueado) e último login | sim    | sim   | sim    |
+| Enviar acesso (J1); o botão respeita opt-out                              | não    | sim   | sim    |
+| Bloquear, desbloquear, encerrar sessões                                   | não    | não   | sim    |
+| Configurações → Área do contato                                           | não    | não   | sim    |
+
+- **Configurações:** ligar/desligar, canal dos códigos, template `AUTHENTICATION`, palavra-chave e endereço `/area/c/<código>`. Sem o item no plano: aviso e controles desabilitados (§8.4).
+- **Ficha:** cartão `ContactPortalAccessCard` na aba Detalhes e no painel lateral da conversa. Sem o item no plano: não renderiza.
+- **Console `/admin`:** "ligada/desligada · N contatos com acesso". Checkbox `contact_portal_enabled` no editor de plano e na exceção por conta, sem código novo.
+- **Atividade:** `contact.portal_invited`, `contact.portal_blocked`, `contact.portal_unblocked`. Login comum não entra.
+
+### 4.4. Ciclo de vida
+
+| Evento                                 | Efeito                                                                 | Como                                    |
+| -------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------- |
+| Contato excluído                       | Acesso e sessões somem                                                 | `ON DELETE CASCADE`                     |
+| Telefone alterado                      | Acesso, códigos e sessões somem. Trocar número nunca transfere a senha | Gatilho `contact_portal_phone_changed`  |
+| Conta bloqueada                        | Contatos dela param de entrar nela. Outras contas seguem               | `account_is_eligible` a cada requisição |
+| Conta excluída                         | Acessos removidos                                                      | `ON DELETE CASCADE`                     |
+| Área desligada **ou plano sem o item** | Acesso negado com mensagem neutra; senha e sessões preservadas         | `account_is_eligible` a cada requisição |
+| Acesso bloqueado                       | Sessões apagadas na hora, senha preservada                             | `portal_set_blocked`                    |
+
+## 5. Banco
+
+### 5.1. Pré-condições (rodar antes, no projeto confirmado)
+
+Regra do ZAP: perguntar o projeto, rodar `get_project_url` e confirmar com o mantenedor antes de qualquer escrita. As consultas abaixo são só leitura.
+
+```sql
+select e.extname, n.nspname from pg_extension e
+join pg_namespace n on n.oid = e.extnamespace where e.extname = 'pgcrypto';
+-- Esperado: pgcrypto em extensions. As migrações NÃO criam a extensão.
+
+select md5(prosrc) from pg_proc where oid = 'public.handle_new_user()'::regprocedure;
+-- Ver a tabela abaixo.
+
+select to_regnamespace('contact_portal');                       -- Esperado: nulo
+select count(*) from pg_proc where proname = 'plan_feature';    -- Esperado: 1
+select count(*) from pg_proc where proname = 'plan_feature_strict'; -- Esperado: 0
+select to_regclass('public.whatsapp_billing_status'),
+       exists(select 1 from pg_proc where proname = 'sync_profile_email'); -- 089 presente
+select exists(select 1 from information_schema.columns
+  where table_name = 'whatsapp_config' and column_name = 'app_id');       -- 092 presente
+select has_function_privilege('anon', 'public.recount_account_usage(uuid)', 'EXECUTE');
+-- false = SPEC 081 aplicada; true = ainda não (D-8: só bloqueia a ida a produção)
+select count(*) from public.contacts;                           -- Dimensiona o índice do §5.3
+select quotas_enforced from platform_settings;                  -- Só para registrar; a 096 não depende
+```
+
+| `md5(prosrc)`                      | Significado                       | Ação                                                                    |
+| ---------------------------------- | --------------------------------- | ----------------------------------------------------------------------- |
+| `42dbf56301eec1b34457364a82b27754` | Versão da 067 com fim de linha LF | Seguir                                                                  |
+| `2ce62f9d86dece7b37aed920a7f9621a` | Mesma versão, aplicada com CRLF   | Trocar o hash esperado na asserção 4 da 093 e seguir                    |
+| Outro                              | A função não é a da 067           | **Parar.** Ler a função e entender o desvio. Não enfraquecer a asserção |
+
+### 5.2. Migrações
+
+Quatro arquivos. Os três primeiros são copiados do Ranch e renumerados; o SQL fica idêntico, exceto o aviso de origem no topo, para o diff com o Ranch continuar trivial. O quarto é só do ZAP.
+
+| Ranch                                   | ZAP                                       | Conteúdo                                                                                                                                                                      |
+| --------------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `094_contact_portal.sql`                | `093_contact_portal.sql`                  | Schema, tabelas, gatilho, 16 funções `portal_*`, asserções                                                                                                                    |
+| `095_contact_portal_public_account.sql` | `094_contact_portal_public_account.sql`   | `portal_public_account`: nome da conta em `/area/c/<código>`                                                                                                                  |
+| `096_contact_portal_limit_locks.sql`    | `095_contact_portal_limit_locks.sql`      | Travas por telefone, bcrypt nos ramos `no_match`, chave canônica do convite                                                                                                   |
+| —                                       | `096_contact_portal_plan_gate_strict.sql` | `plan_feature_strict()` e `account_is_eligible` reescrita para usá-la (PRD 082 D-2). Asserções: chave ausente nega; `quotas_enforced = false` nega; override por conta libera |
+
+**Não dependem da 091.** Cada `portal_*` faz `REVOKE ALL … FROM PUBLIC, anon, authenticated` explícito, então funciona sem a 091. A asserção 3 da 093 confere isso e falha alto. A 096 segue a mesma convenção: `plan_feature_strict` é `SECURITY DEFINER`, `search_path = public`, só `service_role`.
+
+**Esboço da 096** (o arquivo final nasce na F1, com asserções):
+
+```sql
+-- plan_feature_strict: PRD 082 D-2. Diferente de plan_feature():
+-- chave ausente é FALSE, quotas_enforced não é consultado e conta sem
+-- account_plans é FALSE. Para permissão comercial, não para quota.
+CREATE OR REPLACE FUNCTION public.plan_feature_strict(p_account_id UUID, p_key TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE(
+    (
+      SELECT ((p.features || ap.limit_overrides) ->> p_key)::boolean
+      FROM account_plans ap
+      JOIN plans p ON p.id = ap.plan_id
+      WHERE ap.account_id = p_account_id
+    ),
+    FALSE
+  );
+$$;
+ALTER FUNCTION public.plan_feature_strict(UUID, TEXT) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.plan_feature_strict(UUID, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.plan_feature_strict(UUID, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION public.plan_feature_strict(UUID, TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.plan_feature_strict(UUID, TEXT) TO service_role;
+
+-- account_is_eligible: mesma assinatura da 093, trocando
+-- plan_feature(...) por plan_feature_strict(...). CREATE OR REPLACE.
+```
+
+### 5.3. Schema `contact_portal`
+
+Fora de "Exposed schemas" e sem `USAGE` para ninguém além do dono. RLS ligada em todas as tabelas, **sem policy**: só o dono das funções lê.
+
+| Tabela           | Papel                                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings`       | `account_id` PK, `enabled` (padrão `false`), `channel_id`, `auth_template_id`, `keyword` (padrão `SENHA`, `NULL` desliga), `public_code` único de 8 caracteres |
+| `access`         | `contact_id` PK, `account_id`, `phone`, `password_hash` (nulo = convite pendente), convite, ativação, último login, bloqueio, termos                           |
+| `codes`          | `purpose` (`first_access`, `reset`, `invite`), `code_hash`, `expires_at`, `attempts`, `consumed_at`. Um código ativo por contato                               |
+| `sessions`       | `token_hash` (`bytea`), `current_contact_id`, 30 dias deslizantes                                                                                              |
+| `session_access` | Quais acessos a sessão abriu                                                                                                                                   |
+| `attempts`       | Contadores por `kind` e `key_hash`                                                                                                                             |
+
+**Principais ajudantes internos:** `account_is_eligible`, `candidates`, `canonical_phone` e `lock_phone`.
+
+**Índice em tabela viva:** a 093 cria `idx_contacts_phone_normalized` em `public.contacts` sem `CONCURRENTLY`, o que bloqueia escrita em contatos durante a construção. Se a contagem do §5.1 for grande, criar antes, fora de transação, e a migração seguirá adiante pelo `IF NOT EXISTS`:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_contacts_phone_normalized
+  ON public.contacts (phone_normalized);
+```
+
+**Funções do contato** (todas `SECURITY DEFINER`, `search_path = public`, só `service_role`):
+
+| Função                                                             | Faz                                                                                               |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `portal_request_code`                                              | Aplica limites, escolhe o contato, grava o hash. Devolve `(status, contact_id, account_id)`       |
+| `portal_complete_code`                                             | Confere o código (5 erros consomem), grava senha e termos, apaga as sessões do acesso             |
+| `portal_login`                                                     | Confere a senha contra cada acesso elegível do telefone. Devolve os `contact_id` que bateram      |
+| `portal_create_session`, `portal_resolve_session`                  | Criam e validam a sessão. A resolução desliza a validade e devolve só acessos **ainda** elegíveis |
+| `portal_select_account`, `portal_change_password`, `portal_logout` | Trocam de conta, trocam a senha (e apagam as outras sessões), encerram esta sessão ou todas       |
+| `portal_public_account`                                            | Nome da conta pelo código público. Só para conta elegível; nunca devolve o id                     |
+
+**Funções da conta** (chamadas depois de `requireRole` e da guarda de plano): `portal_account_settings_get`, `portal_account_settings_set`, `portal_access_status`, `portal_active_contact_ids`, `portal_invite`, `portal_set_blocked`, `portal_end_sessions`, `portal_account_summary`.
+
+### 5.4. Plano
+
+`contact_portal_enabled` entra em `FEATURE_KEYS` (`src/lib/plans/types.ts`) e nos dois seeds do ZAP (`plans-seed.sql` e `plans-seed-vn.sql`) com `false` explícito nos quatro planos (PRD 082 D-1). `src/lib/plans/catalog.test.ts` valida `plans-seed.sql` contra `FEATURE_KEYS`; estender o teste para `plans-seed-vn.sql` é parte da F1.
+
+Rótulo: `Plan.featureLabel.contact_portal_enabled` em `en.json` ("Contact portal") e `pt-BR.json` ("Área do contato"). Sem ele, o catálogo do cliente e o editor do console dão `MISSING_MESSAGE`.
+
+**Por que `plan_feature()` não serve** (PRD 082 D-2): devolve `TRUE` para chave ausente e quando `quotas_enforced` está desligado. A 096 põe `plan_feature_strict()` no lugar, dentro de `account_is_eligible`. O lado da conta (§8.4) lê a mesma decisão pelo servidor, nunca pelo `plan.features` do cliente.
+
+### 5.5. Depois de aplicar
+
+1. `get_advisors` (security) no mesmo projeto. Esperado: nenhuma `portal_*` nem `plan_feature_strict` nos WARN e 6 INFO 0008 de `contact_portal`, sem policy por desenho.
+2. Conferir no painel que `contact_portal` não está em "Exposed schemas".
+3. Rodar os seeds de planos (os dois).
+4. Atualizar [`status.md`](./context/status.md): última migração, próximo número, chaves de i18n, scripts de `supabase/setup/`.
+
+## 6. Envio do código
+
+| Situação                              | Como sai                                                 |
+| ------------------------------------- | -------------------------------------------------------- |
+| Canal QRCode                          | Texto livre com código e link                            |
+| Cloud API com janela de 24 h aberta   | Texto livre com código e link                            |
+| Cloud API fora da janela              | Template `AUTHENTICATION` de `settings.auth_template_id` |
+| Cloud API, sem template aprovado      | `needs_template`: a UI avisa e a J2 continua valendo     |
+| Teto de envio frio do QRCode atingido | `cold_limit`                                             |
+
+- **Redação:** `sendAndPersistOutbound` manda o texto real ao provedor e grava `[código de acesso enviado]` em `messages`. Envio de motor não dispara webhook de saída. Origem nova no log: `contact_portal`.
+- **Eco `fromMe` da Evolution:** no teste real o eco chegou ~450 ms **antes** do `INSERT`. Por isso `ingest.ts` descarta o eco quando `looksLikePortalCodeMessage` reconhece o marcador fixo `🔐` mais seis dígitos. O marcador fica fora da tradução de propósito.
+- **Link:** `{NEXT_PUBLIC_SITE_URL}/area/c/<código-da-conta>/codigo#c=<código>`. O código vai no fragmento, que não chega ao servidor nem ao log do proxy. A origem vem **só** da variável (`configuredSiteOrigin`), nunca do host da requisição.
+- **Template:** corpo com `add_security_recommendation`, rodapé com `code_expiration_minutes: 10`, botão `OTP`/`COPY_CODE`. No envio, o código vai no `body` e no botão de índice `"0"` com `sub_type: url`. Os componentes prontos viajam em `rawComponents`. O ZAP já tem `app_id` por canal (092): o upload de cabeçalho não se aplica ao template `AUTHENTICATION`, então não há interação.
+- **Palavra-chave:** etapa de `ingestInbound` depois do opt-out e antes dos flows. Compara sem acento, sem caixa e com espaços colapsados. Consumida, suprime flows, gatilhos de conteúdo e IA. Em conta não elegível (plano ou interruptor), a palavra-chave **não** é consumida e a mensagem segue o caminho normal.
+- **Opt-out:** a J1 respeita. J2, J3 e J5 são transacionais e pedidas pelo contato, então ignoram.
+- **Teto frio:** no QRCode, `last_customer_message_at` fica sempre nulo, e todo envio de motor contava como frio. Sem a correção `loadLastInboundAt`, a J1 e a J2 falham com `cold_limit`. Ela vale também para automações, flows e IA, e **muda o comportamento dessas rotinas no ZAP** (PRD 082 D-11).
+
+## 7. Segurança
+
+### 7.1. Limites
+
+Fonte única: `PORTAL_LIMITS` em `limits.ts`. Cada função recebe em `p_limits` e falha com `22023` se faltar chave.
+
+| Chave                       | Janela | Máximo                                      |
+| --------------------------- | ------ | ------------------------------------------- |
+| Envio por telefone          | 60 s   | 1                                           |
+| Envio por telefone          | 1 h    | 5                                           |
+| Envio por IP                | 1 h    | 20                                          |
+| Erros de código por IP      | 15 min | 30                                          |
+| Erros de login por telefone | 15 min | 10                                          |
+| Erros de login por IP       | 15 min | 30                                          |
+| Validade do código          | —      | 10 min (convite: 24 h), 5 erros o invalidam |
+
+A rota traduz `throttled` em 429 só no login e na conclusão do código. No pedido de código a resposta segue neutra, com piso de 750 ms (`PORTAL_REQUEST_CODE_MIN_MS`) em todos os caminhos. O teto diário por telefone (PRD 082 D-10) entra na F7, com migração própria.
+
+### 7.2. Isolamento
+
+- `/area` sai cedo do middleware, sem `getUser()`. A sessão da área não abre nenhuma rota da CRM.
+- O cookie `zap_area_session` não começa com `sb-` e só vale em `Path=/area`. É `HttpOnly`, `SameSite=Lax` e `Secure` fora de `http://localhost`.
+- O login sempre gera token novo. O banco guarda só o sha256.
+- Toda escrita em `/area/api/*` confere `Origin` (`guardWrite`). Ausente ou `null` responde 403.
+- Rotas `/area/api/*` importam só `@/lib/contact-portal/*`. Dentro da área, só `service.ts` e `account.ts` tocam `@/lib/supabase/*`.
+- Rotas da conta: `requireRole`, depois guarda de plano (§8.4), depois contato conferido pela RLS da sessão (`visibleContact[Ids]`), depois `portal_*`.
+- `isolation.test.ts` e `middleware.contact-portal.test.ts` prendem essas regras por varredura estática e por teste de rota.
+
+### 7.3. Achados da revisão do Ranch
+
+**Já corrigidos no código portado:** A-1 (cache), A-2 (link por host forjado), A-3 (tempo do pedido), A-4 (corrida nos limites, na 095) e A-9 (chave do convite).
+
+**Abertos, herdados pelo ZAP:**
+
+| #    | Gravidade | Risco                                                                                                           | Ação no ZAP                                                                                                              |
+| ---- | --------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| A-5  | Médio     | Se o proxy repassar `X-Forwarded-For` do cliente, os limites por IP caem                                        | Conferir na stack: Traefik é a borda, sem `forwardedHeaders.insecure`/`trustedIPs` abertos, e porta do app não publicada |
+| A-6  | Médio     | 25 palpites/h por telefone somam ~1,8 % de acerto em 30 dias                                                    | PRD 082 D-10: F7                                                                                                         |
+| A-7  | Baixo     | Qualquer um trava o login de um telefone por 15 min. A recuperação por código continua                          | Aceito                                                                                                                   |
+| A-8  | Baixo     | Desligar a área, bloquear a conta ou perder o item do plano não apaga sessões. Religar em até 30 dias as revive | PRD 082 D-6: aceito por ora; decidir se apaga depois do piloto                                                           |
+| A-10 | Baixo     | Com a mesma linha salva duas vezes, o código pode nascer para um contato e sair na conversa do outro            | Aceito                                                                                                                   |
+| A-11 | Info      | `Path=/area` impede o prefixo `__Host-`                                                                         | Aceito                                                                                                                   |
+| A-12 | Info      | O contato que reencaminhar o código ao número da conta o grava em claro                                         | Aceito                                                                                                                   |
+
+## 8. Aplicação
+
+### 8.1. Arquivos novos (62 portados + os da guarda de plano)
+
+| Caminho                                                  | Conteúdo                                                                                                                                                 |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/contact-portal/`                                | `types`, `limits`, `phone`, `code`, `session`, `current`, `request`, `http`, `service`, `journeys`, `delivery`, `keyword`, `account`, com testes         |
+| `src/lib/contact-portal/plan-gate.ts` (+ teste)          | **Novo no ZAP:** `requireContactPortalFeature(accountId)` lê `plan_feature_strict` por `supabaseAdmin()` e lança `ForbiddenError('FEATURE_NOT_IN_PLAN')` |
+| `src/app/(portal)/`                                      | Layout, telas da §4.2 e rotas `area/api/`: `request-code`, `complete-code`, `login`, `logout`, `select-account`, `change-password`                       |
+| `src/app/api/contact-portal/`                            | `settings` (GET/PATCH), `contacts/status`, `contacts/[contactId]/invite`, `/block`, `/sessions`                                                          |
+| `src/components/contact-portal/`                         | `portal-card`, `login-form`, `request-code-form`, `code-form`, `session-actions`, `password-input`, `portal-api`                                         |
+| `src/components/contacts/contact-portal-access-card.tsx` | Cartão de estado e ações                                                                                                                                 |
+| `src/components/settings/contact-portal-settings.tsx`    | Aba de Configurações                                                                                                                                     |
+| `src/middleware.contact-portal.test.ts`                  | Isolamento no middleware                                                                                                                                 |
+| `src/next-config.test.ts`                                | Política de cache                                                                                                                                        |
+| `src/lib/whatsapp/meta-api.template.test.ts`             | Envio de template com `rawComponents`                                                                                                                    |
+
+### 8.2. Arquivos alterados (30 portados + os da guarda de plano)
+
+| Arquivo                                                                                                        | Mudança                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `src/middleware.ts`                                                                                            | `/area` e abaixo saem antes do `createServerClient`                                                             |
+| `next.config.ts`                                                                                               | Política de cache (§9)                                                                                          |
+| `src/lib/plans/types.ts`                                                                                       | `contact_portal_enabled` em `FEATURE_KEYS`                                                                      |
+| `src/lib/plans/catalog.test.ts`                                                                                | **ZAP:** valida também `plans-seed-vn.sql`                                                                      |
+| `messages/en.json`, `messages/pt-BR.json`                                                                      | +126 chaves da feature, `Plan.featureLabel.contact_portal_enabled` e o aviso "não incluído no seu plano" da aba |
+| `src/lib/activity/types.ts`                                                                                    | Três ações `contact.portal_*`                                                                                   |
+| `src/lib/channels/ingest.ts` e teste                                                                           | Descarte do eco e etapa da palavra-chave                                                                        |
+| `src/lib/channels/send.ts` e teste, `send-log.ts`, `types.ts`                                                  | `rawComponents`, origem `contact_portal`, leitura da última mensagem do contato                                 |
+| `src/lib/channels/adapters/whatsapp-cloud.ts`, `src/lib/whatsapp/meta-api.ts`                                  | Repasse de `rawComponents` (conflito esperado com 092, §2.2)                                                    |
+| `src/lib/channels/cold-send-wiring.ts` e teste                                                                 | `loadLastInboundAt`                                                                                             |
+| `src/lib/whatsapp/send-message.ts` e teste                                                                     | Teto frio pela mesma leitura                                                                                    |
+| `src/lib/whatsapp/template-components.ts`, `template-send-builder.ts`, `template-validators.ts` e testes       | Payload e envio `AUTHENTICATION`; corpo opcional nessa categoria                                                |
+| `src/app/(dashboard)/settings/page.tsx`, `src/components/settings/settings-sections.ts`                        | Aba `contact-portal` (`minRole: 'admin'`)                                                                       |
+| `src/components/contacts/contact-detail-view.tsx`, `src/components/inbox/contact-sidebar.tsx`                  | Cartão de acesso, condicionado ao plano                                                                         |
+| `src/app/(platform)/admin/accounts/[accountId]/page.tsx`, `src/app/api/platform/accounts/[accountId]/route.ts` | Resumo no console                                                                                               |
+| `docs/context/INDEX.md`, `docs/context/auth-e-conta.md`                                                        | **ZAP:** linha "Área do contato" no roteamento e no domínio (`src/lib/contact-portal/`, `src/app/(portal)/`)    |
+
+A API pública `/api/v1` não muda.
+
+### 8.3. Adaptações obrigatórias no destino
+
+| Item                                    | Ranch                                    | ZAP                                               | Onde                                              |
+| --------------------------------------- | ---------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+| Cookie de sessão                        | `vr_area_session`                        | `zap_area_session`                                | `session.ts`, `middleware.contact-portal.test.ts` |
+| Chave de `sessionStorage`               | `valenranch:area:phone`                  | `zapcrm:area:phone`                               | `portal-api.ts`                                   |
+| Nomes de migração em teste              | `094_…`, `096_…`                         | `093_…`, `095_…`                                  | `limits.test.ts`, `phone.test.ts`                 |
+| Frase do painel                         | "Inscrições, comprovantes e resultados…" | Texto genérico, nos dois idiomas (PRD 082 §3.1)   | `ContactPortal.panel.comingSoonBody`              |
+| Versão dos termos                       | `2026-10-30`                             | Data do texto aprovado (PRD 082 D-9)              | `PORTAL_TERMS_VERSION` em `journeys.ts`           |
+| Texto dos termos                        | Só a frase do checkbox                   | Texto aprovado (PRD 082 D-9)                      | `ContactPortal.code.terms`                        |
+| Comentário                              | "a porta do competidor"                  | "a porta do contato"                              | `src/app/(portal)/area/painel/page.tsx`           |
+| Referências em comentário               | `SPEC 084`, `PRD 081`, `SPEC 085`        | Trocar por `PRD 082` / `SPEC 083` (§9 para a 085) | Código portado                                    |
+| `plan_feature` em `account_is_eligible` | `plan_feature(...)`                      | `plan_feature_strict(...)` pela 096               | Banco                                             |
+
+Domínios de exemplo nos testes (`dev.valenranch.com.br`, `Valen Ranch`) são dados de teste e não afetam a execução. Trocar por `zap.local.ia.br` / `ZAP CRM BR` é opcional.
+
+### 8.4. Guarda de plano no app (novo no ZAP)
+
+| Camada                                  | Implementação                                                                                                                                                                                                                 |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rotas `/api/contact-portal/*`           | Depois de `requireRole(min)`, `await requireContactPortalFeature(ctx.accountId)`. Lança `ForbiddenError` com mensagem `FEATURE_NOT_IN_PLAN`; o handler responde `403 { error: 'FEATURE_NOT_IN_PLAN' }`                        |
+| `GET /api/contact-portal/settings`      | Não falha com 403: devolve `{ featureInPlan: false, settings: null }` para a aba renderizar o aviso. É a única rota do grupo que responde 200 sem o item                                                                      |
+| Aba de Configurações                    | Lê `featureInPlan` do GET. `false`: aviso traduzido ("A área do contato não está incluída no seu plano") e controles desabilitados. Não usa `useAccountPlan().plan.features` para decidir: o cliente não vê `limit_overrides` |
+| Cartão da ficha e do painel da conversa | `GET /api/contact-portal/contacts/status` responde `403`; o cartão trata 403 como "não renderizar", sem toast                                                                                                                 |
+| Área (`/area/**`)                       | Nada a fazer no app: `account_is_eligible` já nega no banco                                                                                                                                                                   |
+| Palavra-chave em `ingestInbound`        | `portal_account_settings_get` devolve `eligible = false`; a etapa não consome a mensagem                                                                                                                                      |
+| Console                                 | Sem código: `FEATURE_KEYS` alimenta o editor de plano e a tela da conta                                                                                                                                                       |
+
+Teste: `plan-gate.test.ts` cobre os três estados (chave `true`, `false`, ausente) com o cliente mockado, e um teste de rota por grupo garante o 403.
+
+## 9. Cache-Control das páginas (SPEC 085 do Ranch)
+
+**Problema.** O catch-all de `headers()` em `next.config.ts` põe `public, max-age=0, s-maxage=300, stale-while-revalidate=86400` em toda página, e esse valor vence o `private` que o Next põe nas páginas dinâmicas. Com cache compartilhado na frente, a página de um usuário e o `Set-Cookie` do refresh de sessão podem ir para outra pessoa. O ZAP tem hoje essa regra (`next.config.ts:158`).
+
+| Caminho                                                                   | `Cache-Control`                                                 |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Toda página: CRM, auth, convite, console, `/area/**`, `/area/api/*`       | `private, no-store`                                             |
+| Arquivo solto na raiz de `public/`, um segmento, com extensão de estático | `public, max-age=0, s-maxage=300, stale-while-revalidate=86400` |
+| `/api/*`                                                                  | `no-store`                                                      |
+| `/emojibase/*`, `/opus/*`                                                 | `public, max-age=31536000, immutable`                           |
+| `/_next/static/*`, `/_next/image`                                         | Definido pelo Next                                              |
+
+Extensões da segunda linha: `svg`, `png`, `jpe?g`, `gif`, `webp`, `avif`, `ico`, `json`, `txt`, `xml`, `webmanifest`. Uma extensão abaixo da raiz, como `/area/x.json`, continua privada.
+
+**Por que resolve o motivo original.** A regra pública existia porque um CDN guardava HTML velho apontando para chunks sumidos. Com `no-store`, nenhum HTML fica na edge. O custo é a página não entrar no bfcache de alguns navegadores.
+
+**Alcance:** esta mudança vale para a CRM inteira, não só para a área (PRD 082 D-11).
+
+## 10. Plano de implementação
+
+As fases e os modelos estão no PRD 082 §9. Aqui, só o que cada fase toca.
+
+| Fase | Toca                                                                                                                                      |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| F1   | Porte por arquivo da §10.1, migrações 093–096 copiadas e escritas, seeds, §8.3, §8.4, `INDEX.md` e `auth-e-conta.md`, gate local          |
+| F2   | §5.1, §5.2 e §5.5 no `vn`, com confirmação do mantenedor em cada escrita                                                                  |
+| F3   | Deploy, §11.2, §11.5                                                                                                                      |
+| F4   | §11.4, inclusive os cenários 18–20 de plano                                                                                               |
+| F5   | `/security-review` do diff                                                                                                                |
+| F6   | `limit_overrides` da conta piloto pelo console; termos definitivos                                                                        |
+| F7   | Teto diário por telefone: chave nova em `PORTAL_LIMITS`, migração 097 com `CREATE OR REPLACE` de `portal_request_code`, cenário 8 de novo |
+
+### 10.1. Porte por arquivo (o checkout do Ranch não tem git)
+
+O método original era `git am` dos 8 commits (`83ad199`, `08c0570`, `c3f58fe`, `91823f9`, `1a4f590`, `c4a8227`, `4b30fea`, `792699a`). Sem `.git` na fonte, o porte é por arquivo, em duas classes, sempre lendo a `docs/spec-084-area-do-contato.md` do Ranch como mapa do que cada arquivo faz:
+
+**Classe A, copiar inteiro** (só existem no Ranch e são todos da feature): `src/lib/contact-portal/`, `src/app/(portal)/`, `src/app/api/contact-portal/`, `src/components/contact-portal/`, `src/components/contacts/contact-portal-access-card.tsx`, `src/components/settings/contact-portal-settings.tsx`, `src/middleware.contact-portal.test.ts`, `src/next-config.test.ts`, `src/lib/whatsapp/meta-api.template.test.ts`. **Não copiar** `src/lib/retention/log-purge*.ts` nem `src/app/api/automations/cron/route.test.ts` (outra feature, §12).
+
+**Classe B, portar só os trechos da feature** nos 30 arquivos da §8.2 que já existem no ZAP. Para cada um, `diff` Ranch → ZAP, aplicar apenas o que a §8.2 descreve e **descartar** o resto do diff, que é deriva sem relação:
+
+| Deriva a descartar                                                                                                                                            | Motivo                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app/globals.css`, `src/app/layout.tsx`, `src/components/email-spam-notice.tsx`, `src/lib/mailer/render*.ts`                                              | Identidade Valen                                                                                                                   |
+| `src/lib/retention/defaults*.ts`, `src/lib/activity/retention.ts`, `src/app/api/automations/cron/route.ts`                                                    | Purga de logs (SPEC 083 do Ranch)                                                                                                  |
+| `src/app/api/channels/evolution/webhook/[secret]/route*.ts`                                                                                                   | Revogação `fromMe` (§12)                                                                                                           |
+| `src/lib/evolution/config*.ts`, `src/lib/evolution/instance-name.ts`, `src/lib/inbox/export/*`, `src/lib/whatsapp/cloud-channel-crud.ts`, `cloud-channels.ts` | Correções e ajustes do Ranch sem relação com a área (§12)                                                                          |
+| Em `meta-api.ts`, `template-header-handle*.ts`, `template-manager.tsx`, `whatsapp-config.tsx`, `app/api/whatsapp/config/*`, `templates/*`, `types/index.ts`   | O ZAP está **à frente** (092, `app_id` por canal): manter o lado do ZAP e inserir só `rawComponents` e o template `AUTHENTICATION` |
+
+Nos 30 arquivos da feature, o diff esperado é o da §8.2; qualquer hunk fora dessa descrição é deriva e fica de fora. `messages/*.json`: copiar o namespace `ContactPortal` (67 chaves), as chaves novas de `Settings`, `Contacts`, `Inbox`, `Activity` e `Admin` que a feature usa (conferir pelo `grep` de `t('` nos arquivos da classe A) e `Plan.featureLabel.contact_portal_enabled`; o total final se mede no gate, não se presume 3.676. `next.config.ts`: só a política de cache (§9).
+
+Ordem sugerida: classe A, depois classe B de baixo para cima na pilha (`lib/` → `app/api/` → `components/` → `app/`), `messages`, `next.config.ts`, migrações e seeds, por fim a guarda de plano (§8.4), a 096 e as adaptações da §8.3. Gate local ao fim; `format:check` pode acusar CRLF nos arquivos copiados (ver §10.2).
+
+### 10.2. Gate
+
+Gate local do ZAP, ao fim da F1:
+
+```bash
+npm run typecheck && npm run i18n:check && npm run lint && npm run test && npm run format:check && npm run build
+```
+
+Com `core.autocrlf=true`, o `git am` pode deixar CRLF nos arquivos que tocar, e `format:check` exige LF. Se isso acontecer, rodar `npx prettier --write` nos arquivos alterados. O conteúdo versionado não muda.
+
+## 11. Critérios de aceite e testes
+
+### 11.1. Critérios
+
+Os dez do PRD 082 §8. O critério 8 (plano) é o novo e é provado pelos cenários 18–20 abaixo mais as asserções da 096.
+
+### 11.2. Conferências de deploy
+
+- `NEXT_PUBLIC_SITE_URL` preenchida na stack. Sem ela, a mensagem sai sem link.
+- Traefik como borda, conforme A-5.
+- `contact_portal` fora de "Exposed schemas".
+- Os dois seeds rodados: `select code, features->'contact_portal_enabled' from plans` devolve `false` em todos.
+- Opcional: `rateLimit` do Traefik em `/area/api/*`, como freio barato antes do bcrypt.
+
+### 11.3. Consultas de apoio (só leitura)
+
+Trocar `<contact_id>` pelo contato de teste e `<account_id>` pela conta de teste. Nunca use contato real.
+
+```sql
+-- Plano da conta: o que a área enxerga
+select plan_feature_strict('<account_id>', 'contact_portal_enabled') as strict,
+       plan_feature('<account_id>', 'contact_portal_enabled')        as legado,
+       (select quotas_enforced from platform_settings)               as quotas;
+
+-- Estado do acesso
+select contact_id, account_id, (password_hash is not null) as tem_senha,
+       left(password_hash, 7) as custo, invited_at, activated_at,
+       last_login_at, blocked_at, terms_version
+from contact_portal.access where contact_id = '<contact_id>';
+
+-- Código: só o hash e o estado
+select purpose, left(code_hash, 7) as custo, expires_at, attempts, consumed_at, created_at
+from contact_portal.codes where contact_id = '<contact_id>'
+order by created_at desc limit 5;
+
+-- Sessões do acesso
+select s.id, s.created_at, s.last_seen_at, s.expires_at
+from contact_portal.sessions s
+join contact_portal.session_access sa on sa.session_id = s.id
+where sa.contact_id = '<contact_id>';
+
+-- Contadores da última hora
+select kind, count(*) from contact_portal.attempts
+where created_at > now() - interval '1 hour' group by kind;
+
+-- Nada novo no cadastro do SaaS
+select (select count(*) from auth.users      where created_at >= '<data>') as users,
+       (select count(*) from public.accounts where created_at >= '<data>') as accounts,
+       (select count(*) from public.profiles where created_at >= '<data>') as profiles;
+
+-- Código em claro no inbox (esperado: 0 e 0)
+select (select count(*) from public.messages
+         where content_text like '%🔐%' and content_text ~ '\m[0-9]{6}\M') as mensagens,
+       (select count(*) from public.conversations
+         where last_message_text like '%🔐%' and last_message_text ~ '\m[0-9]{6}\M') as previas;
+```
+
+### 11.4. Roteiro manual
+
+**Regras:** só leitura nas consultas; envio real só para contato de teste, em conta de teste; sem disparo em massa. Antes de cada envio pelo QRCode, faça o contato escrever ao número da conta, para não gastar envio frio. Rode 8 e 15 por último. `<ZAP_URL>` é a URL da instância e `<CÓDIGO>` o endereço público da conta. Os cenários 1–17 pressupõem a conta de teste com `limit_overrides.contact_portal_enabled = true`.
+
+| #   | Cenário                                 | Passos                                                                                                                                                                | Esperado                                                                                                                         |
+| --- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | J3 pela web                             | `/area/c/<CÓDIGO>` → Primeiro acesso → telefone → link do WhatsApp → senha → aceite                                                                                   | Painel; `$2a$10$`; uma sessão; cadastro zerado; uma bolha `[código de acesso enviado]`; `#c=` some da barra                      |
+| 2   | J1 pela ficha                           | "Enviar acesso" para contato sem senha                                                                                                                                | Código válido por 24 h; atividade `contact.portal_invited`; sem código no `metadata`                                             |
+| 3   | J2 e variações                          | Enviar `SENHA`, `senha` e `Sénha`                                                                                                                                     | Código na conversa; nenhuma automação, flow ou IA; mensagem do contato fica como comum                                           |
+| 4   | J4 e J5                                 | Sair, entrar; depois "Esqueci minha senha"                                                                                                                            | Sessão nova a cada login; sessão anterior perde o acesso; eco descartado                                                         |
+| 5   | Duas contas com template fora da janela | Conta B Cloud API com template aprovado, mesmo contato sem conversa em 24 h; enviar acesso; mesma senha; depois senha diferente                                       | Template com "copiar código"; tela de escolher conta com A e B; depois só A                                                      |
+| 6   | Reset em A não muda B                   | Recuperar por A                                                                                                                                                       | Senha de B continua valendo                                                                                                      |
+| 7   | Não contato                             | `/area` → Primeiro acesso com número inexistente, depois com o contato                                                                                                | Mesma tela; `{"ok":true}` nos dois; ≥ 750 ms; nada enviado ao primeiro                                                           |
+| 8   | Seis pedidos em uma hora                | Intervalo acima de 60 s                                                                                                                                               | Cinco entregam; o sexto mostra a mesma tela e não envia                                                                          |
+| 9   | Isolamento                              | Janela anônima com sessão da área: `/dashboard`, `/inbox`, `/contacts`, `/settings`, `GET /api/contacts`. Janela normal com CRM e área                                | Redirect para `/login` e 401. As duas sessões convivem; cookies com `Path` certo                                                 |
+| 10  | Ciclo de vida                           | Excluir contato descartável, trocar telefone, bloquear conta, desligar área, bloquear acesso                                                                          | Volta para `/area` em todos. Registrar o que acontece ao religar (A-8)                                                           |
+| 11  | Trocar senha                            | Dois navegadores; trocar em A                                                                                                                                         | A segue; B volta para `/area`; senha antiga não entra                                                                            |
+| 12  | Sair de todos os aparelhos              | Dois navegadores                                                                                                                                                      | Os dois voltam para `/area`                                                                                                      |
+| 13  | Limite de login                         | Onze senhas erradas                                                                                                                                                   | Dez 401, a 11ª 429; senha certa também 429 nos 15 min; nenhuma mensagem sai                                                      |
+| 14  | Paralelo não fura o limite              | Onze logins errados simultâneos                                                                                                                                       | No máximo 10 viram 401, o resto 429; `login_phone` = 10                                                                          |
+| 15  | Cinco códigos errados                   | Pedir código, errar cinco vezes, digitar o certo                                                                                                                      | Certo recusado; `attempts = 5`; `consumed_at` preenchido                                                                         |
+| 16  | Papéis                                  | `viewer`, `agent` e `admin` na ficha e em Configurações                                                                                                               | Conforme §4.3                                                                                                                    |
+| 17  | Teto frio em automação                  | Automação no QRCode responde a quem acabou de escrever                                                                                                                | Não conta como envio frio                                                                                                        |
+| 18  | **Plano sem o item**                    | Conta de teste no plano `free` sem override; `admin` abre Configurações → Área do contato; abre a ficha de um contato; `curl` em `PATCH /api/contact-portal/settings` | Aba com aviso e controles desabilitados; cartão ausente; `403 FEATURE_NOT_IN_PLAN`; sem toast de erro                            |
+| 19  | **Perder o item com sessão aberta**     | Contato logado; no console, remover `limit_overrides.contact_portal_enabled`; contato recarrega `/area/painel`; devolver o override                                   | Volta para `/area` com mensagem neutra; `contact_portal.access` e `sessions` intactos; ao devolver, a sessão volta a abrir (A-8) |
+| 20  | **`quotas_enforced` desligado**         | Em banco de teste, `quotas_enforced = false` e plano sem a chave; pedir código e enviar `SENHA`                                                                       | Nada sai; `plan_feature_strict` = `false`, `plan_feature` = `true` na consulta do §11.3                                          |
+
+Comandos dos cenários de borda:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<ZAP_URL>/area/api/login -H "content-type: application/json" -d '{"phone":"11900000000","password":"x"}'
+```
+
+Esperado acima: `403`, sem `Origin`.
+
+```bash
+curl -s -X POST https://<ZAP_URL>/area/api/request-code -H "content-type: application/json" -H "origin: https://exemplo.invalid" -H "x-forwarded-host: exemplo.invalid" -d '{"phone":"<telefone de teste>","publicCode":"<CÓDIGO>","purpose":"reset"}'
+```
+
+Esperado acima: 403 ou, se passar, link da mensagem apontando para `NEXT_PUBLIC_SITE_URL`.
+
+```bash
+curl -s -o /dev/null -w "%{time_total}\n" -X POST https://<ZAP_URL>/area/api/request-code -H "content-type: application/json" -H "origin: https://<ZAP_URL>" -d '{"phone":"11900000000","purpose":"first_access"}'
+```
+
+Esperado acima: ≥ 0,75 s, sem diferença visível entre número de contato e de não contato.
+
+### 11.5. Medição do `Cache-Control` (com `next start` e no host)
+
+```bash
+for p in /login /dashboard /inbox /admin /join/x /area /area/painel /auth/confirm /; do printf '%s ' "$p"; curl -sI "https://<ZAP_URL>$p" | grep -i '^cache-control'; done
+```
+
+Esperado acima: `private, no-store` em todas.
+
+```bash
+for p in /og-image.webp /openapi.json /favicon.ico; do printf '%s ' "$p"; curl -sI "https://<ZAP_URL>$p" | grep -i '^cache-control'; done
+```
+
+Esperado acima: `public, max-age=0, s-maxage=300, stale-while-revalidate=86400`. Conferir também `/api/...` com `no-store` e `/emojibase/...` com `immutable`.
+
+Sem `.env.local`, o middleware devolve 500 e o Next põe o cabeçalho de erro dele. Para medir localmente, passe `NEXT_PUBLIC_SUPABASE_URL` e a chave anon falsas só no ambiente do processo.
+
+## 12. Fora do porte
+
+| Item do Ranch                                                          | Por quê                                                                                                                                   |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Migrações 090–092 do Ranch (endurecimento de RPCs)                     | Já portadas como 090 e 091 do ZAP na [SPEC 081](./spec-081-aperto-de-rpcs-definer-e-privilegios-padrao.md); aplicar lá, antes da F6 (D-8) |
+| Migração 093 do Ranch, `log-purge.ts`, fase 7 do cron (SPEC 083 de lá) | Outra feature                                                                                                                             |
+| Identidade Valen (`34c306a`, `9f9ab39`)                                | Marca do Ranch                                                                                                                            |
+| Correções `db5b1a6` e `859f13e` (nome do contato)                      | Sem relação com a área. Úteis ao ZAP, em tarefa própria                                                                                   |
+| Trecho de `792699a` no webhook da Evolution (revogação `fromMe`)       | Sem relação com a área. Portar só `contact-sidebar.tsx`                                                                                   |
+| Barreiras de docs no `Dockerfile`                                      | O ZAP tem as próprias                                                                                                                     |
+| `plans-seed-rs.sql`                                                    | O projeto `rs` foi removido do ZAP                                                                                                        |
+| §12 da SPEC 084 do Ranch (ganchos de prova) e regras de Ranch Sorting  | Não se aplicam ao ZAP                                                                                                                     |
+| Qualquer recurso dentro da área logada                                 | PRD 082 §3.1 e D-5: PRD próprio, chave própria quando cobrado                                                                             |
+
+## 13. Pendências herdadas
+
+- **Filtro "com acesso ativo" na lista de contatos:** filtrar por `.in('id', …)` estoura a URL e `service_role` furaria o escopo por papel. Fazer no servidor, respeitando a RLS. A função `portal_active_contact_ids` já existe.
+- **Evento `contact.portal_activated`:** `portal_complete_code` não diz se foi primeiro acesso. Pede migração pequena, com `DROP FUNCTION`.
+- **QR code do endereço em Configurações:** não há gerador no cliente.
+- **Template `AUTHENTICATION`:** cada conta oficial precisa aprovar o seu na Meta. O custo da conversa é da conta.
+- **Apagar sessões ao perder elegibilidade (A-8):** decidir depois do piloto (PRD 082 D-6).

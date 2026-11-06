@@ -18,6 +18,10 @@ export interface MetaComponent {
   format?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
   text?: string;
   buttons?: MetaButtonPayload[];
+  /** Só AUTHENTICATION: "Por sua segurança, não compartilhe este código." */
+  add_security_recommendation?: boolean;
+  /** Só AUTHENTICATION: rodapé "Este código expira em N minutos." */
+  code_expiration_minutes?: number;
   example?: {
     header_text?: string[];
     header_url?: string[];
@@ -27,8 +31,10 @@ export interface MetaComponent {
 }
 
 interface MetaButtonPayload {
-  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE';
-  text: string;
+  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE' | 'OTP';
+  /** Opcional só no `OTP`: sem ele a Meta usa "Copiar código" no idioma. */
+  text?: string;
+  otp_type?: 'COPY_CODE';
   url?: string;
   phone_number?: string;
   // URL buttons: array with the sample value, e.g. ["summer2023"].
@@ -146,12 +152,50 @@ const CATEGORY_TO_META: Record<
 };
 
 /**
+ * Validade que o template de autenticação anuncia no rodapé. Igual ao
+ * código pedido pelo contato na área (SPEC 083, `code_ttl_s` = 600 s);
+ * a Meta aceita de 1 a 90.
+ */
+export const AUTHENTICATION_CODE_EXPIRATION_MINUTES = 10;
+
+/**
+ * Template de categoria AUTHENTICATION (SPEC 083 §7, PRD 082 §6).
+ *
+ * A Meta não aceita corpo livre aqui: o texto é fixo e localizado por
+ * ela ("{{1}} é seu código de verificação."), e o que se escolhe é só a
+ * recomendação de segurança, o rodapé de validade e o botão OTP de
+ * copiar. Mandar o `body_text` do formulário ou botões comuns faz a Meta
+ * recusar a criação — por isso este caminho ignora os dois.
+ */
+export function buildAuthenticationTemplatePayload(
+  payload: Pick<TemplatePayload, 'name' | 'language'>
+): MetaTemplateSubmitPayload {
+  return {
+    name: payload.name,
+    category: 'AUTHENTICATION',
+    language: payload.language,
+    components: [
+      { type: 'BODY', add_security_recommendation: true },
+      {
+        type: 'FOOTER',
+        code_expiration_minutes: AUTHENTICATION_CODE_EXPIRATION_MINUTES,
+      },
+      { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE' }] },
+    ],
+  };
+}
+
+/**
  * Assemble the full submit payload (name + category + language +
  * components in canonical order: HEADER → BODY → FOOTER → BUTTONS).
  */
 export function buildMetaTemplatePayload(
   payload: TemplatePayload
 ): MetaTemplateSubmitPayload {
+  if (payload.category === 'Authentication') {
+    return buildAuthenticationTemplatePayload(payload);
+  }
+
   const components: MetaComponent[] = [];
   const header = buildHeaderComponent(payload);
   if (header) components.push(header);

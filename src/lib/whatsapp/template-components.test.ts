@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildMetaTemplatePayload } from './template-components';
+import {
+  AUTHENTICATION_CODE_EXPIRATION_MINUTES,
+  buildMetaTemplatePayload,
+} from './template-components';
 import type { TemplatePayload } from './template-validators';
 
 const base: TemplatePayload = {
@@ -127,5 +130,42 @@ describe('buildMetaTemplatePayload', () => {
       'FOOTER',
       'BUTTONS',
     ]);
+  });
+});
+
+describe('buildMetaTemplatePayload — AUTHENTICATION (SPEC 083)', () => {
+  const auth: TemplatePayload = {
+    name: 'area_codigo',
+    category: 'Authentication',
+    language: 'pt_BR',
+    // O formulário exige corpo; a Meta recusa corpo livre em AUTHENTICATION.
+    body_text: 'Seu código é {{1}}',
+    footer_text: 'Rodapé que não vai',
+    buttons: [{ type: 'QUICK_REPLY', text: 'Não vai' }],
+  };
+
+  it('formato fixo da Meta: segurança, validade e botão OTP de copiar', () => {
+    expect(buildMetaTemplatePayload(auth)).toEqual({
+      name: 'area_codigo',
+      category: 'AUTHENTICATION',
+      language: 'pt_BR',
+      components: [
+        { type: 'BODY', add_security_recommendation: true },
+        { type: 'FOOTER', code_expiration_minutes: 10 },
+        { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE' }] },
+      ],
+    });
+  });
+
+  it('ignora corpo, rodapé e botões do formulário', () => {
+    const json = JSON.stringify(buildMetaTemplatePayload(auth));
+    expect(json).not.toContain('Seu código');
+    expect(json).not.toContain('Rodapé');
+    expect(json).not.toContain('QUICK_REPLY');
+  });
+
+  it('validade anunciada = código da área (10 min) e dentro do limite da Meta', () => {
+    expect(AUTHENTICATION_CODE_EXPIRATION_MINUTES).toBe(10);
+    expect(AUTHENTICATION_CODE_EXPIRATION_MINUTES).toBeLessThanOrEqual(90);
   });
 });

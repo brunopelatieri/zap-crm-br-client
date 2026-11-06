@@ -29,7 +29,10 @@ import {
   sendInteractiveList,
   sendReactionMessage,
 } from '@/lib/whatsapp/meta-api';
-import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
+import type {
+  MetaSendComponent,
+  SendTimeParams,
+} from '@/lib/whatsapp/template-send-builder';
 import type { MessageTemplate } from '@/types';
 import { capabilitiesFor } from '../capabilities';
 import type {
@@ -113,6 +116,7 @@ export const whatsappCloudAdapter: ChannelAdapter = {
       // monta botão de URL com variável — ver `SendTemplateParams`.
       template: (p.definition as MessageTemplate | undefined) ?? undefined,
       params: p.positionalParams,
+      rawComponents: p.rawComponents as MetaSendComponent[] | undefined,
       contextMessageId: p.quotedProviderMessageId ?? undefined,
     });
     return { providerMessageId: r.messageId };

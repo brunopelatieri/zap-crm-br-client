@@ -471,6 +471,7 @@ export async function sendMediaMessage(
 import type { MessageTemplate } from '@/types';
 import {
   buildSendComponents,
+  type MetaSendComponent,
   type SendTimeParams,
 } from './template-send-builder';
 
@@ -501,6 +502,12 @@ export interface SendTemplateMessageArgs {
    * in `buttonParams` keyed by index.
    */
   messageParams?: SendTimeParams;
+  /**
+   * Componentes de envio já prontos, usados como estão e com prioridade
+   * sobre `template`/`params`. Hoje só o template AUTHENTICATION da área
+   * do contato (`buildAuthenticationSendComponents`, SPEC 083).
+   */
+  rawComponents?: MetaSendComponent[];
   /** Meta's message_id of the message being replied to. */
   contextMessageId?: string;
 }
@@ -528,6 +535,7 @@ export async function sendTemplateMessage(
     params,
     template,
     messageParams,
+    rawComponents,
     contextMessageId,
   } = args;
   const url = `${META_API_BASE}/${phoneNumberId}/messages`;
@@ -537,7 +545,9 @@ export async function sendTemplateMessage(
     language: { code: language },
   };
 
-  if (template) {
+  if (rawComponents && rawComponents.length > 0) {
+    templatePayload.components = rawComponents;
+  } else if (template) {
     const components = buildSendComponents(template, {
       // Legacy callers pass body values in `params`; fold them into
       // `messageParams.body` so the new path covers them too.

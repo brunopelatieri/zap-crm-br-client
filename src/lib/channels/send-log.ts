@@ -14,7 +14,15 @@
  */
 
 export type SendOrigin =
-  'inbox' | 'automation' | 'flow' | 'ai' | 'broadcast' | 'api_v1' | 'ingest';
+  | 'inbox'
+  | 'automation'
+  | 'flow'
+  | 'ai'
+  | 'broadcast'
+  | 'api_v1'
+  | 'ingest'
+  /** Código de acesso da área do contato (SPEC 083). */
+  | 'contact_portal';
 
 /**
  * De onde veio a escolha do canal (SPEC 065 §11).

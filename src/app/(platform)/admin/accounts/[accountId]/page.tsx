@@ -56,6 +56,7 @@ import {
 } from '@/lib/platform/audit-feed';
 import type { AccountPayment } from '@/lib/plans/payments';
 import type { PlanUsage } from '@/lib/plans/types';
+import type { PortalAccountSummary } from '@/lib/contact-portal/account';
 
 interface AccountDetailResponse {
   account: AccountDetail;
@@ -77,6 +78,8 @@ interface AccountDetailResponse {
   payments: AccountPayment[] | null;
   /** SPEC 078 §9.3 — membros que SÃO o proprietário da plataforma. */
   platformOwnerUserIds: string[];
+  /** SPEC 083 — área do contato; `null` = a leitura falhou. */
+  contactPortal: PortalAccountSummary | null;
   self: {
     /** A conta aberta é a do próprio proprietário (§4.4). */
     isOwnAccount: boolean;
@@ -321,6 +324,10 @@ function AccountDetailContent({ accountId }: { accountId: string }) {
         </Card>
       ) : null}
 
+      {data.contactPortal ? (
+        <ContactPortalSummaryCard summary={data.contactPortal} />
+      ) : null}
+
       {/* SPEC 062 §7.5 — a retenção desta conta, com os mesmos cartões
           que o dono via em Configurações até a 069 e a prévia calculada
           sobre os dados reais dela. */}
@@ -500,5 +507,43 @@ export default function PlatformAccountDetailPage() {
     <RequirePlatformOwner>
       <AccountDetailContent accountId={params.accountId} />
     </RequirePlatformOwner>
+  );
+}
+
+/** SPEC 083 — PRD 082 §6.3: "ligada/desligada · N contatos com acesso". */
+function ContactPortalSummaryCard({
+  summary,
+}: {
+  summary: PortalAccountSummary;
+}) {
+  const t = useTranslations('Platform.contactPortal');
+  const state = !summary.enabled
+    ? t('off')
+    : summary.eligible
+      ? t('on')
+      : t('ineligible');
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('section')}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-3 text-sm">
+        <Badge
+          variant={
+            summary.enabled && summary.eligible ? 'default' : 'secondary'
+          }
+        >
+          {state}
+        </Badge>
+        <span className="text-muted-foreground">
+          {t('activeCount', { count: summary.activeCount })}
+        </span>
+        {summary.publicCode ? (
+          <code className="text-muted-foreground text-xs">
+            /area/c/{summary.publicCode}
+          </code>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

@@ -50,6 +50,10 @@ export const ACTIVITY_CATALOG = {
     'contact.exported',
     'contact.opted_out',
     'contact.opted_in',
+    // Área do contato (SPEC 083). Login comum não entra (PRD 082 §6.4).
+    'contact.portal_invited',
+    'contact.portal_blocked',
+    'contact.portal_unblocked',
   ],
   deal: ['deal.created', 'deal.stage_changed', 'deal.deleted'],
   broadcast: [

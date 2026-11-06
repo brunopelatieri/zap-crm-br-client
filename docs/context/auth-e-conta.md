@@ -29,11 +29,28 @@
 10. **Erro de Auth sem chave no namespace = `MISSING_MESSAGE` em runtime.** O `i18n:check` valida `CODE_TO_MESSAGE_KEY` em cada namespace que usa o helper (ver [`i18n.md`](./i18n.md)).
 11. **Excluir/transferir conta é só do `owner`** (`canDeleteAccount`, `canTransferOwnership`); fluxo e ordem em [`planos-quotas-admin.md`](./planos-quotas-admin.md).
 
+## Área do contato (`/area`) — PRD 082 / SPEC 083
+
+O cliente final da conta entra em `/area` com telefone + senha; o código de primeiro acesso e de recuperação sai pelo WhatsApp da própria conta. É uma identidade **à parte** do Supabase Auth: o contato não ganha `auth.users`, `profiles`, JWT nem papel Postgres, então nenhuma policy ou grant da CRM o alcança. Código em `src/lib/contact-portal/` (regra de negócio + testes), `src/app/(portal)/` (telas e `area/api/*`), `src/app/api/contact-portal/` (lado da conta), `src/components/contact-portal/`. Banco: schema `contact_portal` (migrações 093–096), alcançado só por funções `public.portal_*` que **só `service_role`** executa.
+
+Regras de isolamento (SPEC 083 §7.2; `isolation.test.ts` e `middleware.contact-portal.test.ts` as prendem por varredura estática e por teste de rota):
+
+1. **`/area` sai cedo do middleware, sem `getUser()`.** A sessão da área não abre nenhuma rota da CRM; usuário da conta e contato convivem no mesmo navegador.
+2. **Cookie `zap_area_session`**: não começa com `sb-`, só vale em `Path=/area`, `HttpOnly`, `SameSite=Lax`, `Secure` fora de `http://localhost`. O nome só aparece em `session.ts`. O banco guarda só o sha256 do token; todo login gera token novo.
+3. **Toda escrita em `/area/api/*` confere `Origin`** (`guardWrite`); ausente ou `null` responde 403. O link da mensagem usa só `NEXT_PUBLIC_SITE_URL` (`configuredSiteOrigin`), nunca o host da requisição.
+4. **Rotas `/area/api/*` importam só `@/lib/contact-portal/*`.** Dentro da área, só `service.ts` e `account.ts` tocam `@/lib/supabase/*`; `plan-gate.ts` passa por `portalDb()` de `service.ts`. Nenhuma rota de `/api/**` fora de `/api/contact-portal/` importa o lado do contato (só `contact-portal/account`, para o resumo do console).
+5. **Rotas da conta (`/api/contact-portal/*`)**: `requireRole`, depois **guarda de plano** (`requireContactPortalFeature` → `plan_feature_strict`, 403 `FEATURE_NOT_IN_PLAN`), depois contato conferido pela RLS da sessão (`visibleContact[Ids]`), depois `portal_*`. Única exceção: `GET /api/contact-portal/settings` responde 200 com `featureInPlan: false` para a aba mostrar o aviso.
+6. **Elegibilidade reconferida a cada requisição, sem cache**: `plan_feature_strict(account, 'contact_portal_enabled')` + `contact_portal.settings.enabled` + `accounts.blocked_at IS NULL` (`account_is_eligible`). Chave ausente, `quotas_enforced` desligado ou conta sem `account_plans` **negam** (PRD 082 D-2); `plan_feature()` da 067 não serve para porta de login. Perder o item nega e **não apaga** senha nem sessões (D-6).
+7. **O código nunca fica em claro no inbox**: `sendAndPersistOutbound` grava `[código de acesso enviado]`; `ingest.ts` descarta o eco `fromMe` que `looksLikePortalCodeMessage` reconhece (marcador fixo `🔐` + seis dígitos, fora da tradução de propósito).
+
+Armadilhas próprias: a mensagem sai sem link se `NEXT_PUBLIC_SITE_URL` faltar; limites por IP caem se o proxy repassar `X-Forwarded-For` do cliente (Traefik é a borda, A-5); `PORTAL_TERMS_VERSION` vira a data do texto de aceite aprovado (D-9) antes da primeira conta real.
+
 ## Armadilhas
 
-| Sintoma                                       | Causa provável                                                                           |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| E-mail de confirmação aponta para `localhost` | **Site URL** do Supabase não trocada para produção (independe de `NEXT_PUBLIC_SITE_URL`) |
+| Sintoma                                                 | Causa provável                                                                                                                   |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| E-mail de confirmação aponta para `localhost`           | **Site URL** do Supabase não trocada para produção (independe de `NEXT_PUBLIC_SITE_URL`)                                         |
+| `/area` responde "conta não elegível" com a área ligada | Plano sem `contact_portal_enabled` (ou 096 não aplicada); conferir `plan_feature_strict` no `vn`, não `plan.features` do cliente |
 
 Outras: `otp_expired` no clique = scanner consumiu o token (regra 5); `auth_callback_failed` com domínio certo = verifier apagado (regra 3); sessão "travada" = cookies renovados não copiados (regra 4). A **Redirect URL** do callback precisa estar na allowlist do Supabase de cada ambiente.
 

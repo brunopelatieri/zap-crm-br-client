@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildSendComponents } from './template-send-builder';
+import {
+  buildAuthenticationSendComponents,
+  buildSendComponents,
+} from './template-send-builder';
 import type { MessageTemplate } from '@/types';
 
 function row(overrides: Partial<MessageTemplate> = {}): MessageTemplate {
@@ -267,5 +270,19 @@ describe('buildSendComponents — end-to-end mix', () => {
     // QUICK_REPLY at index 0 doesn't need send-time params, so only the
     // URL button at index 1 emits a component.
     expect((components[2] as { index: string }).index).toBe('1');
+  });
+});
+
+describe('buildAuthenticationSendComponents (SPEC 083)', () => {
+  it('código no corpo e no botão 0 como url/text — não coupon_code', () => {
+    expect(buildAuthenticationSendComponents('048213')).toEqual([
+      { type: 'body', parameters: [{ type: 'text', text: '048213' }] },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: '048213' }],
+      },
+    ]);
   });
 });

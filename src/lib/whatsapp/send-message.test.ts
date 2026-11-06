@@ -402,6 +402,32 @@ describe('sendMessageToConversation — coldSendOrigin (canal QR)', () => {
     expect(record?.payload).toMatchObject({ origin: 'api' });
   });
 
+  it('origin "api", contato escreveu há 1 h: não é frio — entrega sobre o teto e não registra', async () => {
+    // `last_customer_message_at` segue NULL (CONVERSATION_QR), como em
+    // todo canal QRCode; a última mensagem do contato vem de `messages`.
+    const db = dbForQr({
+      'channel_cold_sends.select': { count: 999 },
+      'messages.select': {
+        data: { created_at: new Date(Date.now() - 3_600_000).toISOString() },
+      },
+    });
+
+    const result = await sendMessageToConversation(db.client, 'acct-1', {
+      ...base,
+      coldSendOrigin: 'api',
+    });
+
+    expect(result.whatsappMessageId).toBe('evo.1');
+    expect(adminDb.inserts.some((i) => i.table === 'channel_cold_sends')).toBe(
+      false
+    );
+    expect(db.filters).toContainEqual({
+      table: 'messages',
+      verb: 'select',
+      args: ['sender_type', 'customer'],
+    });
+  });
+
   it('coldSendOrigin omitido: comportamento de hoje — sem checagem, sem registro', async () => {
     const db = dbForQr({
       'channel_cold_sends.select': { count: 999 },

@@ -21,6 +21,7 @@ import { isPlatformOwnerEmail } from '@/lib/platform/owner';
 import { getAccountPlan } from '@/lib/plans/account-plan';
 import { listAccountPayments } from '@/lib/plans/payments';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { createPortalAccountService } from '@/lib/contact-portal/account';
 
 const NOT_FOUND = NextResponse.json({ error: 'Not found' }, { status: 404 });
 
@@ -45,7 +46,7 @@ export async function GET(
   // conveniência, não garantia.
   const self = await loadOwnerSelfRefs(db, ownerUserId);
 
-  const [detail, planSnapshot, events, auditEvents, payments] =
+  const [detail, planSnapshot, events, auditEvents, payments, contactPortal] =
     await Promise.all([
       getAccountDetail(db, accountId),
       getAccountPlan(accountId, db).catch((err) => {
@@ -75,6 +76,11 @@ export async function GET(
         );
         return null;
       }),
+      // SPEC 083 — "ligada/desligada · N contatos com acesso" (PRD 082
+      // §5). Falha vira `null`: o card some, o detalhe não cai.
+      createPortalAccountService(db)
+        .summary(accountId)
+        .catch(() => null),
     ]);
 
   if (!detail) {
@@ -91,6 +97,8 @@ export async function GET(
     auditEvents,
     // SPEC 078 §4.4 — `null` = a leitura falhou.
     payments,
+    // SPEC 083 — `null` = a leitura falhou.
+    contactPortal,
     // SPEC 078 §9.3 — membros que SÃO o proprietário da plataforma: o
     // diálogo de edição trava o campo de e-mail deles.
     platformOwnerUserIds: detail.members

@@ -272,4 +272,21 @@ describe('validateTemplatePayload — integration', () => {
       })
     ).toThrow(/exactly 1 sample/);
   });
+  it('Authentication (SPEC 083): corpo é da Meta — só nome e idioma contam', () => {
+    expect(
+      validateTemplatePayload({
+        ...baseValid,
+        category: 'Authentication',
+        body_text: '',
+        sample_values: undefined,
+      })
+    ).toEqual({ bodyVarCount: 1, headerVarCount: 0 });
+    expect(() =>
+      validateTemplatePayload({
+        ...baseValid,
+        category: 'Authentication',
+        name: 'Nome Inválido',
+      })
+    ).toThrow();
+  });
 });

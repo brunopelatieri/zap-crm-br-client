@@ -55,6 +55,50 @@ export interface ColdSendCheck {
 }
 
 /**
+ * Última mensagem DO CONTATO nesta conversa — o `lastInboundAt` que
+ * `checkColdSend` espera.
+ *
+ * Por que não `conversations.last_customer_message_at`
+ *
+ *   Ele é a âncora da janela de 24h, e `ingest.ts` só o grava em canal
+ *   COM janela (`shouldTrackSessionWindow`) — gravá-lo no QRCode poria a
+ *   conversa no alcance do reengajamento. Ou seja: justamente nos canais
+ *   onde o teto frio vale, ele é NULL para sempre, e NULL é "nunca
+ *   escreveu" (`isColdSend` → frio). Lido dali, todo envio de motor no
+ *   QRCode contava como frio, inclusive a resposta a quem acabou de
+ *   escrever — e o aquecimento (piso de 5 no 1º dia) esgotava em
+ *   minutos de conversa normal.
+ *
+ *   A própria mensagem do contato é a fonte que existe em todo canal.
+ *   O índice `(conversation_id, created_at)` (068) cobre a leitura.
+ *
+ * Falha de leitura vira `null` (frio): é o lado conservador, e o mesmo
+ * resultado de antes desta função existir.
+ */
+export async function loadLastInboundAt(
+  db: SupabaseClient,
+  conversationId: string
+): Promise<Date | null> {
+  const { data, error } = await db
+    .from('messages')
+    .select('created_at')
+    .eq('conversation_id', conversationId)
+    .eq('sender_type', 'customer')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error(
+      '[cold-send-wiring] failed to load last inbound message:',
+      error.message
+    );
+    return null;
+  }
+  const createdAt = (data as { created_at?: string | null } | null)?.created_at;
+  return createdAt ? new Date(createdAt) : null;
+}
+
+/**
  * Este envio É frio, e nesse caso ele pode sair agora? Avalia SEM
  * gravar nada — `recordColdSend` é a segunda metade, chamada depois da
  * entrega confirmada (§6.1 ponto 4: contar antes transformaria uma
@@ -73,7 +117,11 @@ export async function checkColdSend(
      * teto vendido ao cliente valer de fato.
      */
     accountId?: string | null;
-    /** Última mensagem DO CONTATO nesta conversa; `null` = nunca escreveu. */
+    /**
+     * Última mensagem DO CONTATO nesta conversa; `null` = nunca escreveu.
+     * Use `loadLastInboundAt` — não `last_customer_message_at`, que é
+     * NULL em todo canal onde este teto vale.
+     */
     lastInboundAt: Date | null;
   },
   now: Date = new Date(),

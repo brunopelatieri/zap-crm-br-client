@@ -55,6 +55,7 @@ import {
 import { can, canSendMedia } from './capabilities';
 import {
   checkColdSend,
+  loadLastInboundAt,
   recordColdSend,
   ColdSendLimitError,
 } from './cold-send-wiring';
@@ -128,6 +129,8 @@ export type OutboundContent =
       definition?: unknown;
       components?: unknown;
       positionalParams?: string[];
+      /** Componentes de envio prontos (template AUTHENTICATION, SPEC 083). */
+      rawComponents?: unknown;
     }
   | { kind: 'interactive'; payload: InteractiveMessagePayload };
 
@@ -536,6 +539,7 @@ async function sendContentViaAdapter(
         definition: content.definition,
         components: content.components,
         positionalParams: content.positionalParams,
+        rawComponents: content.rawComponents,
         quotedProviderMessageId,
       });
       return r.providerMessageId;
@@ -694,7 +698,7 @@ export async function sendAndPersistOutbound(input: {
   db: SupabaseClient;
   accountId: string;
   /** Log estruturado (SPEC 064 §11.1) — qual motor disparou este envio. */
-  origin: 'automation' | 'flow' | 'ai';
+  origin: 'automation' | 'flow' | 'ai' | 'contact_portal';
   /**
    * Envia por um canal EXPLÍCITO, ignorando o da conversa.
    *
@@ -748,18 +752,11 @@ export async function sendAndPersistOutbound(input: {
   // de qualquer outro erro e tratar como adiamento.
   let coldSend: Awaited<ReturnType<typeof checkColdSend>> | null = null;
   if (!can(ctx.channel.type, 'sessionWindow24h')) {
-    const { data: conv } = await db
-      .from('conversations')
-      .select('last_customer_message_at')
-      .eq('id', conversationId)
-      .maybeSingle();
     coldSend = await checkColdSend(db, {
       channelId: ctx.channel.id,
       channelType: ctx.channel.type,
       accountId,
-      lastInboundAt: conv?.last_customer_message_at
-        ? new Date(conv.last_customer_message_at)
-        : null,
+      lastInboundAt: await loadLastInboundAt(db, conversationId),
     });
     if (coldSend.decision && !coldSend.decision.allowed) {
       throw new ColdSendLimitError(coldSend.decision);

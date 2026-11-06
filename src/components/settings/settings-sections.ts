@@ -1,5 +1,6 @@
 import {
   Coins,
+  DoorOpen,
   FileText,
   KeyRound,
   LayoutGrid,
@@ -37,6 +38,7 @@ export const SETTINGS_SECTIONS = [
   'fields',
   'deals',
   'members',
+  'contact-portal',
   'api',
   'webhook-log',
   'danger',
@@ -130,6 +132,14 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     label: 'Team members',
     icon: UsersRound,
     group: 'workspace',
+  },
+  // Área do contato (SPEC 083): configuração da conta, `admin`+.
+  'contact-portal': {
+    id: 'contact-portal',
+    label: 'Contact area',
+    icon: DoorOpen,
+    group: 'workspace',
+    minRole: 'admin',
   },
   api: { id: 'api', label: 'API keys', icon: KeyRound, group: 'workspace' },
   'webhook-log': {

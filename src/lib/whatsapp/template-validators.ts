@@ -343,6 +343,13 @@ export function validateTemplatePayload(payload: TemplatePayload): {
   if (!payload.language?.trim()) {
     throw new Error('Language is required.');
   }
+  // AUTHENTICATION (SPEC 083): a Meta fixa corpo, rodapé e botão
+  // (`buildAuthenticationTemplatePayload` ignora o que vier do
+  // formulário), então só nome e idioma importam. O corpo tem uma
+  // variável — o código.
+  if (payload.category === 'Authentication') {
+    return { bodyVarCount: 1, headerVarCount: 0 };
+  }
   const bodyVars = validateBody(payload.body_text);
   validateFooter(payload.footer_text);
   const headerResult = validateHeader(payload);

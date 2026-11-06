@@ -84,37 +84,63 @@ describe('validateOverrides', () => {
   });
 });
 
-// Extrai cada bloco `-- PLAN: <code>` do seed comercial e valida contra
+// Extrai cada bloco `-- PLAN: <code>` dos seeds comerciais e valida contra
 // types.ts. Compensa o JSONB sem CHECK no banco (SPEC 059 §5, D-2): o
 // seed é o único lugar onde a chave errada não seria pega por typecheck.
-describe('supabase/setup/plans-seed.sql', () => {
-  const seedPath = path.resolve(
-    __dirname,
-    '../../../supabase/setup/plans-seed.sql'
-  );
+// Os dois seeds (genérico e o do `vn`) passam pela mesma régua (SPEC 083
+// §5.4); o bloco comentado de um plano também é lido — o regex não liga
+// para `--`, e é melhor validar um plano desligado do que deixá-lo
+// envelhecer com chave errada.
+describe.each(['plans-seed.sql', 'plans-seed-vn.sql'])(
+  'supabase/setup/%s',
+  (seedFile) => {
+    const seedPath = path.resolve(
+      __dirname,
+      '../../../supabase/setup',
+      seedFile
+    );
 
-  it('todo plano do seed comercial usa só chaves conhecidas', () => {
-    if (!existsSync(seedPath)) {
-      // F8 ainda não escreveu o seed comercial — nada a validar ainda.
-      return;
+    function readPlans(): CatalogPlanInput[] | null {
+      if (!existsSync(seedPath)) {
+        // `supabase/` fica fora do git: num checkout sem o seed, nada a conferir.
+        return null;
+      }
+      const sql = readFileSync(seedPath, 'utf-8');
+      const blockPattern =
+        /-- PLAN: (\w+)[\s\S]*?'(\{.*?\})'::jsonb[\s\S]*?'(\{.*?\})'::jsonb/g;
+
+      const plans: CatalogPlanInput[] = [];
+      let match: RegExpExecArray | null;
+      while ((match = blockPattern.exec(sql)) !== null) {
+        const [, code, limitsJson, featuresJson] = match;
+        plans.push({
+          code,
+          limits: JSON.parse(limitsJson),
+          features: JSON.parse(featuresJson),
+        });
+      }
+      return plans;
     }
 
-    const sql = readFileSync(seedPath, 'utf-8');
-    const blockPattern =
-      /-- PLAN: (\w+)[\s\S]*?'(\{.*?\})'::jsonb[\s\S]*?'(\{.*?\})'::jsonb/g;
+    it('todo plano do seed usa só chaves conhecidas', () => {
+      const plans = readPlans();
+      if (!plans) return;
+      expect(plans.length).toBeGreaterThan(0);
+      expect(validateCatalog(plans)).toEqual([]);
+    });
 
-    const plans: CatalogPlanInput[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = blockPattern.exec(sql)) !== null) {
-      const [, code, limitsJson, featuresJson] = match;
-      plans.push({
-        code,
-        limits: JSON.parse(limitsJson),
-        features: JSON.parse(featuresJson),
-      });
-    }
-
-    expect(plans.length).toBeGreaterThan(0);
-    expect(validateCatalog(plans)).toEqual([]);
-  });
-});
+    it('contact_portal_enabled é explícito em todo plano (PRD 082 D-1: nasce false)', () => {
+      // Chave ausente não libera (plan_feature_strict), mas o seed grava o
+      // `false` mesmo assim: a decisão comercial fica visível no catálogo
+      // e no editor do console, e não dependente do default de uma função.
+      const plans = readPlans();
+      if (!plans) return;
+      for (const plan of plans) {
+        expect(plan.features, `${seedFile}: plano ${plan.code}`).toHaveProperty(
+          'contact_portal_enabled',
+          false
+        );
+      }
+    });
+  }
+);

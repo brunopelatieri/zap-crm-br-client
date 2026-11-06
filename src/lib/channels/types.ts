@@ -153,6 +153,13 @@ export interface SendTemplateParams {
    * dois porque o disparo em massa e as automações ainda o usam.
    */
   positionalParams?: string[];
+  /**
+   * Componentes de envio já montados, usados como estão (`unknown` pelo
+   * mesmo motivo de `components`). Só o template AUTHENTICATION da área
+   * do contato usa (SPEC 083): o formato de envio dele é fixo e não sai
+   * da linha local do template.
+   */
+  rawComponents?: unknown;
   quotedProviderMessageId?: string | null;
 }
 

@@ -38,6 +38,7 @@ import { AccountBlockedError } from '@/lib/platform/blocked';
 import { can } from '@/lib/channels/capabilities';
 import {
   checkColdSend,
+  loadLastInboundAt,
   recordColdSend,
   type ColdSendCheck,
 } from '@/lib/channels/cold-send-wiring';
@@ -368,9 +369,7 @@ export async function sendMessageToConversation(
       channelId: channelCtx.channel.id,
       channelType: channelCtx.channel.type,
       accountId,
-      lastInboundAt: conversation.last_customer_message_at
-        ? new Date(conversation.last_customer_message_at)
-        : null,
+      lastInboundAt: await loadLastInboundAt(db, conversationId),
     });
     if (
       coldSendOrigin === 'api' &&

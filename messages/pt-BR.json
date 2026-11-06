@@ -274,7 +274,8 @@
       "api_v1_enabled": "API pública",
       "flows_enabled": "Flows",
       "broadcasts_enabled": "Disparos em massa",
-      "webhooks_out_enabled": "Webhooks de saída"
+      "webhooks_out_enabled": "Webhooks de saída",
+      "contact_portal_enabled": "Área do contato"
     },
     "cycle": {
       "title": "Trocar para {plan}",
@@ -460,7 +461,10 @@
         "imported": "{actor} importou {count, plural, =1 {# contato} other {# contatos}}",
         "exported": "{actor} exportou {count, plural, =1 {# contato} other {# contatos}}",
         "opted_out": "Um contato pediu para sair da lista",
-        "opted_in": "Um contato voltou a aceitar mensagens"
+        "opted_in": "Um contato voltou a aceitar mensagens",
+        "portal_invited": "{actor} enviou o acesso à área do contato para {label}",
+        "portal_blocked": "{actor} bloqueou o acesso de {label} à área do contato",
+        "portal_unblocked": "{actor} desbloqueou o acesso de {label} à área do contato"
       },
       "deal": {
         "created": "{actor} criou o negócio {label}",
@@ -1356,6 +1360,39 @@
       "toastRenameFailed": "Não foi possível renomear o campo.",
       "toastDeleteFailed": "Não foi possível excluir o campo.",
       "toastDeleted": "\"{name}\" excluído."
+    },
+    "portalAccess": {
+      "title": "Área do contato",
+      "status": {
+        "none": "Sem acesso",
+        "invited": "Convite enviado",
+        "active": "Ativo",
+        "blocked": "Bloqueado"
+      },
+      "lastLogin": "Último acesso: {date}",
+      "neverLoggedIn": "Nunca entrou",
+      "areaOff": "A área do contato está desligada nesta conta.",
+      "invite": "Enviar acesso",
+      "inviteSent": "Código de acesso enviado pelo WhatsApp",
+      "block": "Bloquear acesso",
+      "unblock": "Desbloquear acesso",
+      "blocked": "Acesso bloqueado",
+      "unblocked": "Acesso desbloqueado",
+      "endSessions": "Encerrar sessões",
+      "sessionsEnded": "Sessões encerradas",
+      "failed": "Não foi possível concluir a ação",
+      "reasons": {
+        "opted_out": "Este contato pediu para não receber mensagens, então o convite não é enviado.",
+        "blocked": "O acesso deste contato está bloqueado.",
+        "not_eligible": "A área do contato não está disponível nesta conta.",
+        "invalid_phone": "O telefone deste contato não pode receber o código.",
+        "throttled": "Um código acabou de ser enviado. Tente de novo em um minuto.",
+        "not_found": "Contato não encontrado.",
+        "no_channel": "Não há canal conectado para enviar o código.",
+        "needs_template": "Fora da janela de 24 horas o número oficial precisa de um template de Autenticação aprovado.",
+        "cold_limit": "O canal QRCode chegou ao limite de primeiras mensagens.",
+        "send_failed": "O WhatsApp não aceitou a mensagem."
+      }
     }
   },
   "Import": {
@@ -3565,7 +3602,8 @@
       "api": "Chaves de API",
       "webhook-log": "Log de webhook",
       "retention": "Retenção",
-      "danger": "Zona de risco"
+      "danger": "Zona de risco",
+      "contact-portal": "Área do contato"
     },
     "groups": {
       "account": "Conta",
@@ -3843,6 +3881,31 @@
       "errorNotOwner": "Só o titular da conta pode excluí-la.",
       "errorGeneric": "Não foi possível excluir a conta. Tente novamente.",
       "leftovers": "Algumas limpezas não puderam ser concluídas automaticamente e foram registradas para o operador."
+    },
+    "contactPortal": {
+      "title": "Área do contato",
+      "desc": "Deixe seus contatos entrarem com o número de WhatsApp e uma senha, e verem o que você oferece a eles.",
+      "enabledLabel": "Área do contato ligada",
+      "enabledHint": "Desligar corta todos os contatos desta conta na hora. As senhas ficam guardadas para quando você religar.",
+      "notEligible": "A área está ligada, mas os contatos não conseguem entrar: o plano da conta não inclui o recurso ou a conta está bloqueada.",
+      "notInPlan": "A área do contato não está incluída no seu plano. Fale com o proprietário da plataforma para liberar.",
+      "channelLabel": "Canal que envia os códigos",
+      "channelDefault": "Canal padrão da conta",
+      "templateLabel": "Template de autenticação (número oficial)",
+      "templateNone": "Sem template",
+      "templateHint": "Fora da janela de 24 horas o número oficial só envia um template AUTHENTICATION aprovado. Cada envio é uma conversa cobrada pela Meta desta conta.",
+      "templateEmpty": "Ainda não há template de Autenticação aprovado. Crie um em Templates.",
+      "keywordLabel": "Palavra-chave de autoatendimento",
+      "keywordHint": "O contato que mandar esta palavra recebe um código na mesma conversa.",
+      "keywordOff": "Palavra-chave desligada",
+      "urlLabel": "Endereço da área para divulgar",
+      "copy": "Copiar",
+      "copied": "Endereço copiado",
+      "save": "Salvar",
+      "saved": "Configurações da área do contato salvas",
+      "saveFailed": "Não foi possível salvar as configurações",
+      "loadFailed": "Não foi possível carregar as configurações",
+      "neverConfigured": "A área ainda não foi configurada nesta conta."
     }
   },
   "Platform": {
@@ -4274,6 +4337,13 @@
       "email_taken": "Outro usuário já usa este e-mail.",
       "user_not_found": "Usuário não encontrado.",
       "partial_update": "O e-mail foi alterado, mas o nome não foi salvo."
+    },
+    "contactPortal": {
+      "section": "Área do contato",
+      "on": "Ligada",
+      "off": "Desligada",
+      "ineligible": "Ligada, mas indisponível (plano ou bloqueio)",
+      "activeCount": "{count, plural, =0 {Nenhum contato com acesso} =1 {# contato com acesso} other {# contatos com acesso}}"
     }
   },
   "Blocked": {
@@ -4283,5 +4353,90 @@
     "contactPrompt": "Para resolver, escreva para {email}.",
     "contactMissing": "Para resolver, entre em contato com quem administra este servidor.",
     "signOut": "Sair"
+  },
+  "ContactPortal": {
+    "brand": "Área do contato",
+    "brandOf": "Área de {account}",
+    "phoneLabel": "Número do WhatsApp",
+    "phonePlaceholder": "(11) 99999-9999",
+    "passwordLabel": "Senha",
+    "showPassword": "Mostrar senha",
+    "hidePassword": "Esconder senha",
+    "backToLogin": "Voltar para entrar",
+    "loading": "Aguarde…",
+    "login": {
+      "title": "Entrar",
+      "description": "Use o número de WhatsApp em que você conversa com a gente e a sua senha.",
+      "submit": "Entrar",
+      "firstAccess": "Primeiro acesso",
+      "forgot": "Esqueci minha senha"
+    },
+    "request": {
+      "firstAccessTitle": "Primeiro acesso",
+      "recoverTitle": "Esqueci minha senha",
+      "description": "Informe o seu número de WhatsApp. Vamos mandar um código de 6 dígitos para ele.",
+      "submit": "Enviar código",
+      "sent": "Se este número tiver acesso, enviamos um código pelo WhatsApp.",
+      "haveCode": "Já tenho o código"
+    },
+    "code": {
+      "title": "Crie a sua senha",
+      "description": "Digite o código que chegou no WhatsApp e escolha uma senha.",
+      "codeLabel": "Código de 6 dígitos",
+      "newPassword": "Nova senha",
+      "confirmPassword": "Confirme a senha",
+      "terms": "Li e aceito os termos de uso desta área.",
+      "submit": "Salvar e entrar",
+      "resend": "Não chegou? Pedir outro código"
+    },
+    "choose": {
+      "title": "Escolha a conta",
+      "description": "A sua senha abre mais de uma área. Em qual você quer entrar?",
+      "enter": "Entrar"
+    },
+    "panel": {
+      "greeting": "Olá, {name}!",
+      "greetingNoName": "Olá!",
+      "accountLine": "Você está na área de {account}.",
+      "comingSoonTitle": "Em breve",
+      "comingSoonBody": "Novos recursos vão aparecer aqui conforme a conta liberar.",
+      "switchAccount": "Trocar de conta",
+      "myAccount": "Minha conta"
+    },
+    "account": {
+      "title": "Minha conta",
+      "name": "Nome",
+      "phone": "WhatsApp",
+      "changePasswordTitle": "Trocar senha",
+      "changePasswordHint": "Troca a senha das áreas em que você entrou com ela nesta sessão.",
+      "currentPassword": "Senha atual",
+      "newPassword": "Nova senha",
+      "confirmPassword": "Confirme a nova senha",
+      "save": "Trocar senha",
+      "saved": "Senha trocada. Os outros aparelhos foram desconectados.",
+      "signOut": "Sair",
+      "signOutEverywhere": "Sair de todos os aparelhos",
+      "back": "Voltar ao painel"
+    },
+    "errors": {
+      "invalid_input": "Preencha todos os campos.",
+      "forbidden_origin": "Pedido recusado. Recarregue a página e tente de novo.",
+      "invalid_credentials": "Número ou senha inválidos.",
+      "throttled": "Muitas tentativas. Espere alguns minutos e tente de novo.",
+      "invalid_code": "Código inválido ou vencido. Peça um novo.",
+      "weak_password": "A senha não atende aos requisitos.",
+      "password_mismatch": "As senhas não conferem.",
+      "terms_required": "É preciso aceitar os termos de uso.",
+      "invalid_current": "A senha atual está incorreta.",
+      "no_session": "A sua sessão terminou. Entre de novo.",
+      "not_found": "Esta conta não está mais disponível.",
+      "unexpected": "Algo deu errado. Tente de novo."
+    },
+    "whatsapp": {
+      "codeMessage": "{code} é o seu código de acesso à área de {account}. Vale por {minutes} minutos. Não compartilhe com ninguém.",
+      "inviteMessage": "{account} liberou o seu acesso à área dela. O seu código é {code} (vale por {hours} horas). Não compartilhe com ninguém.",
+      "signInLink": "Para entrar: {url}",
+      "redactedBody": "[código de acesso enviado]"
+    }
   }
 }

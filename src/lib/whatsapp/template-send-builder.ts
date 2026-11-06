@@ -249,3 +249,27 @@ export function buildSendComponents(
   }
   return out;
 }
+
+/**
+ * Componentes de ENVIO de um template AUTHENTICATION com botão de copiar
+ * código (SPEC 083 §7).
+ *
+ * Não passa por `buildSendComponents`: a Meta cria o botão como `OTP`,
+ * mas ele vira `URL` depois de aprovado, e a linha local sincronizada
+ * pode não refletir isso. O formato de envio é fixo e documentado — o
+ * código no corpo ({{1}}) E no botão de índice 0, com `sub_type: url` e
+ * parâmetro `text`. Não é o `coupon_code` dos templates de marketing.
+ */
+export function buildAuthenticationSendComponents(
+  code: string
+): MetaSendComponent[] {
+  return [
+    { type: 'body', parameters: [{ type: 'text', text: code }] },
+    {
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: code }],
+    },
+  ];
+}

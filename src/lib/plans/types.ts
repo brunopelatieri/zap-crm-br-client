@@ -80,6 +80,11 @@ export const FEATURE_KEYS = [
   'flows_enabled',
   'broadcasts_enabled',
   'webhooks_out_enabled',
+  // Área do contato (PRD 082 D-1/D-2, SPEC 083 §5.4). Primeira chave que
+  // bloqueia de verdade uma rota: lida por `plan_feature_strict()` (096),
+  // fail-closed — chave ausente é FALSE. Mesmo assim o seed grava `false`
+  // explícito nos quatro planos (D-1), e `catalog.test.ts` cobra isso.
+  'contact_portal_enabled',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

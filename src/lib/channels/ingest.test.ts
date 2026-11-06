@@ -52,6 +52,11 @@ vi.mock('@/lib/webhooks/deliver', () => ({
   dispatchWebhookEvent: (...args: unknown[]) => dispatchWebhookEvent(...args),
 }));
 
+const handlePortalKeyword = vi.fn();
+vi.mock('@/lib/contact-portal/keyword', () => ({
+  handlePortalKeyword: (...args: unknown[]) => handlePortalKeyword(...args),
+}));
+
 // ------------------------------------------------------------
 // Supabase de mentira: registra cada operação na ordem em que
 // aconteceu. É a ordem que este PR precisa provar.
@@ -190,6 +195,7 @@ function opsFor(db: FakeDb, table: string, verb?: RecordedOp['verb']) {
 beforeEach(() => {
   vi.clearAllMocks();
   dispatchInboundToFlows.mockResolvedValue({ consumed: false });
+  handlePortalKeyword.mockResolvedValue(false);
   runAutomationsForTrigger.mockResolvedValue(undefined);
   dispatchWebhookEvent.mockResolvedValue(undefined);
   dispatchInboundToAiReply.mockResolvedValue(undefined);
@@ -634,5 +640,84 @@ describe('ingestInbound — idempotência de reentrega', () => {
       'id',
       { count: 'exact', head: true },
     ]);
+  });
+});
+
+describe('ingestInbound — área do contato (SPEC 083 §7)', () => {
+  it('palavra-chave consumida: sem flows, sem gatilhos de conteúdo, sem IA', async () => {
+    const db = existingThread();
+    handlePortalKeyword.mockResolvedValue(true);
+
+    await ingestInbound(ctxFor(db), textMessage({ text: 'SENHA' }));
+
+    expect(handlePortalKeyword).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'acct-1',
+        contactId: 'contact-1',
+        contactPhone: CONTACT.phone,
+        conversationId: 'conv-1',
+        text: 'SENHA',
+      })
+    );
+    expect(dispatchInboundToFlows).not.toHaveBeenCalled();
+    const triggers = runAutomationsForTrigger.mock.calls.map(
+      (c) => (c[0] as { triggerType: string }).triggerType
+    );
+    expect(triggers).not.toContain('new_message_received');
+    expect(triggers).not.toContain('keyword_match');
+    expect(dispatchInboundToAiReply).not.toHaveBeenCalled();
+    // A mensagem continua no inbox como qualquer outra.
+    expect(opsFor(db, 'messages', 'insert')[0].payload).toMatchObject({
+      sender_type: 'customer',
+      content_text: 'SENHA',
+    });
+  });
+
+  it('roda depois do opt-out e antes dos flows', async () => {
+    const db = existingThread();
+    await ingestInbound(ctxFor(db), textMessage({ text: 'senha' }));
+    expect(handlePortalKeyword.mock.invocationCallOrder[0]).toBeLessThan(
+      dispatchInboundToFlows.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('não roda em pedido de opt-out nem em toque de botão', async () => {
+    await ingestInbound(
+      ctxFor(existingThread()),
+      textMessage({ text: 'SAIR' })
+    );
+    await ingestInbound(
+      ctxFor(existingThread()),
+      textMessage({ contentType: 'interactive', interactiveReplyId: 'opt-1' })
+    );
+    expect(handlePortalKeyword).not.toHaveBeenCalled();
+  });
+
+  it('eco fromMe de mensagem de código não é gravado (quem grava é o envio, redigido)', async () => {
+    // Teste real de 2026-10-30: no QRCode o eco chega ~450 ms ANTES do
+    // INSERT do envio — a checagem de "já gravado" não o pega.
+    const db = existingThread();
+
+    await ingestInbound(
+      ctxFor(db, 'whatsapp_qr'),
+      textMessage({
+        fromMe: true,
+        text: '🔐 048213 é o seu código de acesso à área de Valen Ranch.',
+      })
+    );
+
+    expect(opsFor(db, 'messages', 'insert')).toHaveLength(0);
+    expect(opsFor(db, 'conversations', 'update')).toHaveLength(0);
+    expect(JSON.stringify(db.ops)).not.toContain('048213');
+    expect(handlePortalKeyword).not.toHaveBeenCalled();
+  });
+
+  it('eco comum do operador continua gravado', async () => {
+    const db = existingThread();
+    await ingestInbound(
+      ctxFor(db, 'whatsapp_qr'),
+      textMessage({ fromMe: true, text: 'Seu número da sorte é 123456' })
+    );
+    expect(opsFor(db, 'messages', 'insert')).toHaveLength(1);
   });
 });

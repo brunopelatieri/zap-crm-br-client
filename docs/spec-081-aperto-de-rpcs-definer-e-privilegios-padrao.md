@@ -9,6 +9,7 @@
 | **Migrações**     | `090_tighten_definer_rpc_grants_and_search_path.sql`, `091_default_privileges_closed.sql`                                                         |
 | **Conferência**   | `scripts/verify-090-rpc-grants.sql` (só lê)                                                                                                       |
 | **Contexto**      | [`supabase-rls-mcp`](./context/supabase-rls-mcp.md) (D-19, D-20) · [`status.md`](./context/status.md)                                             |
+| **Depende disto** | [`PRD 082`](./prd-082-area-do-contato.md) D-8: a área do contato só vai a produção depois desta SPEC aplicada no `vn`                             |
 
 > `/supabase` e `/scripts` estão no `.gitignore`: os três arquivos SQL acima não entram em commit. Só esta SPEC e os `.md` de contexto vão para o Git.
 
@@ -138,5 +139,5 @@ Rode no diretório do ZAP, com o projeto `vn` confirmado pelo mantenedor. Os pas
 
 ## 6. Pontas abertas
 
-- **Numeração da área do contato.** `docs/feature-spec-area-do-contato-zap-crm-br.md`, no repositório do Ranch, mapeia as migrações da área para ZAP 090/091/092. Esses números estão ocupados: a área passa a 092/093/094. A spec ainda não foi corrigida.
+- **Numeração da área do contato.** Resolvida em 2026-11-05: a 092 foi tomada pelo `app_id` por canal (`092_whatsapp_config_app_id.sql`, já aplicada no `vn`), então as migrações da área passam a **093/094/095**, mais uma 096 só do ZAP (guarda por plano). O antigo `docs/feature-spec-area-do-contato-zap-crm-br.md` foi substituído por [`PRD 082`](./prd-082-area-do-contato.md) e [`SPEC 083`](./spec-083-area-do-contato.md), que já trazem esses números. O PRD 082 D-8 exige esta SPEC aplicada no `vn` antes da primeira conta real com a área.
 - **Registro de migrações no `vn`.** `list_migrations` para em 085 e não prova nada. Confira pelo script.

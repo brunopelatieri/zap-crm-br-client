@@ -39,6 +39,7 @@ import {
   ContactForm,
   type ContactSavePatch,
 } from '@/components/contacts/contact-form';
+import { ContactPortalAccessCard } from '@/components/contacts/contact-portal-access-card';
 import { toContactTagRowsFromTags } from '@/lib/tags';
 
 interface SiblingThread {
@@ -465,6 +466,14 @@ export function ContactSidebar({
               </div>
             </>
           )}
+
+          {/* Área do contato (SPEC 083): o mesmo cartão da ficha, para
+              enviar o acesso sem sair da conversa. `key` zera o estado ao
+              trocar de conversa, em vez de mostrar o contato anterior
+              enquanto o novo carrega. */}
+          <div className="mt-4">
+            <ContactPortalAccessCard key={contact.id} contactId={contact.id} />
+          </div>
 
           {/* Divider */}
           <div className="border-border my-4 border-t" />

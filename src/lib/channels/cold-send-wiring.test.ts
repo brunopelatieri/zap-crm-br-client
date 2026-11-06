@@ -24,6 +24,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 
 import {
   checkColdSend,
+  loadLastInboundAt,
   recordColdSend,
   ColdSendLimitError,
 } from './cold-send-wiring';
@@ -167,6 +168,57 @@ describe('checkColdSend', () => {
     expect(check.cold).toBe(true);
     expect(check.decision?.allowed).toBe(false);
     expect(check.decision?.reason).toBe('daily_limit');
+  });
+});
+
+describe('loadLastInboundAt', () => {
+  /** Uma leitura só; guarda tabela e filtros para conferir a consulta. */
+  function oneRead(result: { data?: unknown; error?: unknown }) {
+    const calls: Array<[string, ...unknown[]]> = [];
+    const c = {
+      select: (...a: unknown[]) => (calls.push(['select', ...a]), c),
+      eq: (...a: unknown[]) => (calls.push(['eq', ...a]), c),
+      order: (...a: unknown[]) => (calls.push(['order', ...a]), c),
+      limit: (...a: unknown[]) => (calls.push(['limit', ...a]), c),
+      maybeSingle: () =>
+        Promise.resolve({
+          data: result.data ?? null,
+          error: result.error ?? null,
+        }),
+    };
+    const from = vi.fn((table: string) => {
+      calls.push(['from', table]);
+      return c;
+    });
+    return { client: { from } as unknown as SupabaseClient, calls };
+  }
+
+  it('lê a mensagem mais recente DO CONTATO na conversa, em messages', async () => {
+    const { client, calls } = oneRead({
+      data: { created_at: '2026-10-31T10:00:00Z' },
+    });
+
+    const at = await loadLastInboundAt(client, 'conv-1');
+
+    expect(at).toEqual(new Date('2026-10-31T10:00:00Z'));
+    expect(calls).toContainEqual(['from', 'messages']);
+    expect(calls).toContainEqual(['eq', 'conversation_id', 'conv-1']);
+    expect(calls).toContainEqual(['eq', 'sender_type', 'customer']);
+    expect(calls).toContainEqual(['order', 'created_at', { ascending: false }]);
+    // Nunca a âncora da janela — ela é NULL no QRCode por construção.
+    expect(calls).not.toContainEqual(['from', 'conversations']);
+  });
+
+  it('contato que nunca escreveu → null (frio)', async () => {
+    const { client } = oneRead({ data: null });
+    expect(await loadLastInboundAt(client, 'conv-1')).toBeNull();
+  });
+
+  it('falha de leitura → null (frio), sem lançar', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = oneRead({ error: { message: 'boom' } });
+    expect(await loadLastInboundAt(client, 'conv-1')).toBeNull();
+    spy.mockRestore();
   });
 });
 

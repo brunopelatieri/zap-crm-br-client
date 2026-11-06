@@ -122,26 +122,30 @@ const nextConfig: NextConfig = {
    *   renderizava sem estilo. Modo privado/anônimo não ajudava porque
    *   o cache é server-side.
    *
-   * Estratégia:
-   *   - /_next/static/* — deixamos para o Next. Chunks de dev do
-   *     Turbopack podem ficar obsoletos se forçarmos cache imutável
-   *     aqui; o Next já emite os cabeçalhos corretos de produção para
-   *     assets com hash.
+   * Estratégia (SPEC 083 §9 — o padrão é privado; público só o que é
+   * estático de verdade):
+   *   - /_next/static/* e /_next/image — deixamos para o Next. Chunks
+   *     de dev do Turbopack podem ficar obsoletos se forçarmos cache
+   *     imutável aqui; o Next já emite os cabeçalhos corretos de
+   *     produção para assets com hash.
    *   - /api/*          — no-store. Respostas da API são por usuário
    *     e nunca devem ser compartilhadas entre requisições na edge.
-   *   - Todo o resto — público, s-maxage breve + stale-while-
-   *     revalidate generoso. A edge serve instantaneamente do cache
-   *     nos primeiros 5 min, depois retorna o conteúdo em cache
-   *     enquanto atualiza em segundo plano por até 24 h. A defasagem
-   *     de hash de chunk de um deploy se autocorrige em ~5 min sem
-   *     latência visível para o usuário.
-   *
-   *   Nota: rotas dinâmicas do dashboard (/inbox, /contacts,
-   *   /pipelines, /broadcasts, etc.) são renderizadas no servidor por
-   *   requisição — o Next.js e a autenticação do Supabase já impedem
-   *   que sejam servidas de um cache compartilhado. O s-maxage aqui é
-   *   um teto; o Next.js e o middleware de autenticação ainda definem
-   *   `private` / `no-store` para respostas por usuário.
+   *   - Toda página (CRM, auth, convite, `/area`, console) — `private,
+   *     no-store`. Até a SPEC 083 §9 o catch-all era `public, s-maxage=300`,
+   *     e ele VENCE o `private, no-cache, no-store` que o Next põe nas
+   *     páginas dinâmicas (medido no dev e no `next start` em
+   *     2026-10-31: `/dashboard` → 307 com `public`). Com um cache
+   *     compartilhado na frente, a página de um usuário (e o Set-Cookie
+   *     do refresh de sessão que o middleware anexa) iria para outro.
+   *     O motivo original continua atendido, e melhor: com `no-store` a
+   *     edge não guarda HTML nenhum, então não há HTML velho apontando
+   *     para chunk que já sumiu. Rota nova nasce privada sem lembrar de
+   *     nada.
+   *   - Arquivos soltos de `public/` (`/og-image.webp`, `/openapi.json`,
+   *     `/favicon.ico`…) — público, s-maxage breve + stale-while-
+   *     revalidate generoso, como o catch-all antigo: não têm hash no
+   *     nome, então um deploy que os troque se autocorrige em ~5 min.
+   *   - /emojibase/* e /opus/* — imutáveis (regras próprias abaixo).
    *
    * Os cabeçalhos de segurança são adicionados por uma regra catch-all
    * separada abaixo — o Next.js mescla os cabeçalhos de cada regra
@@ -155,7 +159,17 @@ const nextConfig: NextConfig = {
         headers: [{ key: 'Cache-Control', value: 'no-store' }],
       },
       {
+        // Padrão de toda página (inclui `/area/**`, SPEC 083 achado
+        // A-1, e o 307 que o middleware devolve sem sessão).
         source: '/:path((?!_next/static|_next/image|api|emojibase|opus).*)',
+        headers: [{ key: 'Cache-Control', value: 'private, no-store' }],
+      },
+      {
+        // Arquivo solto na raiz de `public/` (ou `src/app/favicon.ico`):
+        // um segmento só, com extensão de estático. Nenhuma página tem
+        // ponto no nome. Vem DEPOIS do padrão: mesma chave, vale a última.
+        source:
+          '/:path([^/]+\\.(?:svg|png|jpe?g|gif|webp|avif|ico|json|txt|xml|webmanifest))',
         headers: [
           {
             key: 'Cache-Control',
@@ -168,8 +182,8 @@ const nextConfig: NextConfig = {
         // Dados da Emojibase (SPEC 066): o conteúdo é fixo por versão da
         // dependência `emojibase-data` (npm run emoji:sync). Um upgrade
         // troca os bytes E o deploy junto, então cache imutável é seguro
-        // e evita revalidar ~780KB por locale a cada 5 min como a regra
-        // catch-all acima faria.
+        // e evita revalidar ~780KB por locale a cada 5 min (o que o antigo
+        // catch-all público fazia antes da SPEC 083 §9).
         source: '/emojibase/:path*',
         headers: [
           {

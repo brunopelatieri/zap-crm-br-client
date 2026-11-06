@@ -40,6 +40,8 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine';
 import { dispatchInboundToFlows } from '@/lib/flows/engine';
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
+import { looksLikePortalCodeMessage } from '@/lib/contact-portal/delivery';
+import { handlePortalKeyword } from '@/lib/contact-portal/keyword';
 import { shouldTrackSessionWindow } from './session-window';
 import type {
   ChannelType,
@@ -176,6 +178,13 @@ export async function ingestInbound(
   // ramo (a rota da Meta fixa `fromMe: false`), então nada muda nele.
   // ============================================================
   if (event.fromMe) {
+    // Código da área do contato (SPEC 083 §7): o eco NÃO é gravado. Quem
+    // grava é o envio (`deliverAccessCode` → `send.ts`), já redigido. No
+    // QRCode o eco chega ANTES desse INSERT no caso normal (medido no
+    // teste de 2026-10-30: ~450 ms antes), então conferir "já gravado"
+    // não basta — gravaria o código em claro, ou uma bolha duplicada.
+    if (looksLikePortalCodeMessage(event.text)) return;
+
     const { data: alreadyStored } = await db
       .from('messages')
       .select('id')
@@ -446,6 +455,28 @@ export async function ingestInbound(
   }
 
   // ============================================================
+  // Palavra-chave da área do contato (SPEC 083 §7, jornada J2).
+  //
+  // Depois do opt-out (quem pediu para sair não está pedindo código) e
+  // ANTES dos flows: se casa, a mensagem é consumida como se um flow a
+  // tivesse tomado — nenhum gatilho de conteúdo, nenhuma resposta de IA
+  // para "SENHA". Os gatilhos de relação (primeiro contato) continuam,
+  // como no consumo por flow. `handlePortalKeyword` nunca lança e só
+  // consulta o banco quando o texto tem tamanho de palavra-chave.
+  // ============================================================
+  const portalConsumed =
+    !event.interactiveReplyId && !optOutKeyword
+      ? await handlePortalKeyword({
+          db,
+          accountId,
+          contactId: contactRecord.id,
+          contactPhone: contactRecord.phone,
+          conversationId: conversation.id,
+          text: inboundText,
+        })
+      : false;
+
+  // ============================================================
   // Flow runner dispatch.
   //
   // If the runner consumes the message (it either advanced an active
@@ -464,28 +495,30 @@ export async function ingestInbound(
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
   // ============================================================
-  const flowResult = await dispatchInboundToFlows({
-    accountId,
-    userId: ctx.ownerUserId,
-    contactId: contactRecord.id,
-    conversationId: conversation.id,
-    // SPEC 065 D-6: quais fluxos são candidatos — os sem escopo mais os
-    // escopados NESTE número, com o escopado ganhando do genérico.
-    channelId: ctx.channelId,
-    message: event.interactiveReplyId
-      ? {
-          kind: 'interactive_reply',
-          reply_id: event.interactiveReplyId,
-          reply_title: event.text ?? '',
-          meta_message_id: event.providerMessageId,
-        }
-      : {
-          kind: 'text',
-          text: inboundText,
-          meta_message_id: event.providerMessageId,
-        },
-    isFirstInboundMessage,
-  });
+  const flowResult = portalConsumed
+    ? { consumed: true }
+    : await dispatchInboundToFlows({
+        accountId,
+        userId: ctx.ownerUserId,
+        contactId: contactRecord.id,
+        conversationId: conversation.id,
+        // SPEC 065 D-6: quais fluxos são candidatos — os sem escopo mais os
+        // escopados NESTE número, com o escopado ganhando do genérico.
+        channelId: ctx.channelId,
+        message: event.interactiveReplyId
+          ? {
+              kind: 'interactive_reply',
+              reply_id: event.interactiveReplyId,
+              reply_title: event.text ?? '',
+              meta_message_id: event.providerMessageId,
+            }
+          : {
+              kind: 'text',
+              text: inboundText,
+              meta_message_id: event.providerMessageId,
+            },
+        isFirstInboundMessage,
+      });
   const flowConsumed = flowResult.consumed;
 
   // Fire any automations that react to this webhook event. All dispatches

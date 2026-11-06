@@ -21,6 +21,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Área do contato (SPEC 083, PRD 082 D-7): páginas e `/area/api/*`.
+  // O contato não tem sessão do Supabase — a dele é o cookie opaco da
+  // área, conferido no banco pelo layout e por cada rota. Nada abaixo se
+  // aplica, e um `getUser()` aqui só pagaria um refresh à toa (ou
+  // mexeria nos cookies do usuário da conta que estiver no mesmo
+  // navegador).
+  if (
+    request.nextUrl.pathname === '/area' ||
+    request.nextUrl.pathname.startsWith('/area/')
+  ) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

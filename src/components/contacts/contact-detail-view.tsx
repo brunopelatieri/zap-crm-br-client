@@ -67,6 +67,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { ContactPortalAccessCard } from './contact-portal-access-card';
 
 interface ContactDetailViewProps {
   open: boolean;
@@ -877,6 +878,8 @@ export function ContactDetailView({
                         </Button>
                       </div>
                     )}
+
+                    <ContactPortalAccessCard contactId={contact.id} />
                   </div>
                 </TabsContent>
 

@@ -274,7 +274,8 @@
       "api_v1_enabled": "Public API",
       "flows_enabled": "Flows",
       "broadcasts_enabled": "Bulk broadcasts",
-      "webhooks_out_enabled": "Outbound webhooks"
+      "webhooks_out_enabled": "Outbound webhooks",
+      "contact_portal_enabled": "Contact portal"
     },
     "cycle": {
       "title": "Switch to {plan}",
@@ -460,7 +461,10 @@
         "imported": "{actor} imported {count, plural, =1 {# contact} other {# contacts}}",
         "exported": "{actor} exported {count, plural, =1 {# contact} other {# contacts}}",
         "opted_out": "A contact opted out of marketing",
-        "opted_in": "A contact opted back in"
+        "opted_in": "A contact opted back in",
+        "portal_invited": "{actor} sent contact area access to {label}",
+        "portal_blocked": "{actor} blocked contact area access for {label}",
+        "portal_unblocked": "{actor} unblocked contact area access for {label}"
       },
       "deal": {
         "created": "{actor} created the deal {label}",
@@ -1356,6 +1360,39 @@
       "toastRenameFailed": "Could not rename field.",
       "toastDeleteFailed": "Could not delete field.",
       "toastDeleted": "Deleted \"{name}\"."
+    },
+    "portalAccess": {
+      "title": "Contact area",
+      "status": {
+        "none": "No access",
+        "invited": "Invite sent",
+        "active": "Active",
+        "blocked": "Blocked"
+      },
+      "lastLogin": "Last sign-in: {date}",
+      "neverLoggedIn": "Never signed in",
+      "areaOff": "The contact area is off for this account.",
+      "invite": "Send access",
+      "inviteSent": "Access code sent on WhatsApp",
+      "block": "Block access",
+      "unblock": "Unblock access",
+      "blocked": "Access blocked",
+      "unblocked": "Access unblocked",
+      "endSessions": "End sessions",
+      "sessionsEnded": "Sessions ended",
+      "failed": "Could not complete the action",
+      "reasons": {
+        "opted_out": "This contact opted out, so the invite is not sent.",
+        "blocked": "Access is blocked for this contact.",
+        "not_eligible": "The contact area is not available for this account.",
+        "invalid_phone": "This contact phone cannot receive the code.",
+        "throttled": "A code was sent moments ago. Try again in a minute.",
+        "not_found": "Contact not found.",
+        "no_channel": "No connected channel to send the code.",
+        "needs_template": "Outside the 24-hour window the official number needs an approved Authentication template.",
+        "cold_limit": "The QRCode channel reached its limit for first messages.",
+        "send_failed": "WhatsApp did not accept the message."
+      }
     }
   },
   "Import": {
@@ -3565,7 +3602,8 @@
       "api": "API keys",
       "webhook-log": "Webhook log",
       "retention": "Retention",
-      "danger": "Danger zone"
+      "danger": "Danger zone",
+      "contact-portal": "Contact area"
     },
     "groups": {
       "account": "Account",
@@ -3843,6 +3881,31 @@
       "errorNotOwner": "Only the account owner can delete the account.",
       "errorGeneric": "Could not delete the account. Try again.",
       "leftovers": "Some cleanup could not be completed automatically and was logged for the operator."
+    },
+    "contactPortal": {
+      "title": "Contact area",
+      "desc": "Let your contacts sign in with their WhatsApp number and a password, and see what you offer them.",
+      "enabledLabel": "Contact area enabled",
+      "enabledHint": "Turning it off cuts every contact of this account out at once. Passwords are kept for when you turn it back on.",
+      "notEligible": "The area is on but contacts cannot sign in: the account plan does not include it or the account is blocked.",
+      "notInPlan": "The contact area is not included in your plan. Talk to the platform owner to enable it.",
+      "channelLabel": "Channel that sends the codes",
+      "channelDefault": "Account default channel",
+      "templateLabel": "Authentication template (official number)",
+      "templateNone": "No template",
+      "templateHint": "Outside the 24-hour window the official number can only send an approved AUTHENTICATION template. Each one is a conversation billed by Meta to this account.",
+      "templateEmpty": "No approved Authentication template yet. Create one in Templates.",
+      "keywordLabel": "Self-service keyword",
+      "keywordHint": "A contact who sends this word gets a code on the same chat.",
+      "keywordOff": "Keyword off",
+      "urlLabel": "Area address to share",
+      "copy": "Copy",
+      "copied": "Address copied",
+      "save": "Save",
+      "saved": "Contact area settings saved",
+      "saveFailed": "Could not save the settings",
+      "loadFailed": "Could not load the settings",
+      "neverConfigured": "The area has not been set up for this account yet."
     }
   },
   "Platform": {
@@ -4274,6 +4337,13 @@
       "email_taken": "Another user already uses that e-mail.",
       "user_not_found": "User not found.",
       "partial_update": "The e-mail was changed, but the name was not saved."
+    },
+    "contactPortal": {
+      "section": "Contact area",
+      "on": "On",
+      "off": "Off",
+      "ineligible": "On, but not available (plan or block)",
+      "activeCount": "{count, plural, =0 {No contacts with access} =1 {# contact with access} other {# contacts with access}}"
     }
   },
   "Blocked": {
@@ -4283,5 +4353,90 @@
     "contactPrompt": "To sort this out, write to {email}.",
     "contactMissing": "To sort this out, get in touch with whoever runs this server.",
     "signOut": "Sign out"
+  },
+  "ContactPortal": {
+    "brand": "Contact area",
+    "brandOf": "{account} area",
+    "phoneLabel": "WhatsApp number",
+    "phonePlaceholder": "(11) 99999-9999",
+    "passwordLabel": "Password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "backToLogin": "Back to sign in",
+    "loading": "Please wait…",
+    "login": {
+      "title": "Sign in",
+      "description": "Use the WhatsApp number you talk to us on and your password.",
+      "submit": "Sign in",
+      "firstAccess": "First access",
+      "forgot": "Forgot my password"
+    },
+    "request": {
+      "firstAccessTitle": "First access",
+      "recoverTitle": "Forgot my password",
+      "description": "Enter your WhatsApp number. We will send a 6-digit code there.",
+      "submit": "Send code",
+      "sent": "If this number has access, we sent a code on WhatsApp.",
+      "haveCode": "I have a code"
+    },
+    "code": {
+      "title": "Create your password",
+      "description": "Enter the code you received on WhatsApp and choose a password.",
+      "codeLabel": "6-digit code",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm the password",
+      "terms": "I have read and accept the terms of use of this area.",
+      "submit": "Save and sign in",
+      "resend": "Did not receive it? Request another code"
+    },
+    "choose": {
+      "title": "Choose the account",
+      "description": "Your password opens more than one area. Which one do you want to enter?",
+      "enter": "Enter"
+    },
+    "panel": {
+      "greeting": "Hello, {name}!",
+      "greetingNoName": "Hello!",
+      "accountLine": "You are in the {account} area.",
+      "comingSoonTitle": "Coming soon",
+      "comingSoonBody": "New features will appear here as the account enables them.",
+      "switchAccount": "Switch account",
+      "myAccount": "My account"
+    },
+    "account": {
+      "title": "My account",
+      "name": "Name",
+      "phone": "WhatsApp",
+      "changePasswordTitle": "Change password",
+      "changePasswordHint": "Changes the password of the areas you entered with it in this session.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm the new password",
+      "save": "Change password",
+      "saved": "Password changed. Other devices were signed out.",
+      "signOut": "Sign out",
+      "signOutEverywhere": "Sign out of all devices",
+      "back": "Back to the panel"
+    },
+    "errors": {
+      "invalid_input": "Fill in all the fields.",
+      "forbidden_origin": "This request was refused. Reload the page and try again.",
+      "invalid_credentials": "Invalid number or password.",
+      "throttled": "Too many attempts. Wait a few minutes and try again.",
+      "invalid_code": "Invalid or expired code. Request a new one.",
+      "weak_password": "The password does not meet the requirements.",
+      "password_mismatch": "The passwords do not match.",
+      "terms_required": "You need to accept the terms of use.",
+      "invalid_current": "The current password is incorrect.",
+      "no_session": "Your session ended. Sign in again.",
+      "not_found": "This account is no longer available.",
+      "unexpected": "Something went wrong. Try again."
+    },
+    "whatsapp": {
+      "codeMessage": "{code} is your access code for the {account} area. It is valid for {minutes} minutes. Do not share it with anyone.",
+      "inviteMessage": "{account} has enabled your access to its area. Your code is {code} (valid for {hours} hours). Do not share it with anyone.",
+      "signInLink": "Sign in: {url}",
+      "redactedBody": "[access code sent]"
+    }
   }
 }
