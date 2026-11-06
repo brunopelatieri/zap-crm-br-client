@@ -17,13 +17,13 @@
 ## Como navegar
 
 - Achar o domínio da tarefa (mapa do repo, onde mexer, rule/skill): [`docs/context/INDEX.md`](./docs/context/INDEX.md).
-- Fatos que mudam (versões, última migração, nº de chaves i18n, projetos Supabase, rotas de cron): [`docs/context/status.md`](./docs/context/status.md).
+- Fatos que mudam (versões, última migração, nº de chaves i18n, rotas de cron): [`docs/context/status.md`](./docs/context/status.md).
 - SPECs, PRDs e guias: [`docs/context/catalogo-specs.md`](./docs/context/catalogo-specs.md).
-- Nunca confie em fato desse tipo escrito fora de `status.md` (a única exceção é qual projeto Supabase é o padrão, em Convenções: é escolha do mantenedor, não medida).
+- Nunca confie em fato desse tipo escrito fora de `status.md`.
 
 ## Convenções obrigatórias
 
-**Supabase (MCP) — qual projeto:** pergunte sempre qual projeto usar (`vn` é o oficial e padrão; lista atual em `status.md`). Confirme com o mantenedor antes de migração, DML, DDL, deploy de Edge Function ou branch, em qualquer projeto. Antes de ler ou escrever, rode `get_project_url` no projeto escolhido e confira que é o esperado. Use **só** os MCPs listados em `status.md` (hoje, só `vn`) — nunca outro projeto nem conector Supabase sem nome (só UUID). Detalhe: [`supabase-rls-mcp.md`](./docs/context/supabase-rls-mcp.md).
+**Supabase (MCP):** o projeto tem um único banco, o `vn`. Confirme com o mantenedor antes de migração, DML, DDL, deploy de Edge Function ou branch. Antes de ler ou escrever, rode `get_project_url` e confira que é o `vn`. Nunca use outro projeto nem conector Supabase sem nome (só UUID). Detalhe: [`supabase-rls-mcp.md`](./docs/context/supabase-rls-mcp.md).
 
 **Clientes Supabase — escolher o certo importa (RLS depende disso):**
 
@@ -31,7 +31,7 @@
 - `src/lib/supabase/server.ts` — Server Components, Route Handlers; sujeito a RLS, usa cookies da sessão.
 - `src/lib/supabase/admin.ts` — **service_role**, ignora RLS. Só em rotas de servidor com autorização já validada. Nunca importar em código que chega ao browser.
 
-**Migrações:** numeração sequencial em `supabase/migrations/` — rode `ls supabase/migrations/` antes de criar. Função nova: `REVOKE ALL … FROM PUBLIC` **e** `FROM anon` (interna: também `FROM authenticated`; `GRANT` e `SECURITY DEFINER` em [`supabase-rls-mcp.md`](./docs/context/supabase-rls-mcp.md#privilégios-de-função-em-public-d-19)). Depois de DDL, `get_advisors` (security) no projeto confirmado. Script que carrega URL/segredo do deploy específico **não** é migração: vai em `supabase/setup/` (senão o fork de terceiros agendaria chamadas para o seu domínio).
+**Migrações:** numeração sequencial em `supabase/migrations/` — rode `ls supabase/migrations/` antes de criar. Função nova: `REVOKE ALL … FROM PUBLIC` **e** `FROM anon` (interna: também `FROM authenticated`; `GRANT` e `SECURITY DEFINER` em [`supabase-rls-mcp.md`](./docs/context/supabase-rls-mcp.md#privilégios-de-função-em-public-d-19)). Depois de DDL, `get_advisors` (security) no `vn`. Script que carrega URL/segredo do deploy específico **não** é migração: vai em `supabase/setup/` (senão o fork de terceiros agendaria chamadas para o seu domínio).
 
 **i18n — toda string visível ao usuário é traduzida:**
 

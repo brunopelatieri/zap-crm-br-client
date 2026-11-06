@@ -24,11 +24,11 @@ Ao criar ou alterar migração em `supabase/migrations/`, função/RPC, trigger 
 
    `SECURITY DEFINER`: fixe `SET search_path = public` e valide conta/papel no corpo.
 
-3. **Policy.** Escreva `TO authenticated`, com `is_account_member(...)` ou `can_*`: a 090 revoga esses predicados de `anon`, e policy `PUBLIC` que os chame dá `42501` em leitura anônima. Tabela nova não dá nada a `anon` depois da 091; leitura sem login exige `GRANT SELECT … TO anon`. Antes de afirmar algo sobre a ACL, consulte no projeto confirmado: `SELECT has_function_privilege('anon', 'public.is_account_member(uuid, account_role_enum)', 'EXECUTE');`.
+3. **Policy.** Escreva `TO authenticated`, com `is_account_member(...)` ou `can_*`: a 090 revoga esses predicados de `anon`, e policy `PUBLIC` que os chame dá `42501` em leitura anônima. Tabela nova não dá nada a `anon` depois da 091; leitura sem login exige `GRANT SELECT … TO anon`. Antes de afirmar algo sobre a ACL, consulte no `vn`: `SELECT has_function_privilege('anon', 'public.is_account_member(uuid, account_role_enum)', 'EXECUTE');`.
 4. **Quota e escopo** moram em RLS/trigger — o browser grava direto no banco; guarda só na rota é contornável.
 5. **URL ou segredo do deploy** (agendamento de cron, catálogo comercial) **não é migração**: vai em `supabase/setup/`. Senão todo fork herda chamadas e dados do seu deploy.
-6. **Antes de aplicar:** pergunte qual projeto (o padrão e a lista viva estão em `status.md`), mostre o SQL e espere a confirmação. Rode `get_project_url` no projeto escolhido e confira. Só os MCPs listados em `status.md` — nunca outro conector Supabase.
-7. **Aplicar** com `apply_migration` do servidor MCP do projeto escolhido, um projeto por vez, só após o OK.
+6. **Antes de aplicar:** mostre o SQL e espere a confirmação. Rode `get_project_url` e confira que é o `vn`. Nunca outro conector Supabase.
+7. **Aplicar** com `apply_migration` do MCP `vn`, só após o OK.
 8. **Depois:** `get_advisors` (tipo `security`) **no mesmo projeto** e trate o que for novo; atualize `docs/context/status.md` (valor e data) e, se mudou tabela, `src/types/index.ts`.
 
 Modelos para **ler**, não copiar:

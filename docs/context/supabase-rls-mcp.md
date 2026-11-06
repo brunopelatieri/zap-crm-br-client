@@ -1,6 +1,6 @@
 # Supabase — clientes, RLS, migrações, privilégios e MCP
 
-> Domínio sob demanda (SPEC 079). Fatos que envelhecem — última migração, próximo número livre, projetos Supabase conectados — ficam **só** em [`status.md`](./status.md). Rule: `.claude/rules/supabase-rls-mcp.md`. Skill: `nova-migracao-supabase`.
+> Domínio sob demanda (SPEC 079). Fatos que envelhecem — última migração, próximo número livre, registro de migrações — ficam **só** em [`status.md`](./status.md). Rule: `.claude/rules/supabase-rls-mcp.md`. Skill: `nova-migracao-supabase`.
 
 ## Qual cliente usar (RLS depende disso)
 
@@ -15,19 +15,19 @@
 
 ## MCP Supabase — invariante 1
 
-1. **Pergunte qual projeto** antes de qualquer operação. Lista e projeto padrão: [`status.md` → Banco](./status.md#banco--supabase).
-2. **Confirme com o mantenedor** antes de migração, DML, DDL, deploy de Edge Function ou criar/mexer em branch — em qualquer projeto.
-3. Rode `get_project_url` no projeto escolhido **antes** de escrever e confira que é o esperado.
-4. Use **só** os MCPs listados em [`status.md`](./status.md) (hoje, só `vn`); nunca um conector Supabase identificado só por UUID (sem nome). Os conectores do claude.ai são desligados a partir de sessão nova (detalhe em `status.md`); se ainda aparecerem ferramentas `mcp__<UUID>__*`, não as use.
-5. Leitura (`list_tables`, `execute_sql` com `SELECT`) também só no projeto confirmado.
-6. Depois de DDL, rode `get_advisors` (tipo **security**) **no projeto confirmado** e trate o que for novo.
+O projeto tem um único Supabase, o `vn`.
+
+1. **Confirme com o mantenedor** antes de migração, DML, DDL, deploy de Edge Function ou criar/mexer em branch.
+2. Rode `get_project_url` **antes** de ler ou escrever e confira que é o `vn`.
+3. Nunca use outro projeto nem um conector Supabase identificado só por UUID (sem nome). Os conectores do claude.ai são desligados a partir de sessão nova (detalhe em `status.md`); se ainda aparecerem ferramentas `mcp__<UUID>__*`, não as use.
+4. Depois de DDL, rode `get_advisors` (tipo **security**) e trate o que for novo.
 
 ## Migrações
 
 - Numeração sequencial em `supabase/migrations/`; a ordem numérica **é** a ordem de aplicação. Antes de criar, `ls supabase/migrations/` (outra sessão pode ter pego o número) — próximo livre em [`status.md`](./status.md).
 - Lacunas e sufixos documentados em [`supabase/migrations/README.md`](../../supabase/migrations/README.md) (as exceções de numeração estão em [`status.md`](./status.md)). Esse README trata **só** de numeração — privilégios estão abaixo.
 - **Invariante 10 — template de fork:** script que carrega URL ou segredo do deploy específico **não é migração**. Vai em `supabase/setup/` (ex.: `cron-jobs.sql`, `plans-seed*.sql`); senão todo fork agendaria chamadas ou gravaria dados do seu deploy.
-- `apply_migration` só após o item 2 acima, um projeto de cada vez.
+- `apply_migration` só após o item 1 acima.
 
 ## Privilégios de função em `public` (D-19)
 
@@ -46,13 +46,12 @@ Modelos para ler (não copiar): `supabase/migrations/044_messaging_limit_and_quo
 - A 090 revoga o `EXECUTE` de `anon` nesses predicados. Onde ela foi aplicada, uma tabela que `anon` precise ler **não pode** ter policy `PUBLIC` que chame um deles: o Postgres checa `EXECUTE` de toda função das policies permissivas ao iniciar o executor, sem curto-circuito pelo `OR`, e o `SELECT` anônimo dá `42501`. Foi o caso de `plans_select_own` (corrigida na 090). Nunca devolva o `EXECUTE` a `anon`: mova a policy para `TO authenticated`.
 - Em tabela de tenant, o `SELECT` anônimo passa de 0 linhas para `42501`. Continua fail-closed.
 - Tabela e sequência novas não dão nada a `anon` depois da 091: leitura sem login exige `GRANT SELECT … TO anon` na própria migração.
-- Antes de afirmar algo sobre essa ACL, verifique no projeto escolhido: `SELECT has_function_privilege('anon', 'public.is_account_member(uuid, account_role_enum)', 'EXECUTE');` (idem para as `can_*`). Fechar a ACL é migração própria, com confirmação.
+- Antes de afirmar algo sobre essa ACL, verifique no `vn`: `SELECT has_function_privilege('anon', 'public.is_account_member(uuid, account_role_enum)', 'EXECUTE');` (idem para as `can_*`). Fechar a ACL é migração própria, com confirmação.
 
 ## Verificação e diagnóstico
 
-- `scripts/verify-039-rls.sql`, `scripts/verify-040-media.sql`: conferências (não migração) para o SQL Editor do projeto confirmado; a PARTE A só lê.
+- `scripts/verify-039-rls.sql`, `scripts/verify-040-media.sql`: conferências (não migração) para o SQL Editor do `vn`; a PARTE A só lê.
 - `scripts/verify-090-rpc-grants.sql`: só lê. Mostra o que `anon` executa, o privilégio padrão e as policies de `plans`, antes da 090 e depois da 091.
-- Outra URL com outro Supabase (instância por URL): [PRD 077](../prd-077-supabase-dedicado-por-cliente.md) (§2: como o código fala com o banco) e [SPEC 080](../spec-080-instancia-por-url.md).
 
 ## Armadilha conhecida
 

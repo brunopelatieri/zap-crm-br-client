@@ -1,6 +1,6 @@
 # Índice de contexto — mapa do repo e roteamento por tarefa
 
-> Ponto de entrada sob demanda (SPEC 079). Fatos que envelhecem (versões, última migração, nº de chaves, projetos Supabase, rotas de cron) ficam **só** em [`status.md`](./status.md). Lista completa de SPECs/PRDs/guias: [`catalogo-specs.md`](./catalogo-specs.md).
+> Ponto de entrada sob demanda (SPEC 079). Fatos que envelhecem (versões, última migração, nº de chaves, rotas de cron) ficam **só** em [`status.md`](./status.md). Lista completa de SPECs/PRDs/guias: [`catalogo-specs.md`](./catalogo-specs.md).
 
 ## Mapa do repositório
 

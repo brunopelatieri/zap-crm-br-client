@@ -4,7 +4,7 @@
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Status**        | Migrações escritas e testadas num Postgres descartável. **Nada aplicado no `vn`.** O achado no banco real ainda não foi confirmado nem descartado |
 | **Data**          | 2026-11-05                                                                                                                                        |
-| **Origem**        | Porte da SPEC 080 do Valen Ranch (migrações 090, 091 e 092 de lá). Não confundir com a [SPEC 080 daqui](./spec-080-instancia-por-url.md)          |
+| **Origem**        | Porte da SPEC 080 do Valen Ranch (migrações 090, 091 e 092 de lá).                                                                                |
 | **Código do app** | Nenhum em `src/`                                                                                                                                  |
 | **Migrações**     | `090_tighten_definer_rpc_grants_and_search_path.sql`, `091_default_privileges_closed.sql`                                                         |
 | **Conferência**   | `scripts/verify-090-rpc-grants.sql` (só lê)                                                                                                       |
@@ -138,7 +138,5 @@ Rode no diretório do ZAP, com o projeto `vn` confirmado pelo mantenedor. Os pas
 
 ## 6. Pontas abertas
 
-- **Toda instância precisa das duas migrações.** Instância nova recebe 090 e 091 na aplicação em ordem da [SPEC 080](./spec-080-instancia-por-url.md). Instância que já exista passa por este roteiro.
-- **Verificador da SPEC 080 (F2), ainda não implementado.** Ele busca o primeiro `CREATE` de cada migração. A 090 não cria objeto, e a 091 só cria sondas apagadas na própria transação, então o verificador acusaria falta da 091 para sempre. Ele precisa tratar as duas como exceção; a prova delas é `scripts/verify-090-rpc-grants.sql`.
 - **Numeração da área do contato.** `docs/feature-spec-area-do-contato-zap-crm-br.md`, no repositório do Ranch, mapeia as migrações da área para ZAP 090/091/092. Esses números estão ocupados: a área passa a 092/093/094. A spec ainda não foi corrigida.
 - **Registro de migrações no `vn`.** `list_migrations` para em 085 e não prova nada. Confira pelo script.

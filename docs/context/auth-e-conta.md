@@ -1,6 +1,6 @@
 # Autenticação, papéis, convites, membros e conta
 
-> Domínio da SPEC 079. Rule: `.claude/rules/auth-e-conta.md`. Versões e projetos Supabase: [`status.md`](./status.md). Bloqueio, console e exclusão da conta: [`planos-quotas-admin.md`](./planos-quotas-admin.md). Mapa: [`INDEX.md`](./INDEX.md).
+> Domínio da SPEC 079. Rule: `.claude/rules/auth-e-conta.md`. Versões: [`status.md`](./status.md). Bloqueio, console e exclusão da conta: [`planos-quotas-admin.md`](./planos-quotas-admin.md). Mapa: [`INDEX.md`](./INDEX.md).
 
 ## Onde mexer
 

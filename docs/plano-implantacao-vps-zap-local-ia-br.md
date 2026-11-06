@@ -1,13 +1,13 @@
 # Plano de implantação — ZAP CRM BR na VPS (`zap.local.ia.br`) e entrada do `rs`
 
-**Data:** 2026-10-02 · **Antecede:** [PRD 077](./prd-077-supabase-dedicado-por-cliente.md) (que fica em pausa).
+**Data:** 2026-10-02.
 **Arquivos entregues com este plano:** [`Dockerfile`](../Dockerfile) · [`.dockerignore`](../.dockerignore) · [`docs/deploy/stack-zapcrm.yml`](./deploy/stack-zapcrm.yml) (pasta com barreira própria no git — não sobe para o GitHub)
 
 ## Objetivo
 
 1. O app do `vn` sai da hospedagem compartilhada da Hostinger e passa a rodar numa **VPS própria** (Docker Swarm + Portainer + Traefik, rede `bru`), em **`zap.local.ia.br`**.
 2. Depois, o `rs` é **consolidado no Supabase `vn`** e o cliente `rs` passa a usar o mesmo `zap.local.ia.br`.
-3. Resultado: um app, um Supabase (`vn`), dois clientes. Isso é a Opção A do PRD 077.
+3. Resultado: um app, um Supabase (`vn`), dois clientes.
 
 **O banco continua no supabase.com.** A VPS roda só o app e o agendador — a stack não tem Postgres.
 
@@ -133,7 +133,7 @@ Ordem, e o motivo de cada uma:
 
 ### F5 — Pré-requisitos da consolidação do `rs` *(manual + Sonnet)*
 
-Decisões do PRD 077 §6 que bloqueiam a F6: ~~**D-3**~~ (**ratificada**: dono do `rs` → `brunopelatieri@hotmail.com`), **D-5** (`ENCRYPTION_KEY` do `rs` igual à do `vn`?), **D-6** (janela de corte e prazo do backup).
+Decisões que bloqueiam a F6: ~~**D-3**~~ (**ratificada**: dono do `rs` → `brunopelatieri@hotmail.com`), **D-5** (`ENCRYPTION_KEY` do `rs` igual à do `vn`?), **D-6** (janela de corte e prazo do backup).
 
 **Troca do e-mail do dono do `rs` — fazer na véspera da F6, não antes:**
 - Mexer em `auth.users` + `auth.identities` (e-mail e `identity_data`) do `rs` e **a senha continua a mesma**. Preferir o painel (Authentication → Users) a SQL manual; se for SQL, atualizar as duas tabelas na mesma transação.
@@ -151,7 +151,7 @@ Perguntas adicionais deste plano — **todas respondidas** (ver "Respostas ratif
 
 ### F6 — Copiar `rs` → `vn` *(Opus; roteiro em SPEC 078, ainda não escrita)*
 
-Resumo (detalhe no PRD 077 §4 e §8): congelar o `rs`; exportar/importar a conta preservando UUIDs, **com triggers de quota e de atividade desligados na sessão**; copiar `auth.users`/`auth.identities` com o hash de senha; copiar o Storage e reescrever as 7 URLs absolutas em `messages.media_url`; **recifrar os segredos** (as chaves **são** diferentes: decifrar com a do `rs`, cifrar com a do `vn` — `whatsapp_config.access_token`, `verify_token`, `app_secret`, `evolution_instance_secrets.instance_token_encrypted` e qualquer coluna do mesmo formato que apareça numa nova varredura; tratar também o formato CBC legado `iv:cipher`, que `decrypt()` aceita e a varredura da leitura não pegou — um dos 3 `access_token` do `rs` não apareceu como GCM e precisa ser conferido); ensaiar tudo antes num projeto descartável. **Teste de aceite da recriptografia:** depois da cópia, decifrar cada valor com a chave do `vn` e conferir que o resultado tem o formato esperado (token da Meta começa com `EA`).
+Resumo: congelar o `rs`; exportar/importar a conta preservando UUIDs, **com triggers de quota e de atividade desligados na sessão**; copiar `auth.users`/`auth.identities` com o hash de senha; copiar o Storage e reescrever as 7 URLs absolutas em `messages.media_url`; **recifrar os segredos** (as chaves **são** diferentes: decifrar com a do `rs`, cifrar com a do `vn` — `whatsapp_config.access_token`, `verify_token`, `app_secret`, `evolution_instance_secrets.instance_token_encrypted` e qualquer coluna do mesmo formato que apareça numa nova varredura; tratar também o formato CBC legado `iv:cipher`, que `decrypt()` aceita e a varredura da leitura não pegou — um dos 3 `access_token` do `rs` não apareceu como GCM e precisa ser conferido); ensaiar tudo antes num projeto descartável. **Teste de aceite da recriptografia:** depois da cópia, decifrar cada valor com a chave do `vn` e conferir que o resultado tem o formato esperado (token da Meta começa com `EA`).
 
 ### F7 — Corte do `rs` *(manual)*
 
@@ -159,7 +159,7 @@ Webhooks Meta e Evolution do `rs` → `zap.local.ia.br`; os 3 usuários entram e
 
 ### F8 — Fechamento *(Sonnet)*
 
-Atualizar `AGENTS.md`/README (domínio, stack, deploy), registrar a memória do projeto, atualizar o PRD 077 (D-1 = consolidar) e arquivar o prompt original.
+Atualizar `AGENTS.md`/README (domínio, stack, deploy) e registrar a memória do projeto.
 
 ---
 

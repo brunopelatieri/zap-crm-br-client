@@ -1,6 +1,6 @@
 # Planos, quotas, limites, console `/admin`, bloqueio e exclusão de conta
 
-> Domínio da SPEC 079. Rule: `.claude/rules/planos-quotas-admin.md`. Migração atual, cron e projetos Supabase: [`status.md`](./status.md). RLS e privilégios: [`supabase-rls-mcp.md`](./supabase-rls-mcp.md). Mapa: [`INDEX.md`](./INDEX.md).
+> Domínio da SPEC 079. Rule: `.claude/rules/planos-quotas-admin.md`. Migração atual e cron: [`status.md`](./status.md). RLS e privilégios: [`supabase-rls-mcp.md`](./supabase-rls-mcp.md). Mapa: [`INDEX.md`](./INDEX.md).
 
 ## Onde mexer
 

@@ -1,6 +1,6 @@
 # IA — rascunho, auto-reply, base de conhecimento e provedores
 
-> Domínio da SPEC 079. Rule: `.claude/rules/ia-agentes.md`. Versões e projetos Supabase: [`status.md`](./status.md). Mapa: [`INDEX.md`](./INDEX.md). Arquitetura detalhada dos componentes: [`../references/agents-ai-components-architecture.md`](../references/agents-ai-components-architecture.md).
+> Domínio da SPEC 079. Rule: `.claude/rules/ia-agentes.md`. Versões: [`status.md`](./status.md). Mapa: [`INDEX.md`](./INDEX.md). Arquitetura detalhada dos componentes: [`../references/agents-ai-components-architecture.md`](../references/agents-ai-components-architecture.md).
 
 ## Onde mexer
 
