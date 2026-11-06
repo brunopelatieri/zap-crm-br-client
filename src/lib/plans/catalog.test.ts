@@ -129,6 +129,46 @@ describe.each(['plans-seed.sql', 'plans-seed-vn.sql'])(
       expect(validateCatalog(plans)).toEqual([]);
     });
 
+    // Formulários (PRD 084 D-10, SPEC 085 §5.3): a chave fail-closed e as
+    // três quotas de uso entram nos dois seeds, em todo plano — inclusive
+    // no `enterprise` comentado do `vn`.
+    it('forms_enabled é explícito (booleano) em todo plano', () => {
+      const plans = readPlans();
+      if (!plans) return;
+      for (const plan of plans) {
+        expect(
+          typeof plan.features.forms_enabled,
+          `${seedFile}: plano ${plan.code}`
+        ).toBe('boolean');
+      }
+    });
+
+    it('as três quotas de formulário estão em todo plano, como inteiro ≥ 0', () => {
+      const plans = readPlans();
+      if (!plans) return;
+      for (const plan of plans) {
+        for (const key of ['forms', 'form_responses_month', 'form_upload_mb']) {
+          const value = plan.limits[key];
+          expect(
+            Number.isInteger(value) && (value as number) >= 0,
+            `${seedFile}: plano ${plan.code} sem ${key} válido`
+          ).toBe(true);
+        }
+      }
+    });
+
+    it('plano sem forms_enabled tem as três quotas em 0 (PRD 084 §7: Grátis)', () => {
+      const plans = readPlans();
+      if (!plans) return;
+      for (const plan of plans) {
+        if (plan.features.forms_enabled === false) {
+          expect(plan.limits.forms, `${seedFile}: ${plan.code}`).toBe(0);
+          expect(plan.limits.form_responses_month).toBe(0);
+          expect(plan.limits.form_upload_mb).toBe(0);
+        }
+      }
+    });
+
     it('contact_portal_enabled é explícito em todo plano (PRD 082 D-1: nasce false)', () => {
       // Chave ausente não libera (plan_feature_strict), mas o seed grava o
       // `false` mesmo assim: a decisão comercial fica visível no catálogo

@@ -32,6 +32,7 @@ const DESTRUCTIVE_ACTIONS = new Set<ActivityAction>([
   'automation.deleted',
   'channel.deleted',
   'member.removed',
+  'form.deleted',
 ]);
 
 /**
@@ -71,6 +72,9 @@ export function activityHref(row: {
       return '/settings';
     case 'plan':
       return '/plan';
+    case 'form':
+      // `/forms` só existe a partir da F2 da SPEC 085; até lá, sem destino.
+      return null;
     case 'export':
     case 'tag':
       return null;
@@ -105,9 +109,16 @@ export function activityValues(row: {
     values.from = str('from');
     values.to = str('to');
   }
-  if (row.action === 'contact.imported' || row.action === 'contact.exported') {
+  if (
+    row.action === 'contact.imported' ||
+    row.action === 'contact.exported' ||
+    row.action === 'form.responses_deleted'
+  ) {
     const count = md.count;
     values.count = typeof count === 'number' ? count : 0;
+  }
+  if (row.action === 'contact.form_submitted') {
+    values.form = str('form_name');
   }
   if (row.action === 'member.role_changed') {
     values.role = str('new_role');

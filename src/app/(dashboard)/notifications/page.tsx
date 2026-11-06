@@ -6,7 +6,14 @@ import { useTranslations, useLocale } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import type { Notification } from '@/types';
-import { Bell, CheckCheck, CreditCard, Loader2, UserPlus } from 'lucide-react';
+import {
+  Bell,
+  CheckCheck,
+  ClipboardList,
+  CreditCard,
+  Loader2,
+  UserPlus,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { Button } from '@/components/ui/button';
@@ -17,6 +24,7 @@ import { toast } from 'sonner';
 const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   conversation_assigned: UserPlus,
   channel_payment_blocked: CreditCard,
+  form_response_received: ClipboardList,
 };
 
 export default function NotificationsPage() {

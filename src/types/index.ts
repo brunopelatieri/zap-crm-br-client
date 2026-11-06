@@ -18,6 +18,17 @@ export type {
   InteractiveListSection,
 } from '@/lib/whatsapp/interactive';
 
+// Formulários de captação (SPEC 085, migrações 097/098). O detalhe dos
+// JSONB (tema, faixas, mapeamento, instantâneo) vive em `lib/forms/types`.
+export type {
+  Form,
+  FormField,
+  FormResponse,
+  FieldType,
+  FormStatus,
+  ResponseStatus,
+} from '@/lib/forms/types';
+
 export interface Profile {
   id: string;
   user_id: string;
@@ -264,7 +275,9 @@ export interface Conversation {
 export type NotificationType =
   | 'conversation_assigned'
   /** SPEC 076 (migração 086): envio bloqueado por pagamento (131042). */
-  | 'channel_payment_blocked';
+  | 'channel_payment_blocked'
+  /** SPEC 085 §9 (migração 098): resposta concluída num formulário. */
+  | 'form_response_received';
 
 export interface Notification {
   id: string;

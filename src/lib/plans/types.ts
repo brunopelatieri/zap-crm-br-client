@@ -20,6 +20,14 @@ export const USAGE_QUOTA_KEYS = [
   'members_viewer',
   'channels_whatsapp_qr',
   'channels_whatsapp_cloud',
+  // Formulários de captação (PRD 084 D-10, SPEC 085 §5.2/§5.3). Os três
+  // têm contador em `account_usage_counters`: `forms` (não arquivados),
+  // `form_responses:YYYY-MM` (concluídas no mês, America/Sao_Paulo) e
+  // `form_upload_bytes` (a chave do plano é em MB; a conversão fica em
+  // `account-plan.ts`).
+  'forms',
+  'form_responses_month',
+  'form_upload_mb',
 ] as const;
 
 export type UsageQuotaKey = (typeof USAGE_QUOTA_KEYS)[number];
@@ -85,6 +93,10 @@ export const FEATURE_KEYS = [
   // fail-closed — chave ausente é FALSE. Mesmo assim o seed grava `false`
   // explícito nos quatro planos (D-1), e `catalog.test.ts` cobra isso.
   'contact_portal_enabled',
+  // Formulários de captação (PRD 084 D-10/D-11). Mesma semântica estrita
+  // da área: `plan_feature_strict()`, chave ausente é FALSE; o seed grava
+  // o valor explícito em todo plano e `catalog.test.ts` cobra isso.
+  'forms_enabled',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

@@ -16,6 +16,7 @@ import { useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   Briefcase,
+  ClipboardList,
   CreditCard,
   Download,
   Inbox,
@@ -60,6 +61,7 @@ export const KIND_THEME: Record<ActivityResourceType, KindTheme> = {
   plan: { icon: CreditCard, badge: 'bg-amber-500/10 text-amber-400' },
   tag: { icon: TagIcon, badge: 'bg-pink-500/10 text-pink-400' },
   webhook: { icon: Webhook, badge: 'bg-orange-500/10 text-orange-400' },
+  form: { icon: ClipboardList, badge: 'bg-lime-500/10 text-lime-400' },
 };
 
 const KNOWN_ROLES = new Set(['owner', 'admin', 'agent', 'viewer']);

@@ -267,7 +267,10 @@
       "members_agent": "Agents",
       "members_viewer": "Viewers",
       "channels_whatsapp_qr": "WhatsApp QRCode instances",
-      "channels_whatsapp_cloud": "Official WhatsApp numbers"
+      "channels_whatsapp_cloud": "Official WhatsApp numbers",
+      "forms": "Forms",
+      "form_responses_month": "Form responses per month",
+      "form_upload_mb": "Form uploads (MB)"
     },
     "featureLabel": {
       "ai_enabled": "AI (draft / auto-reply)",
@@ -275,7 +278,8 @@
       "flows_enabled": "Flows",
       "broadcasts_enabled": "Bulk broadcasts",
       "webhooks_out_enabled": "Outbound webhooks",
-      "contact_portal_enabled": "Contact portal"
+      "contact_portal_enabled": "Contact portal",
+      "forms_enabled": "Forms"
     },
     "cycle": {
       "title": "Switch to {plan}",
@@ -441,7 +445,8 @@
       "export": "Exports",
       "plan": "Plan",
       "tag": "Tags",
-      "webhook": "Webhooks"
+      "webhook": "Webhooks",
+      "form": "Forms"
     },
     "actions": {
       "message": {
@@ -464,7 +469,8 @@
         "opted_in": "A contact opted back in",
         "portal_invited": "{actor} sent contact area access to {label}",
         "portal_blocked": "{actor} blocked contact area access for {label}",
-        "portal_unblocked": "{actor} unblocked contact area access for {label}"
+        "portal_unblocked": "{actor} unblocked contact area access for {label}",
+        "form_submitted": "{label} answered the form {form}"
       },
       "deal": {
         "created": "{actor} created the deal {label}",
@@ -514,6 +520,16 @@
         "requested": "{actor} requested the {label} plan",
         "period_changed": "The plan due date was changed",
         "payment_reversed": "A plan payment was reversed"
+      },
+      "form": {
+        "created": "{actor} created the form {label}",
+        "published": "{actor} published the form {label}",
+        "unpublished": "{actor} unpublished the form {label}",
+        "archived": "{actor} archived the form {label}",
+        "restored": "{actor} restored the form {label}",
+        "deleted": "{actor} deleted the form {label}",
+        "responses_deleted": "{actor} deleted {count, plural, =1 {# response} other {# responses}} from the form {label}",
+        "exported": "{actor} exported the responses of the form {label}"
       }
     }
   },
@@ -4438,5 +4454,52 @@
       "signInLink": "Sign in: {url}",
       "redactedBody": "[access code sent]"
     }
+  },
+  "PublicForm": {
+    "start": "Start",
+    "continue": "Continue",
+    "ok": "OK",
+    "back": "Back",
+    "submit": "Submit",
+    "submitting": "Sending…",
+    "required": "This field is required",
+    "invalidEmail": "Enter a valid email address",
+    "invalidPhone": "Enter a valid WhatsApp number with area code",
+    "invalidNumber": "Enter a valid number",
+    "invalidDate": "Enter a valid date",
+    "invalidOption": "Choose one of the options",
+    "minChoices": "Choose at least {min, plural, =1 {# option} other {# options}}",
+    "maxChoices": "Choose at most {max, plural, =1 {# option} other {# options}}",
+    "maxLength": "Use at most {max} characters",
+    "minValue": "Enter a value of at least {min}",
+    "maxValue": "Enter a value of at most {max}",
+    "tooManyFiles": "You can send at most {max, plural, =1 {# file} other {# files}}",
+    "invalidFile": "This file could not be used. Try another one.",
+    "fileTooLarge": "The file is too large (maximum {max} MB)",
+    "fileTypeNotAllowed": "This file type is not allowed",
+    "consentRequired": "You need to accept to continue",
+    "alreadyAnswered": "You have already answered this form. Thank you!",
+    "unavailable": {
+      "title": "This form is not available",
+      "body": "The link may have expired or the form may have been taken down. If someone sent it to you, ask them for a new link."
+    },
+    "thankYou": {
+      "default": "Thank you! We received your answers.",
+      "whatsapp": "Continue on WhatsApp"
+    },
+    "footer": {
+      "madeWith": "Made with {brand}"
+    },
+    "estimatedTime": "Takes about {minutes, plural, =1 {# minute} other {# minutes}}",
+    "pressEnter": "Press Enter ↵",
+    "uploading": "Uploading…",
+    "retry": "Try again",
+    "yes": "Yes",
+    "no": "No",
+    "optional": "Optional",
+    "chooseFile": "Choose a file",
+    "removeFile": "Remove",
+    "progress": "{current} of {total}",
+    "networkError": "Could not connect. Check your internet and try again."
   }
 }

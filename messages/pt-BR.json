@@ -267,7 +267,10 @@
       "members_agent": "Agentes",
       "members_viewer": "Visualizadores",
       "channels_whatsapp_qr": "Instâncias WhatsApp QRCode",
-      "channels_whatsapp_cloud": "Números oficiais do WhatsApp"
+      "channels_whatsapp_cloud": "Números oficiais do WhatsApp",
+      "forms": "Formulários",
+      "form_responses_month": "Respostas de formulário por mês",
+      "form_upload_mb": "Uploads de formulários (MB)"
     },
     "featureLabel": {
       "ai_enabled": "IA (rascunho / auto-resposta)",
@@ -275,7 +278,8 @@
       "flows_enabled": "Flows",
       "broadcasts_enabled": "Disparos em massa",
       "webhooks_out_enabled": "Webhooks de saída",
-      "contact_portal_enabled": "Área do contato"
+      "contact_portal_enabled": "Área do contato",
+      "forms_enabled": "Formulários"
     },
     "cycle": {
       "title": "Trocar para {plan}",
@@ -441,7 +445,8 @@
       "export": "Exportações",
       "plan": "Plano",
       "tag": "Etiquetas",
-      "webhook": "Webhooks"
+      "webhook": "Webhooks",
+      "form": "Formulários"
     },
     "actions": {
       "message": {
@@ -464,7 +469,8 @@
         "opted_in": "Um contato voltou a aceitar mensagens",
         "portal_invited": "{actor} enviou o acesso à área do contato para {label}",
         "portal_blocked": "{actor} bloqueou o acesso de {label} à área do contato",
-        "portal_unblocked": "{actor} desbloqueou o acesso de {label} à área do contato"
+        "portal_unblocked": "{actor} desbloqueou o acesso de {label} à área do contato",
+        "form_submitted": "{label} respondeu ao formulário {form}"
       },
       "deal": {
         "created": "{actor} criou o negócio {label}",
@@ -514,6 +520,16 @@
         "requested": "{actor} solicitou o plano {label}",
         "period_changed": "O vencimento do plano foi alterado",
         "payment_reversed": "Um pagamento do plano foi estornado"
+      },
+      "form": {
+        "created": "{actor} criou o formulário {label}",
+        "published": "{actor} publicou o formulário {label}",
+        "unpublished": "{actor} despublicou o formulário {label}",
+        "archived": "{actor} arquivou o formulário {label}",
+        "restored": "{actor} restaurou o formulário {label}",
+        "deleted": "{actor} excluiu o formulário {label}",
+        "responses_deleted": "{actor} excluiu {count, plural, =1 {# resposta} other {# respostas}} do formulário {label}",
+        "exported": "{actor} exportou as respostas do formulário {label}"
       }
     }
   },
@@ -4438,5 +4454,52 @@
       "signInLink": "Para entrar: {url}",
       "redactedBody": "[código de acesso enviado]"
     }
+  },
+  "PublicForm": {
+    "start": "Começar",
+    "continue": "Continuar",
+    "ok": "OK",
+    "back": "Voltar",
+    "submit": "Enviar",
+    "submitting": "Enviando…",
+    "required": "Este campo é obrigatório",
+    "invalidEmail": "Informe um e-mail válido",
+    "invalidPhone": "Informe um WhatsApp válido, com DDD",
+    "invalidNumber": "Informe um número válido",
+    "invalidDate": "Informe uma data válida",
+    "invalidOption": "Escolha uma das opções",
+    "minChoices": "Escolha pelo menos {min, plural, =1 {# opção} other {# opções}}",
+    "maxChoices": "Escolha no máximo {max, plural, =1 {# opção} other {# opções}}",
+    "maxLength": "Use no máximo {max} caracteres",
+    "minValue": "Informe um valor de pelo menos {min}",
+    "maxValue": "Informe um valor de no máximo {max}",
+    "tooManyFiles": "Você pode enviar no máximo {max, plural, =1 {# arquivo} other {# arquivos}}",
+    "invalidFile": "Não foi possível usar este arquivo. Tente outro.",
+    "fileTooLarge": "O arquivo é grande demais (máximo {max} MB)",
+    "fileTypeNotAllowed": "Este tipo de arquivo não é permitido",
+    "consentRequired": "Você precisa aceitar para continuar",
+    "alreadyAnswered": "Você já respondeu a este formulário. Obrigado!",
+    "unavailable": {
+      "title": "Este formulário não está disponível",
+      "body": "O link pode ter expirado ou o formulário pode ter sido retirado do ar. Se alguém enviou para você, peça um novo link."
+    },
+    "thankYou": {
+      "default": "Obrigado! Recebemos suas respostas.",
+      "whatsapp": "Continuar no WhatsApp"
+    },
+    "footer": {
+      "madeWith": "Feito com {brand}"
+    },
+    "estimatedTime": "Leva cerca de {minutes, plural, =1 {# minuto} other {# minutos}}",
+    "pressEnter": "Pressione Enter ↵",
+    "uploading": "Enviando arquivo…",
+    "retry": "Tentar de novo",
+    "yes": "Sim",
+    "no": "Não",
+    "optional": "Opcional",
+    "chooseFile": "Escolher arquivo",
+    "removeFile": "Remover",
+    "progress": "{current} de {total}",
+    "networkError": "Não foi possível conectar. Verifique sua internet e tente de novo."
   }
 }

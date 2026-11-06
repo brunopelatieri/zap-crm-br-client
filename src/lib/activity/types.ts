@@ -27,7 +27,9 @@ export type ActivityResourceType =
   | 'export'
   | 'plan'
   | 'tag'
-  | 'webhook';
+  | 'webhook'
+  /** SPEC 085 §9 (migração 097 estende o CHECK da 084). */
+  | 'form';
 
 /**
  * Uma entrada por linha da tabela do §4. `broadcast.blocked` cobre os
@@ -54,6 +56,9 @@ export const ACTIVITY_CATALOG = {
     'contact.portal_invited',
     'contact.portal_blocked',
     'contact.portal_unblocked',
+    // Formulários (SPEC 085 §9): ator é o contato, telefone mascarado.
+    // `contact.form_link_sent` entra na SPEC 086 (quem envia é a integração).
+    'contact.form_submitted',
   ],
   deal: ['deal.created', 'deal.stage_changed', 'deal.deleted'],
   broadcast: [
@@ -99,6 +104,18 @@ export const ACTIVITY_CATALOG = {
   ],
   tag: [],
   webhook: ['webhook.ingest_failed'],
+  // Formulários de captação (SPEC 085 §9). Visita e resposta parcial NÃO
+  // entram no registro (PRD 084 §6.4).
+  form: [
+    'form.created',
+    'form.published',
+    'form.unpublished',
+    'form.archived',
+    'form.restored',
+    'form.deleted',
+    'form.responses_deleted',
+    'form.exported',
+  ],
 } as const satisfies Record<ActivityResourceType, readonly string[]>;
 
 type CatalogValues = typeof ACTIVITY_CATALOG;

@@ -16,6 +16,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createClient } from '@/lib/supabase/server';
+import {
+  FORMS_METRIC,
+  FORM_UPLOAD_BYTES_METRIC,
+  bytesToMbCeil,
+  monthMetricKey,
+} from '@/lib/forms/quota';
 import { bucketStatus } from './usage';
 import {
   USAGE_QUOTA_KEYS,
@@ -160,11 +166,21 @@ async function computeUsage(
   accountPlan: AccountPlan,
   quotasEnforced: boolean
 ): Promise<PlanUsage> {
+  // Formulários (SPEC 085 §5.3): os três contadores saem da mesma
+  // tabela, numa consulta só. O do mês é a chave do mês CORRENTE em
+  // America/Sao_Paulo — o mesmo literal de `form_month_metric()` (098).
+  const formMetrics = [
+    FORMS_METRIC,
+    monthMetricKey(new Date()),
+    FORM_UPLOAD_BYTES_METRIC,
+  ];
+
   const [
     { data: contactsCounter },
     { data: profileRows },
     { count: qrCount },
     { count: cloudCount },
+    { data: formCounters },
   ] = await Promise.all([
     supabase
       .from('account_usage_counters')
@@ -193,7 +209,17 @@ async function computeUsage(
       .eq('account_id', accountId)
       .eq('type', 'whatsapp_cloud')
       .neq('status', 'disabled'),
+    supabase
+      .from('account_usage_counters')
+      .select('metric, value')
+      .eq('account_id', accountId)
+      .in('metric', formMetrics),
   ]);
+
+  const formCounterByMetric = new Map<string, number>();
+  for (const row of formCounters ?? []) {
+    formCounterByMetric.set(row.metric as string, Number(row.value) || 0);
+  }
 
   const roleCounts = { owner: 0, admin: 0, agent: 0, viewer: 0 };
   for (const row of profileRows ?? []) {
@@ -213,6 +239,13 @@ async function computeUsage(
     members_viewer: roleCounts.viewer,
     channels_whatsapp_qr: qrCount ?? 0,
     channels_whatsapp_cloud: cloudCount ?? 0,
+    forms: formCounterByMetric.get(FORMS_METRIC) ?? 0,
+    form_responses_month: formCounterByMetric.get(formMetrics[1]) ?? 0,
+    // Contador em bytes, chave do plano em MB: arredonda para CIMA, para
+    // a barra nunca mostrar "0 de 100 MB" com 300 KB já ocupados.
+    form_upload_mb: bytesToMbCeil(
+      formCounterByMetric.get(FORM_UPLOAD_BYTES_METRIC) ?? 0
+    ),
   };
 
   // USAGE_QUOTA_KEYS, não QUOTA_KEYS: as chaves de segurança da SPEC

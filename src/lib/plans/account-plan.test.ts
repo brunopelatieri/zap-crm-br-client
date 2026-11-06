@@ -14,6 +14,12 @@ import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { getAccountPlan } from './account-plan';
+import {
+  BYTES_PER_MB,
+  FORM_UPLOAD_BYTES_METRIC,
+  FORMS_METRIC,
+  monthMetricKey,
+} from '@/lib/forms/quota';
 
 interface ChannelRow {
   type: string;
@@ -28,6 +34,8 @@ interface RecordedQuery {
 function makeDb(options: {
   channels: ChannelRow[];
   cloudLimit?: number | null;
+  /** Linhas de `account_usage_counters` por métrica (SPEC 085 §5.3). */
+  counters?: Record<string, number>;
 }) {
   const queries: RecordedQuery[] = [];
 
@@ -71,8 +79,23 @@ function makeDb(options: {
             },
             error: null,
           };
-        case 'account_usage_counters':
-          return { data: { value: 0 }, error: null };
+        case 'account_usage_counters': {
+          const wanted = q.filters.find(([k]) => k === 'in:metric')?.[1];
+          if (Array.isArray(wanted)) {
+            // Consulta em lote dos contadores dos formulários: devolve
+            // só as métricas pedidas que existem.
+            const rows = wanted
+              .filter((m) => (options.counters ?? {})[m] !== undefined)
+              .map((metric) => ({
+                metric,
+                value: (options.counters ?? {})[metric],
+              }));
+            return { data: rows, error: null };
+          }
+          const metric = q.filters.find(([k]) => k === 'metric')?.[1];
+          const value = (options.counters ?? {})[String(metric)] ?? 0;
+          return { data: { value }, error: null };
+        }
         case 'profiles':
           return { data: [{ account_role: 'owner' }], error: null };
         case 'channels': {
@@ -102,6 +125,10 @@ function makeDb(options: {
       },
       neq: (k: string, v: unknown) => {
         q.filters.push([`neq:${k}`, v]);
+        return chain;
+      },
+      in: (k: string, v: unknown) => {
+        q.filters.push([`in:${k}`, v]);
         return chain;
       },
       maybeSingle: () => Promise.resolve(value()),
@@ -179,5 +206,51 @@ describe('getAccountPlan — uso de canais (SPEC 064)', () => {
 
     expect(bucket.used).toBe(0);
     expect(bucket.limit).toBe(1);
+  });
+});
+
+describe('getAccountPlan — uso de formulários (SPEC 085 §5.3)', () => {
+  const bucket = (
+    usage: Awaited<ReturnType<typeof getAccountPlan>>,
+    key: string
+  ) => usage.usage.buckets.find((b) => b.key === key)!;
+
+  it('lê forms, o mês corrente em America/Sao_Paulo e os bytes em MB (teto)', async () => {
+    const monthKey = monthMetricKey(new Date());
+    const { client, queries } = makeDb({
+      channels: [],
+      counters: {
+        contacts: 7,
+        [FORMS_METRIC]: 2,
+        [monthKey]: 15,
+        // Mês passado NÃO entra no balde do mês.
+        'form_responses:2000-01': 999,
+        [FORM_UPLOAD_BYTES_METRIC]: BYTES_PER_MB + 1,
+      },
+    });
+    const snapshot = await getAccountPlan('acct-1', client);
+
+    expect(bucket(snapshot, 'contacts').used).toBe(7);
+    expect(bucket(snapshot, 'forms').used).toBe(2);
+    expect(bucket(snapshot, 'form_responses_month').used).toBe(15);
+    expect(bucket(snapshot, 'form_upload_mb').used).toBe(2);
+
+    const batch = queries.find((q) =>
+      q.filters.some(([k]) => k === 'in:metric')
+    )!;
+    expect(batch.table).toBe('account_usage_counters');
+    expect(batch.filters).toContainEqual(['account_id', 'acct-1']);
+    expect(batch.filters).toContainEqual([
+      'in:metric',
+      [FORMS_METRIC, monthKey, FORM_UPLOAD_BYTES_METRIC],
+    ]);
+  });
+
+  it('sem contadores, os três baldes começam em zero', async () => {
+    const { client } = makeDb({ channels: [] });
+    const snapshot = await getAccountPlan('acct-1', client);
+    expect(bucket(snapshot, 'forms').used).toBe(0);
+    expect(bucket(snapshot, 'form_responses_month').used).toBe(0);
+    expect(bucket(snapshot, 'form_upload_mb').used).toBe(0);
   });
 });

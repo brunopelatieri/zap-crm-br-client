@@ -44,6 +44,7 @@ const SAMPLE: Record<string, unknown> = {
   role: 'admin',
   format: 'CSV',
   period: '30 dias',
+  form: 'Captação de leads',
 };
 
 const LOCALES: Array<[string, Block]> = [
@@ -148,6 +149,37 @@ describe('Activity — sintaxe ICU e cobertura do catálogo', () => {
       expect(String(one)).toContain('1');
       expect(String(many)).toContain('500');
       expect(one).not.toBe(many);
+    });
+  }
+
+  for (const [locale, activity] of LOCALES) {
+    // SPEC 085 §9: o plural de `form.responses_deleted` resolve os dois
+    // ramos e a frase de envio nomeia o formulário (metadata.form_name).
+    it(`${locale}: as frases dos formulários resolvem plural e nome do formulário`, () => {
+      const actions = activity.actions as Block;
+      const form = actions.form as Record<string, string>;
+      const one = String(
+        new IntlMessageFormat(form.responses_deleted, locale).format({
+          ...SAMPLE,
+          count: 1,
+        })
+      );
+      const many = String(
+        new IntlMessageFormat(form.responses_deleted, locale).format({
+          ...SAMPLE,
+          count: 12,
+        })
+      );
+      expect(one).toContain('1');
+      expect(many).toContain('12');
+      expect(one.replace(/\d+/g, '')).not.toBe(many.replace(/\d+/g, ''));
+
+      const contact = actions.contact as Record<string, string>;
+      const submitted = String(
+        new IntlMessageFormat(contact.form_submitted, locale).format(SAMPLE)
+      );
+      expect(submitted).toContain(String(SAMPLE.form));
+      expect(submitted).toContain(String(SAMPLE.label));
     });
   }
 
