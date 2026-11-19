@@ -68,6 +68,9 @@ describe('isolamento dos formulários', () => {
     expect(offenders).toEqual([
       'lib/forms/admin-client.ts',
       'lib/forms/plan-gate.ts',
+      // F3: o ÚNICO ponto das rotas e da página pública (`public-service.ts`);
+      // as rotas `app/api/forms/public/**` só o chamam.
+      'lib/forms/public-service.ts',
     ]);
   });
 

@@ -102,6 +102,41 @@ function contactPortalCsp(): string {
   ].join('; ');
 }
 
+/**
+ * Cabeçalhos de `/f/**` — a página pública dos formulários (SPEC 085 E-12).
+ *
+ * Idênticos ao catch-all, MENOS `X-Frame-Options` e o `frame-ancestors` do
+ * CSP: quem pode embutir um formulário é decidido por formulário (origens
+ * de embed cadastradas), e só o middleware conhece o slug — ele manda
+ * `Content-Security-Policy: frame-ancestors <origens>` ou, sem origens,
+ * `X-Frame-Options: DENY`. Um cabeçalho fixo aqui venceria a decisão.
+ *
+ * O CSP Report-Only desta página lista o que ela de fato carrega: o
+ * Turnstile (script, iframe e conexão), o embed de vídeo (YouTube sem
+ * cookies e Vimeo), as imagens assinadas e o PUT direto ao Storage.
+ */
+function formPageSecurityHeaders() {
+  return SECURITY_HEADERS.filter((h) => h.key !== 'X-Frame-Options').map(
+    (h) =>
+      h.key === 'Content-Security-Policy-Report-Only'
+        ? {
+            key: h.key,
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: https:",
+              "font-src 'self' data:",
+              "connect-src 'self' https://*.supabase.co",
+              'frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com',
+              "base-uri 'self'",
+              "form-action 'self'",
+            ].join('; '),
+          }
+        : h
+  );
+}
+
 const nextConfig: NextConfig = {
   /**
    * Saída `standalone` (só o necessário para rodar: `.next/standalone/server.js`
@@ -250,9 +285,14 @@ const nextConfig: NextConfig = {
       {
         // Cabeçalhos de segurança em toda resposta, incluindo assets
         // de /_next/static (o nosniff importa lá) e /api/* (HSTS +
-        // referrer-policy não fazem mal).
-        source: '/:path*',
+        // referrer-policy não fazem mal) — EXCETO `/f/**`, que tem regra
+        // própria logo abaixo (sem `X-Frame-Options`, SPEC 085 E-12).
+        source: '/:path((?!f/|f$).*)',
         headers: [...SECURITY_HEADERS],
+      },
+      {
+        source: '/f/:path*',
+        headers: formPageSecurityHeaders(),
       },
     ];
   },

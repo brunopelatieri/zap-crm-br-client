@@ -1,7 +1,21 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import {
+  frameHeadersFor,
+  lookupEmbedOrigins,
+  slugFromFormPath,
+} from '@/lib/forms/frame-policy';
+
+/** Origens de embed de `/f/<slug>`; qualquer outro caminho de `/f/**` não embute. */
+async function lookupEmbedOriginsFor(pathname: string): Promise<string[]> {
+  const slug = slugFromFormPath(pathname);
+  return slug ? lookupEmbedOrigins(slug) : [];
+}
+
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
   // `/auth/callback` exchanges a one-time PKCE `code` for a session, which
   // depends on the `code-verifier` cookie set when the flow started. None
   // of the gates below apply to this route — but calling getUser() still
@@ -31,6 +45,22 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname === '/area' ||
     request.nextUrl.pathname.startsWith('/area/')
   ) {
+    return NextResponse.next();
+  }
+
+  // Formulários públicos (SPEC 085 E-11): a página `/f/<slug>` e as rotas
+  // `/api/forms/public/**` são do visitante, sem sessão. Sem `getUser()`
+  // (nada de refresh de cookie de um usuário logado no mesmo navegador).
+  // A página ainda decide quem pode embuti-la (E-12).
+  if (pathname === '/f' || pathname.startsWith('/f/')) {
+    const origins = await lookupEmbedOriginsFor(pathname);
+    const response = NextResponse.next();
+    for (const [key, value] of Object.entries(frameHeadersFor(origins))) {
+      response.headers.set(key, value);
+    }
+    return response;
+  }
+  if (pathname.startsWith('/api/forms/public/')) {
     return NextResponse.next();
   }
 

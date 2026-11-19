@@ -2976,7 +2976,12 @@
     "retry": "Retry",
     "emptyTitle": "No notifications yet",
     "emptyDesc": "You'll see an alert here when someone assigns you a conversation or Meta flags a payment problem.",
-    "unread": "Unread"
+    "unread": "Unread",
+    "formResponseReceived": {
+      "title": "New response: {form}",
+      "body": "{contact} answered the form.",
+      "bodyWithBand": "{contact} answered the form and landed in “{band}”."
+    }
   },
   "Agents": {
     "page": {
@@ -4486,7 +4491,8 @@
     },
     "thankYou": {
       "default": "Thank you! We received your answers.",
-      "whatsapp": "Continue on WhatsApp"
+      "whatsapp": "Continue on WhatsApp",
+      "redirecting": "Redirecting you in a moment…"
     },
     "footer": {
       "madeWith": "Made with {brand}"
@@ -4501,7 +4507,12 @@
     "chooseFile": "Choose a file",
     "removeFile": "Remove",
     "progress": "{current} of {total}",
-    "networkError": "Could not connect. Check your internet and try again."
+    "networkError": "Could not connect. Check your internet and try again.",
+    "uploadFailed": "The upload failed. Try again.",
+    "tooFast": "Please wait a moment and try again.",
+    "turnstileFailed": "We could not confirm you are not a robot. Try again.",
+    "turnstileRequired": "Confirm you are not a robot to continue",
+    "submitFailed": "We could not send your answers. Try again."
   },
   "Forms": {
     "status": {

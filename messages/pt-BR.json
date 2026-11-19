@@ -2976,6 +2976,11 @@
     "retry": "Tentar novamente",
     "emptyTitle": "Nenhuma notificação ainda",
     "emptyDesc": "Você verá um alerta aqui quando alguém atribuir uma conversa a você ou a Meta sinalizar um problema de pagamento.",
+    "formResponseReceived": {
+      "title": "Nova resposta: {form}",
+      "body": "{contact} respondeu ao formulário.",
+      "bodyWithBand": "{contact} respondeu ao formulário e caiu em “{band}”."
+    },
     "unread": "Não lida"
   },
   "Agents": {
@@ -4486,7 +4491,8 @@
     },
     "thankYou": {
       "default": "Obrigado! Recebemos suas respostas.",
-      "whatsapp": "Continuar no WhatsApp"
+      "whatsapp": "Continuar no WhatsApp",
+      "redirecting": "Redirecionando você em instantes…"
     },
     "footer": {
       "madeWith": "Feito com {brand}"
@@ -4501,7 +4507,12 @@
     "chooseFile": "Escolher arquivo",
     "removeFile": "Remover",
     "progress": "{current} de {total}",
-    "networkError": "Não foi possível conectar. Verifique sua internet e tente de novo."
+    "networkError": "Não foi possível conectar. Verifique sua internet e tente de novo.",
+    "uploadFailed": "Não foi possível enviar o arquivo. Tente de novo.",
+    "tooFast": "Aguarde um instante e tente de novo.",
+    "turnstileFailed": "Não conseguimos confirmar que você não é um robô. Tente de novo.",
+    "turnstileRequired": "Confirme que você não é um robô para continuar",
+    "submitFailed": "Não foi possível enviar suas respostas. Tente de novo."
   },
   "Forms": {
     "status": {

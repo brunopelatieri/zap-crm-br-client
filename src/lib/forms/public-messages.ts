@@ -64,6 +64,13 @@ export const PUBLIC_FORM_MESSAGE_KEYS = [
   'removeFile',
   'progress',
   'networkError',
+  // F3: página pública em modo `live`.
+  'uploadFailed',
+  'tooFast',
+  'turnstileFailed',
+  'turnstileRequired',
+  'submitFailed',
+  'thankYou.redirecting',
 ] as const;
 
 export type PublicFormMessageKey = (typeof PUBLIC_FORM_MESSAGE_KEYS)[number];

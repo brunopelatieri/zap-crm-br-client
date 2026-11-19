@@ -16,9 +16,12 @@
 import { Check, Paperclip } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
 
+import type { UploadOutcome } from '@/lib/forms/form-session';
 import { applyTextMask } from '@/lib/forms/mask';
 import type { PublicFormTranslator } from '@/lib/forms/public-messages';
 import type { AnswerValue, PublicField } from '@/lib/forms/types';
+
+import { FileUploadControl } from './file-upload-control';
 
 export const OPTION_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -55,8 +58,10 @@ export interface FieldInputProps {
   onPick: (value: AnswerValue) => void;
   t: PublicFormTranslator;
   describedBy?: string;
-  /** Na prévia (e até a F3) o envio de arquivo fica desligado. */
+  /** Na prévia o envio de arquivo fica desligado (só o modo `live` tem `upload`). */
   filesDisabledNotice?: string | null;
+  /** `live`: sobe o arquivo direto ao Storage (SPEC 085 §4.2 item 6). */
+  upload?: (file: File) => Promise<UploadOutcome>;
   /** Foco automático ao mostrar o bloco: só na página real, não na prévia. */
   autoFocus?: boolean;
 }
@@ -70,6 +75,7 @@ export function FieldInput({
   t,
   describedBy,
   filesDisabledNotice,
+  upload,
   autoFocus = true,
 }: FieldInputProps) {
   const v = field.validation;
@@ -357,6 +363,18 @@ export function FieldInput({
       );
 
     case 'file_upload':
+      if (upload) {
+        return (
+          <FileUploadControl
+            field={field}
+            value={value}
+            onChange={onChange}
+            upload={upload}
+            t={t}
+            describedBy={describedBy}
+          />
+        );
+      }
       return (
         <div
           className="flex flex-col items-center gap-2 border-2 border-dashed px-4 py-8 text-center"

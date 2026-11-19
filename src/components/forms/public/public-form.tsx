@@ -6,28 +6,31 @@
 // É O MESMO componente da prévia do construtor e da página pública:
 //   - `mode="preview"` (F2): nada grava; o último bloco leva à tela de
 //     agradecimento sem enviar nada;
-//   - `mode="live"` (F3): `onSubmit` recebe as respostas, o servidor
-//     revalida tudo e devolve o agradecimento.
+//   - `mode="live"` (F3): `live` é a sessão do visitante
+//     (`@/lib/forms/form-session`): `start` ao responder o bloco de
+//     identidade (ou ao concluir o primeiro bloco, em `identity.mode =
+//     'token'`), autosave por bloco com fila de reenvio, upload direto ao
+//     Storage, rascunho local, Turnstile no último bloco, envio real e o
+//     agradecimento com "Falar no WhatsApp" / redirecionamento. O servidor
+//     revalida TUDO; aqui só se decide o que mostrar.
 //
-// O que a F3 ainda precisa acrescentar (SPEC 085 §11, F3):
-//   1. `POST …/start` ao responder o bloco de identidade (e autosave por
-//      bloco, `PATCH …/responses/[id]`); `identity.mode = 'token'` pula o
-//      bloco de telefone (salvo `confirm_phone_with_token`);
-//   2. upload de arquivo (`…/upload-url` + `PUT` na URL assinada) no lugar
-//      do bloco desligado de `file_upload`;
-//   3. rascunho local (`localStorage`, em try/catch) e fila de reenvio;
-//   4. Turnstile quando `settings.turnstile_site_key` vier no payload;
-//   5. botão "Falar no WhatsApp" com o `wa.me` do canal e o
-//      redirecionamento de `redirect_url` após 3 s;
-//   6. `postMessage({ type: 'zapcrm-form-resize', height })` para o embed
-//      (`src/lib/forms/embed.ts`).
+// `layout="page"` (página pública) deixa a página rolar e, dentro de um
+// `<iframe>` (embed, PRD D-13), avisa a altura ao site hospedeiro com
+// `postMessage({ type: 'zapcrm-form-resize', height })`. `layout="frame"`
+// (prévia) preenche a moldura que o construtor desenha.
 //
 // Texto de SISTEMA vem de `PublicForm.*` no idioma do FORMULÁRIO (D-8),
 // pelo `usePublicTranslator`; o texto do formulário (perguntas, opções) é
 // conteúdo. Só CSS variables do tema do formulário (`--pf-*`).
 // ============================================================
 
-import { ArrowLeft, ArrowRight, Check, MessageCircle } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  MessageCircle,
+} from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -39,7 +42,10 @@ import {
 } from 'react';
 
 import { readableTextColor } from '@/lib/forms/contrast';
+import { EMBED_RESIZE_MESSAGE_TYPE } from '@/lib/forms/embed';
+import type { LiveHandlers, ThankYouData } from '@/lib/forms/form-session';
 import { nextFieldKey, resolveVisibleFields } from '@/lib/forms/logic';
+import type { PublicFormTranslator } from '@/lib/forms/public-messages';
 import { validateAnswer, type AnswerErrorCode } from '@/lib/forms/validate';
 import type {
   AnswerValue,
@@ -50,6 +56,7 @@ import type {
 
 import { FieldInput, OPTION_LETTERS } from './field-input';
 import { FormMedia } from './form-media';
+import { TurnstileWidget } from './turnstile-widget';
 import {
   usePublicTranslator,
   type PublicFormMessages,
@@ -70,17 +77,25 @@ const FONT_STACKS = {
 } as const;
 
 const AUTO_ADVANCE_MS = 300;
+const DRAFT_SAVE_MS = 400;
+const REDIRECT_MS = 3000;
 const BRAND = 'ZAP CRM BR';
 
 type Screen =
-  { kind: 'welcome' } | { kind: 'field'; key: string } | { kind: 'thanks' };
+  | { kind: 'welcome' }
+  | { kind: 'field'; key: string }
+  | { kind: 'thanks' }
+  | { kind: 'already' }
+  | { kind: 'unavailable' };
 
 export interface PublicFormProps {
   payload: PublicFormPayload;
   messages: PublicFormMessages;
   mode: 'preview' | 'live';
-  /** `live` (F3): chamado no último bloco com as respostas cruas. */
-  onSubmit?: (answers: Answers) => Promise<void> | void;
+  /** `live` (F3): a sessão do visitante; sem ela o modo `live` não envia nada. */
+  live?: LiveHandlers;
+  /** `page` (página pública, rola) ou `frame` (prévia, preenche a moldura). */
+  layout?: 'frame' | 'page';
   /** Texto do aviso do bloco de arquivo na prévia (vem do namespace `Forms`). */
   filesDisabledNotice?: string | null;
   /**
@@ -94,20 +109,32 @@ export function PublicForm({
   payload,
   messages,
   mode,
-  onSubmit,
+  live,
+  layout = 'frame',
   filesDisabledNotice,
   jumpTo,
 }: PublicFormProps) {
   const t = usePublicTranslator(payload.locale, messages);
+  const isLive = mode === 'live' && !!live;
+  // Quota de upload cheia: só o bloco de arquivo some (PRD D-10).
+  const hideUploads = mode === 'live' && !payload.settings.uploads_available;
 
   const fields = useMemo(
-    () => payload.fields.map((f, i) => ({ ...f, position: i })),
-    [payload.fields]
+    () =>
+      payload.fields
+        .filter((f) => !(hideUploads && f.type === 'file_upload'))
+        .map((f, i) => ({ ...f, position: i })),
+    [payload.fields, hideUploads]
   );
   const [screen, setScreen] = useState<Screen>({ kind: 'welcome' });
   const [answers, setAnswers] = useState<Answers>({});
   const [history, setHistory] = useState<string[]>([]);
   const [errorCode, setErrorCode] = useState<AnswerErrorCode | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [thankYou, setThankYou] = useState<ThankYouData | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileNonce, setTurnstileNonce] = useState(0);
+  const [embedded, setEmbedded] = useState(false);
   // Quem mudou de tela? Na prévia, o foco só vai para a moldura quando foi quem
   // está respondendo (Enter, botão); mudança vinda do construtor (`jumpTo`) não
   // pode tirar o foco do painel de edição.
@@ -116,6 +143,8 @@ export function PublicForm({
   const [submitting, setSubmitting] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const submitted = useRef(false);
+  const turnstileKey = isLive ? payload.settings.turnstile_site_key : null;
 
   useEffect(
     () => () => {
@@ -151,6 +180,57 @@ export function PublicForm({
     if (focusInside) rootRef.current?.focus({ preventScroll: true });
   }, [screen, focusInside]);
 
+  // Rascunho local (SPEC §4.2 item 9): volta ao que o visitante já digitou.
+  useEffect(() => {
+    if (!isLive || !live) return;
+    const draft = live.loadDraft();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (Object.keys(draft).length > 0) setAnswers(draft);
+  }, [isLive, live]);
+  useEffect(() => {
+    if (!isLive || !live) return;
+    const id = setTimeout(() => {
+      if (!submitted.current) live.saveDraft(answers);
+    }, DRAFT_SAVE_MS);
+    return () => clearTimeout(id);
+  }, [answers, isLive, live]);
+
+  // Embed (PRD D-13): dentro de um iframe, avisa a altura ao site hospedeiro.
+  // `'*'` porque o conteúdo é só um número e a origem do hospedeiro é
+  // desconhecida; quem o ouve (o script do snippet) confere `e.origin`.
+  useEffect(() => {
+    if (!isLive || layout !== 'page') return;
+    let inFrame = false;
+    try {
+      inFrame = window.parent !== window;
+    } catch {
+      inFrame = true;
+    }
+    if (!inFrame) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEmbedded(true);
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const post = () =>
+      window.parent.postMessage(
+        { type: EMBED_RESIZE_MESSAGE_TYPE, height: Math.ceil(el.scrollHeight) },
+        '*'
+      );
+    const observer = new ResizeObserver(post);
+    observer.observe(el);
+    post();
+    return () => observer.disconnect();
+  }, [isLive, layout]);
+
+  // Agradecimento com `redirect_url`: vai embora depois de 3 s (só https).
+  useEffect(() => {
+    if (screen.kind !== 'thanks' || !isLive) return;
+    const url = thankYou?.redirect_url;
+    if (!url || !/^https:\/\//.test(url)) return;
+    const id = setTimeout(() => window.location.assign(url), REDIRECT_MS);
+    return () => clearTimeout(id);
+  }, [screen.kind, isLive, thankYou]);
+
   const colors = { ...DEFAULT_THEME_COLORS, ...payload.theme.colors };
   const radius = payload.theme.radius === 'square' ? '0px' : '0.75rem';
   const vars = {
@@ -177,7 +257,7 @@ export function PublicForm({
   const current = field ? visible.findIndex((f) => f.key === field.key) + 1 : 0;
   const total = visible.length;
   const pct =
-    screen.kind === 'thanks'
+    screen.kind === 'thanks' || screen.kind === 'already'
       ? 100
       : screen.kind === 'welcome' || total === 0
         ? 0
@@ -186,6 +266,7 @@ export function PublicForm({
   const setAnswer = useCallback(
     (key: string, value: AnswerValue | undefined) => {
       setErrorCode(null);
+      setServerError(null);
       setAnswers((prev) => {
         const next = { ...prev };
         if (value === undefined) delete next[key];
@@ -196,23 +277,41 @@ export function PublicForm({
     []
   );
 
+  /** Código de erro do servidor → tela (ou mensagem sob o bloco). */
+  const handleServerCode = useCallback((code: string) => {
+    if (code === 'unavailable') setScreen({ kind: 'unavailable' });
+    else if (code === 'already_answered') setScreen({ kind: 'already' });
+    else setServerError(code);
+  }, []);
+
   const finish = useCallback(
     async (finalAnswers: Answers) => {
-      if (mode === 'live' && onSubmit) {
+      if (isLive && live) {
         setSubmitting(true);
-        try {
-          await onSubmit(finalAnswers);
-        } finally {
-          setSubmitting(false);
+        const r = await live.submit(finalAnswers, turnstileToken);
+        setSubmitting(false);
+        if (!r.ok) {
+          const first = r.errors?.[0];
+          if (first && fields.some((f) => f.key === first.key)) {
+            setErrorCode(first.code as AnswerErrorCode);
+            setScreen({ kind: 'field', key: first.key });
+            return;
+          }
+          setTurnstileToken(null);
+          setTurnstileNonce((n) => n + 1);
+          handleServerCode(r.code);
+          return;
         }
+        submitted.current = true;
+        setThankYou(r.thankYou);
       }
       setScreen({ kind: 'thanks' });
     },
-    [mode, onSubmit]
+    [isLive, live, turnstileToken, fields, handleServerCode]
   );
 
   const advance = useCallback(
-    (from: PublicField, answersNow: Answers) => {
+    async (from: PublicField, answersNow: Answers) => {
       // Na prévia o envio de arquivo está desligado: validar bloqueava o
       // fluxo num `file_upload` obrigatório.
       const result =
@@ -224,8 +323,32 @@ export function PublicForm({
         return;
       }
       setErrorCode(null);
+      setServerError(null);
       setUserDriven(true);
       const next = nextFieldKey(fields, answersNow, from.key);
+
+      if (isLive && live) {
+        if (next === null && turnstileKey && !turnstileToken) {
+          setServerError('turnstile_required');
+          return;
+        }
+        if (next !== null) {
+          // `start` (identidade) e autosave; o que não é o bloco de
+          // identidade volta na hora.
+          setSubmitting(true);
+          const r = await live.blockDone(from, answersNow);
+          setSubmitting(false);
+          if (!r.ok) {
+            handleServerCode(r.code);
+            return;
+          }
+          if (r.alreadyAnswered) {
+            setScreen({ kind: 'already' });
+            return;
+          }
+        }
+      }
+
       if (next) {
         setHistory((h) => [...h, from.key]);
         setScreen({ kind: 'field', key: next });
@@ -233,7 +356,16 @@ export function PublicForm({
         void finish(answersNow);
       }
     },
-    [fields, finish, mode]
+    [
+      fields,
+      finish,
+      mode,
+      isLive,
+      live,
+      turnstileKey,
+      turnstileToken,
+      handleServerCode,
+    ]
   );
 
   const start = () => {
@@ -245,6 +377,7 @@ export function PublicForm({
 
   const back = () => {
     setErrorCode(null);
+    setServerError(null);
     setUserDriven(true);
     const prev = history[history.length - 1];
     if (prev === undefined) {
@@ -259,7 +392,10 @@ export function PublicForm({
     const nextAnswers = { ...answers, [f.key]: value };
     setAnswer(f.key, value);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => advance(f, nextAnswers), AUTO_ADVANCE_MS);
+    timer.current = setTimeout(
+      () => void advance(f, nextAnswers),
+      AUTO_ADVANCE_MS
+    );
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -304,7 +440,7 @@ export function PublicForm({
     // Enter num botão já o aciona; fora dele, avança.
     if (e.key === 'Enter' && tag !== 'BUTTON' && tag !== 'A') {
       e.preventDefault();
-      advance(field, answers);
+      void advance(field, answers);
     }
   };
 
@@ -324,12 +460,31 @@ export function PublicForm({
   const buttonClass =
     'inline-flex items-center gap-2 px-5 py-3 text-base font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2';
 
+  const rootClass =
+    layout === 'page'
+      ? `relative flex w-full flex-col outline-none ${
+          embedded ? 'min-h-[480px]' : 'min-h-dvh'
+        }`
+      : 'relative flex h-full min-h-[480px] w-full flex-col overflow-hidden outline-none';
+  const scrollClass =
+    layout === 'page' ? 'flex flex-1 flex-col' : 'flex-1 overflow-y-auto';
+  const contentClass =
+    layout === 'page'
+      ? 'mx-auto flex w-full max-w-[640px] flex-1 flex-col justify-center px-6 py-10'
+      : 'mx-auto flex min-h-full w-full max-w-[640px] flex-col justify-center px-6 py-10';
+
+  const message = serverError
+    ? serverMessage(t, serverError)
+    : errorCode && field
+      ? errorMessage(t, errorCode, field)
+      : '';
+
   return (
     <div
       ref={rootRef}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden outline-none"
+      className={rootClass}
       style={vars}
       lang={payload.locale}
     >
@@ -350,8 +505,28 @@ export function PublicForm({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full w-full max-w-[640px] flex-col justify-center px-6 py-10">
+      <div className={scrollClass}>
+        <div className={contentClass}>
+          {/* Honeypot: invisível e fora da ordem de tabulação; só robô preenche. */}
+          {isLive && (
+            <input
+              type="text"
+              name="website"
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              defaultValue=""
+              onChange={(e) => live?.setHoneypot(e.target.value)}
+              style={{
+                position: 'absolute',
+                left: '-10000px',
+                width: 1,
+                height: 1,
+                opacity: 0,
+              }}
+            />
+          )}
+
           {screen.kind === 'welcome' && (
             <div className="flex flex-col items-start gap-4">
               {payload.theme.logo_url ? (
@@ -432,13 +607,26 @@ export function PublicForm({
                 field={field}
                 value={answers[field.key]}
                 onChange={(value) => setAnswer(field.key, value)}
-                onEnter={() => advance(field, answers)}
+                onEnter={() => void advance(field, answers)}
                 onPick={(value) => pick(field, value)}
                 t={t}
-                describedBy={errorCode ? errorId : undefined}
+                describedBy={message ? errorId : undefined}
                 filesDisabledNotice={filesDisabledNotice}
+                upload={
+                  isLive && live
+                    ? (file) => live.upload(field, file)
+                    : undefined
+                }
                 autoFocus={focusInside}
               />
+
+              {turnstileKey && isLast ? (
+                <TurnstileWidget
+                  key={turnstileNonce}
+                  siteKey={turnstileKey}
+                  onToken={setTurnstileToken}
+                />
+              ) : null}
 
               <p
                 id={errorId}
@@ -447,14 +635,14 @@ export function PublicForm({
                 className="min-h-5 text-sm font-medium"
                 style={{ color: '#dc2626' }}
               >
-                {errorCode ? errorMessage(t, errorCode, field) : ''}
+                {message}
               </p>
 
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => advance(field, answers)}
+                  onClick={() => void advance(field, answers)}
                   className={buttonClass}
                   style={{ ...buttonStyle, outlineColor: 'var(--pf-primary)' }}
                 >
@@ -496,7 +684,19 @@ export function PublicForm({
               <p className="text-lg opacity-80">
                 {thanks.body || t('thankYou.default')}
               </p>
-              {thanks.whatsapp_cta ? (
+              {thanks.whatsapp_cta && thankYou?.whatsapp_url ? (
+                <a
+                  href={thankYou.whatsapp_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonClass}
+                  style={{ ...buttonStyle, outlineColor: 'var(--pf-primary)' }}
+                >
+                  <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                  {t('thankYou.whatsapp')}
+                </a>
+              ) : null}
+              {thanks.whatsapp_cta && !isLive ? (
                 <button
                   type="button"
                   disabled
@@ -507,6 +707,37 @@ export function PublicForm({
                   {t('thankYou.whatsapp')}
                 </button>
               ) : null}
+              {thankYou?.redirect_url ? (
+                <p className="text-sm opacity-60">{t('thankYou.redirecting')}</p>
+              ) : null}
+            </div>
+          )}
+
+          {screen.kind === 'already' && (
+            <div className="flex flex-col items-start gap-4">
+              <div
+                className="flex h-12 w-12 items-center justify-center rounded-full"
+                style={{
+                  background: 'var(--pf-primary)',
+                  color: 'var(--pf-button-text)',
+                }}
+                aria-hidden="true"
+              >
+                <Check className="h-6 w-6" />
+              </div>
+              <p className="text-lg opacity-80" role="status">
+                {t('alreadyAnswered')}
+              </p>
+            </div>
+          )}
+
+          {screen.kind === 'unavailable' && (
+            <div className="flex flex-col items-start gap-4">
+              <AlertCircle className="h-10 w-10 opacity-60" aria-hidden="true" />
+              <h1 className="text-2xl font-semibold">
+                {t('unavailable.title')}
+              </h1>
+              <p className="text-base opacity-80">{t('unavailable.body')}</p>
             </div>
           )}
         </div>
@@ -519,8 +750,25 @@ export function PublicForm({
   );
 }
 
+function serverMessage(t: PublicFormTranslator, code: string): string {
+  switch (code) {
+    case 'network':
+      return t('networkError');
+    case 'invalid_phone':
+      return t('invalidPhone');
+    case 'too_fast':
+      return t('tooFast');
+    case 'turnstile_failed':
+      return t('turnstileFailed');
+    case 'turnstile_required':
+      return t('turnstileRequired');
+    default:
+      return t('submitFailed');
+  }
+}
+
 function errorMessage(
-  t: ReturnType<typeof usePublicTranslator>,
+  t: PublicFormTranslator,
   code: AnswerErrorCode,
   field: PublicField
 ): string {
