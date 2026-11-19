@@ -61,7 +61,14 @@ export function unavailableError(): PublicApiError {
 /** Erro conhecido → resposta; qualquer outro → 500 genérico, log só com o nome. */
 export function publicErrorResponse(route: string, err: unknown): NextResponse {
   if (err instanceof PublicApiError) {
-    return publicJsonError(err.code, err.message, err.status, err.extra);
+    const res = publicJsonError(err.code, err.message, err.status, err.extra);
+    // 429 lançado pelo serviço (teto por conta): o mesmo `Retry-After` que
+    // `rateLimitResponse` põe no 429 por IP.
+    const retry = err.extra.retry_after_seconds;
+    if (err.status === 429 && typeof retry === 'number' && retry > 0) {
+      res.headers.set('Retry-After', String(Math.ceil(retry)));
+    }
+    return res;
   }
   const name = err instanceof Error ? err.name : typeof err;
   console.error(`[forms/public] ${route} failed (${name})`);

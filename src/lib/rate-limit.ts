@@ -233,6 +233,14 @@ export const RATE_LIMITS = {
   formAutosave: { limit: 120, windowMs: 60_000 },
   formUpload: { limit: 20, windowMs: 60_000 },
   formSubmit: { limit: 10, windowMs: 60_000 },
+  /** URLs de upload assinadas por CONTA (todas as rotas e formulários), por
+   *  hora (SPEC 085 F6, achado M-1). O arquivo pendente só entra na quota de
+   *  bytes no envio; sem este teto, um visitante anônimo girando de IP
+   *  gravaria até 16 MB por URL em `form-uploads` sem tocar na quota, e a
+   *  varredura só recolhe depois de 24 h + 7 dias. 600/h cabe numa campanha
+   *  grande (um arquivo por respondente) e limita o pior caso a ~9,6 GB/h
+   *  por conta. Em memória, por processo (como os demais). */
+  formUploadAccount: { limit: 600, windowMs: 3_600_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

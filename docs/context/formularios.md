@@ -23,26 +23,29 @@ Formulário de uma pergunta por tela (modelo Yay! Forms), mobile first. O `admin
 3. **`service_role` só onde há autorização validada**: `public-service.ts` (escopado por `form_id`/`account_id` de `form_public_availability`), `plan-gate.ts`, a trilha de exportação e a remoção de objetos do bucket depois de `admin` confirmado. `src/components/forms/**` e `src/app/(public)/f/**` nunca importam `admin-client` (teste `admin-client.test.ts`).
 4. **Resposta sempre ligada a um contato** (`contact_id NOT NULL`); nada é gravado antes da identidade (telefone válido ou token). Identidade fixada no `start` (token > telefone); o envio ignora `link_token`.
 5. **Instantâneo imutável**: `form_responses.answers` guarda rótulo, tipo, valor e pontos de cada bloco no momento do envio. Editar o formulário depois não reescreve respostas. O JSONB **não preserva a ordem** das chaves: a ordem de exibição vem dos blocos (`field_order`/`fieldOrders`).
-6. **Arquivos**: bucket privado `form-uploads`, caminho `account-<uuid>/<form_id>/<response_id>/<arquivo>`; leitura só por URL assinada de 10 min com `download` (nunca inline); o download confere que o caminho pertence à pasta **daquela** resposta. Apagar resposta remove os objetos (melhor esforço) e devolve os bytes a `form_upload_bytes`; o resto a varredura recolhe.
+6. **Arquivos**: URL de upload assinada só depois de validar o pedido e com teto por IP (`formUpload`) **e por conta** (`formUploadAccount`, 600/h — o arquivo pendente só entra na quota de bytes no envio). Mídia do construtor (`form-media`): a página pública só assina caminho `account-<conta do formulário>/…` (`isOwnedMediaPath`), porque a RLS deixa o `admin` gravar `theme`/`media` direto pelo PostgREST sem passar pelas rotas. Bucket privado `form-uploads`, caminho `account-<uuid>/<form_id>/<response_id>/<arquivo>`; leitura só por URL assinada de 10 min com `download` (nunca inline); o download confere que o caminho pertence à pasta **daquela** resposta. Apagar resposta remove os objetos (melhor esforço) e devolve os bytes a `form_upload_bytes`; o resto a varredura recolhe.
 7. **Exportar é `admin`+ e auditado** em `contact_exports` (`source = 'form_responses'`, migração 098). Toda célula passa por `neutralizeFormula`: a resposta é de um visitante anônimo (injeção de fórmula no Excel/Sheets). **Apagar** exige o nome do formulário digitado (conferido de novo no servidor).
 8. **Filtro "bloco X = valor"** usa `answers @> {key:{value:…}}` (GIN `jsonb_path_ops`); `multi_select` guarda array. Busca por contato usa `.or()` do PostgREST: o termo passa por `sanitizeSearchTerm`.
 9. **Cron**: `partial` com `updated_at` > 24 h vira `abandoned`; objetos de `form-uploads` sem resposta (órfãos) ou de `abandoned` há > 7 dias são removidos; `completed` nunca perde arquivo. A varredura de Storage roda no máximo 1×/h por processo, 10 contas por vez (cursor em memória).
 10. **Quota no banco, app explica**: `forms` e `form_responses_month` por trigger (098); `form_upload_bytes` na rota. Mês em `America/Sao_Paulo` no SQL **e** no TS (`monthMetricKey`).
 11. **i18n**: `Forms` e `PublicForm` nos dois dicionários; textos da página pública seguem `forms.locale`, não o cookie do visitante. Mensagens de `/api/**` em inglês; a UI traduz o código (`Forms.errors.*`).
-12. **Git/banco**: 097/098 são **escritas e não aplicadas** até a F5 (confirmar com o mantenedor). `supabase/` está no `.gitignore`: as migrações não aparecem em `git status`.
+12. **Git/banco**: 097/098 estão **aplicadas no `vn` desde 2026-11-19** (F5 da SPEC 085, pelo SQL Editor, conferidas pelos objetos; detalhe em `status.md`). Toda mudança de schema de formulário é migração nova (`100` em diante), com confirmação do mantenedor. `forms_enabled` está `false` em todos os planos e nenhuma conta o tem ligado. **Piloto (F6):** procedimento e roteiro em [`../spec-085-teste-manual.md`](../spec-085-teste-manual.md); ligar só com confirmação do mantenedor e **sempre junto** com `forms`, `form_responses_month` e `form_upload_mb` nos `limit_overrides` — nenhum plano tem essas chaves em `limits`, e chave ausente = sem limite. Riscos aceitos só para o piloto (M-2 contato criado no `start` sem prova de posse; M-3 modo telefone age sobre contato conhecido): ver o Status da SPEC. `supabase/` está no `.gitignore`: as migrações não aparecem em `git status`.
 
 ## Armadilhas
 
 | Sintoma | Causa provável |
 | --- | --- |
-| Página pública "indisponível" com tudo ligado | `plan_feature_strict` falso (chave ausente no plano), `contacts` cheia, 098 não aplicada |
+| Página pública "indisponível" com tudo ligado | `plan_feature_strict` falso (chave ausente ou `false` no plano e sem `limit_overrides`), `contacts` cheia, quota do mês zerada |
 | Link com token sempre pede telefone | `FORM_LINK_SECRET` ausente, < 32 bytes ou trocado entre deploys; token de outro formulário |
 | "Apagar" some a linha mas o arquivo continua | Falha no `remove` do bucket (melhor esforço): a varredura recolhe como órfão em até ~1 h |
 | Coluna/ordem dos blocos embaralhada | Leu `Object.keys(answers)` em vez da ordem dos blocos |
 | Planilha abre com `'=…` numa célula | É o `neutralizeFormula` funcionando; não remova |
-| Notificação não abre a resposta | Aviso antigo sem `form_response_id` (cai na lista); coluna da 098 não aplicada |
+| Notificação não abre a resposta | Aviso antigo sem `form_response_id` (cai na lista) |
 | Varredura "não limpa" | Interruptor não existe: depende do cron de `/api/automations/cron` e de `AUTOMATION_CRON_SECRET` (503 sem ele) |
 | Upload falha sem erro visível | MIME com parâmetro (`;codecs=`) não normalizado, ou extensão fora da allowlist |
+| Upload responde 429 `rate_limited` com IPs diferentes | Teto `formUploadAccount` (600 URLs/h por conta, em memória por processo) |
+| Logo/imagem some só na página pública | Caminho fora de `account-<conta do formulário>/` (gravado direto no banco): não é assinado |
+| Conta-piloto aceita upload sem limite | `form_upload_mb` ausente em `limits` e em `limit_overrides` = ilimitado |
 
 ## Mais
 

@@ -26,7 +26,9 @@ import {
   SLUG,
   type World,
 } from '@/lib/forms/test-public-world';
+import { loadPublicFormPage } from '@/lib/forms/public-service';
 import { buildUploadPath } from '@/lib/forms/uploads';
+import { __resetRateLimitForTests } from '@/lib/rate-limit';
 import { normalizeContactPhone } from '@/lib/phone/br';
 
 const h = vi.hoisted(() => ({
@@ -144,6 +146,7 @@ const lastPatch = (w: World) =>
   w.state.updates[w.state.updates.length - 1].patch;
 
 beforeEach(() => {
+  __resetRateLimitForTests();
   h.world = createWorld();
   h.applyMappings.mockReset().mockResolvedValue({ applied: [], warnings: [] });
   h.applyBandActions.mockReset().mockResolvedValue({});
@@ -586,6 +589,87 @@ describe('POST …/upload-url', () => {
     expect(res.status).toBe(409);
     h.world.state.uploadQuota = { used_bytes: 0, limit_bytes: 2000 };
     expect((await ask(id, token)).status).toBe(200);
+  });
+});
+
+describe('POST …/upload-url: teto por conta (F6, M-1)', () => {
+  it('600 URLs/h por conta, de IPs diferentes; o 601º → 429 sem assinar', async () => {
+    const { id, token } = seedResponse(h.world);
+    const ask = () =>
+      uploadUrl(
+        post('/upload-url', {
+          response_id: id,
+          resume_token: token,
+          field_key: 'cv',
+          name: 'curriculo.pdf',
+          mime: 'application/pdf',
+          size: 1024,
+        }),
+        params
+      );
+    // Cada pedido sai de um IP novo: o limite por IP nunca dispara.
+    for (let i = 0; i < 600; i++) {
+      h.world.state.objects.clear();
+      expect((await ask()).status).toBe(200);
+    }
+    const blocked = await ask();
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+    const json = await blocked.json();
+    expect(json.code).toBe('rate_limited');
+    expect(json.retry_after_seconds).toBeGreaterThan(0);
+    expect(h.world.storage.createSignedUploadUrl).toHaveBeenCalledTimes(600);
+  });
+
+  it('pedido recusado pela quota não gasta o orçamento da conta', async () => {
+    const { id, token } = seedResponse(h.world);
+    const ask = () =>
+      uploadUrl(
+        post('/upload-url', {
+          response_id: id,
+          resume_token: token,
+          field_key: 'cv',
+          name: 'curriculo.pdf',
+          mime: 'application/pdf',
+          size: 1024,
+        }),
+        params
+      );
+    h.world.state.uploadQuota = { used_bytes: 1000, limit_bytes: 1500 };
+    for (let i = 0; i < 600; i++) {
+      expect((await ask()).status).toBe(409);
+    }
+    h.world.state.uploadQuota = { used_bytes: 0, limit_bytes: null };
+    expect((await ask()).status).toBe(200);
+  });
+});
+
+// ------------------------------------------------------------
+describe('página pública: mídia assinada só da própria conta (F6, L-1)', () => {
+  it('caminho de OUTRA conta ou com ".." no JSON do formulário não é assinado', async () => {
+    const own = `account-${ACCOUNT_ID}/${FORM_ID}/${crypto.randomUUID()}.png`;
+    const foreign = `account-${crypto.randomUUID()}/${FORM_ID}/${crypto.randomUUID()}.png`;
+    const traversal = `account-${ACCOUNT_ID}/${FORM_ID}/../x.png`;
+    h.world = createWorld({
+      form: defaultForm({
+        theme: {
+          logo_path: foreign,
+          welcome: { media: { kind: 'image', path: traversal } },
+        },
+      }),
+      fields: defaultFields().map((f, i) =>
+        i === 0 ? { ...f, media: { kind: 'image', path: own } } : f
+      ),
+    });
+    const page = await loadPublicFormPage(SLUG);
+    expect(page.kind).toBe('available');
+    const signed = h.world.storage.createSignedUrls.mock.calls.flatMap(
+      (c) => c[0]
+    );
+    expect(signed).toEqual([own]);
+    if (page.kind === 'available') {
+      expect(page.payload.theme.logo_url).toBeNull();
+    }
   });
 });
 

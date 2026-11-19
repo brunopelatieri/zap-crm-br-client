@@ -33,9 +33,11 @@ import { createTranslator } from 'next-intl';
 
 import { resolveAuditUserId } from '@/lib/api/v1/contacts';
 import { resolveDefaultChannelId } from '@/lib/channels/default-channel';
+import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 
 import { supabaseAdmin } from './admin-client';
 import { collectMediaPaths } from './account-api';
+import { isOwnedMediaPath } from './account-input';
 import { recordFormSubmitted } from './activity';
 import { applyBandActions } from './apply-band';
 import { applyMappings } from './apply-mapping';
@@ -276,9 +278,14 @@ export async function loadPublicFormPage(
       return { kind: 'unavailable' };
     }
 
+    // O JSON de `theme`/`media` pode ter sido gravado direto pela RLS do
+    // admin (PostgREST), sem passar pela validação das rotas: o service-role
+    // só assina caminho da PRÓPRIA conta (F6, achado L-1).
     const signedMedia = await signPublicMedia(
       db,
-      collectMediaPaths(form, fields)
+      collectMediaPaths(form, fields).filter((p) =>
+        isOwnedMediaPath(p, availability.accountId)
+      )
     );
     let uploadsAvailable = true;
     if (fields.some((f) => f.type === 'file_upload')) {
@@ -769,6 +776,29 @@ export async function createUploadUrl(input: {
       409,
       'upload_quota',
       'Uploads are not available right now.'
+    );
+  }
+
+  // Teto por CONTA e por hora (F6, M-1): vale para todos os IPs juntos. Por
+  // último, logo antes de assinar: pedido recusado por validação, quota ou
+  // teto por resposta não gasta o orçamento da conta. Trade-off aceito: quem
+  // esgota o orçamento deixa o bloco de arquivo da conta indisponível até a
+  // janela virar (melhor que encher o disco que todas as contas dividem).
+  const accountBudget = checkRateLimit(
+    `formUploadAccount:${accountId}`,
+    RATE_LIMITS.formUploadAccount
+  );
+  if (!accountBudget.success) {
+    throw new PublicApiError(
+      429,
+      'rate_limited',
+      'Too many uploads. Try again later.',
+      {
+        retry_after_seconds: Math.max(
+          1,
+          Math.ceil((accountBudget.reset - Date.now()) / 1000)
+        ),
+      }
     );
   }
 

@@ -13,7 +13,8 @@ paths:
 - `service_role` só em `public-service.ts`, `plan-gate.ts` e nas rotas da conta depois do papel `admin` confirmado (trilha de exportação, remoção de objetos). `src/components/forms/**` e `src/app/(public)/f/**` nunca importam `admin-client`.
 - Resposta sempre vinculada a um contato; nada é gravado antes da identidade. `answers` é instantâneo imutável e o JSONB **não guarda a ordem**: a ordem vem dos blocos.
 - Arquivo do visitante: bucket privado, URL assinada curta com `download`, caminho conferido contra a pasta da resposta. Exportar é `admin`+, auditado em `contact_exports` e com `neutralizeFormula` em toda célula; apagar exige o nome do formulário.
-- Quota no banco (trigger), mês em `America/Sao_Paulo` no SQL e no TS. 097/098 só vão ao `vn` com confirmação do mantenedor (fase F5).
+- Quota no banco (trigger), mês em `America/Sao_Paulo` no SQL e no TS. 097/098 aplicadas no `vn` (F5); schema novo é migração nova com confirmação. Piloto: `forms_enabled` **junto** com as 3 quotas em `limit_overrides` (chave ausente = ilimitado), só com confirmação.
+- A página pública só assina mídia `account-<conta do formulário>/…` (o admin grava `theme`/`media` direto pela RLS); upload tem teto por IP e por conta (`formUploadAccount`).
 - Cron: fase `forms` em `/api/automations/cron` (`sweep.ts`): `abandoned` após 24 h, objetos órfãos ou de abandonadas > 7 dias; `completed` nunca perde arquivo.
 - i18n: `Forms` e `PublicForm` nos dois dicionários; `i18n:check` e placeholders ICU idênticos.
 
