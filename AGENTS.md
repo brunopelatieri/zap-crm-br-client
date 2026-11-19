@@ -45,7 +45,7 @@
 
 **Git:** commits e push são executados **manualmente pelo mantenedor**. Agentes entregam o comando pronto, não o executam.
 
-**Segredos:** não leia nem copie `.env*` (exceto `.env.local.example`, a lista de variáveis), `.mcp.json`, `.claude/settings.local.json` nem `docs/deploy/`.
+**Segredos:** não leia nem copie `.env*` (exceto `.env.local.example`, a lista de variáveis), `.mcp.json`, `.claude/settings.local.json` nem `docs/deploy/` (exceção: `docs/deploy/server_contabo.md`, sem segredo, é o acesso SSH à VPS — [`vps-ssh.md`](./docs/context/vps-ssh.md)).
 
 ## Armadilhas conhecidas
 

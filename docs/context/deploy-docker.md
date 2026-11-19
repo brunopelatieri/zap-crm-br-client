@@ -11,7 +11,7 @@
 - **Plano de implantação na VPS:** [`../plano-implantacao-vps-zap-local-ia-br.md`](../plano-implantacao-vps-zap-local-ia-br.md)
 - **Comandos de validação:** [`../comandos-desenvolvimento.md`](../comandos-desenvolvimento.md)
 
-`docs/deploy/` **existe e contém segredo (stack com valores reais) — não ler, não copiar para chat, não citar conteúdo.** A pasta é ignorada pelo Git de propósito.
+`docs/deploy/` **existe e contém segredo (stack com valores reais) — não ler, não copiar para chat, não citar conteúdo.** A pasta é ignorada pelo Git de propósito. **Exceção:** `docs/deploy/server_contabo.md` não guarda segredo e descreve o acesso SSH à VPS: ver [`vps-ssh.md`](./vps-ssh.md). A `stack-zapcrm.yml` só se lê e edita quando o mantenedor liberar na hora (nunca repita os valores dela).
 
 ## Regras que não podem quebrar
 
