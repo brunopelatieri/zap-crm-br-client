@@ -358,7 +358,9 @@ describe('renderConversationPdf — paginação', () => {
 
     const reopened = await PDFDocument.load(bytes);
     expect(reopened.getPageCount()).toBeGreaterThan(2);
-  });
+    // 15 s: renderiza 400 linhas e leva ~4 s sozinho; com a suíte inteira em
+    // paralelo passava de 5 s (limite padrão) e falhava sem relação com o código.
+  }, 15_000);
 
   it('URL de 400 caracteres sem espaço não estoura a caixa', async () => {
     const url = `https://exemplo.com.br/${'a'.repeat(400)}`;
