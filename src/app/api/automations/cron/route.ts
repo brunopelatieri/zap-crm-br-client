@@ -7,9 +7,10 @@ import { scanSchedules } from '@/lib/automations/schedule-scan';
 import { runMessageRetention } from '@/lib/retention/sweep';
 import { runPlanLifecycle } from '@/lib/plans/lifecycle';
 import { deliverPending } from '@/lib/notifications/dispatch';
+import { runFormsSweep } from '@/lib/forms/sweep';
 
 /**
- * Cinco fases, um único agendamento:
+ * Sete fases, um único agendamento:
  *
  *   1. **Drenar** as `automation_pending_executions` vencidas (o step
  *      `wait`). Comportamento original desta rota.
@@ -23,6 +24,10 @@ import { deliverPending } from '@/lib/notifications/dispatch';
  *   6. **Reentregar** a outbox de notificações do sistema — a porta 2
  *      da SPEC 063 §5, rede de segurança para tudo que a porta 1
  *      (`after()` na rota que emitiu o evento) perdeu.
+ *   7. **Varrer** os formulários (SPEC 085 §4.6/§9, F4): marca `abandoned`
+ *      as respostas `partial` paradas há mais de 24 h e remove do bucket
+ *      `form-uploads` os objetos órfãos (sem resposta) ou de respostas
+ *      `abandoned` há mais de 7 dias. A contagem sai no log da fase.
  *
  * Por que a varredura mora AQUI e não numa rota nova (§5.5.1, e o mesmo
  * argumento vale para a fase 3 — SPEC 046 §6.1 —, para a fase 4 —
@@ -206,6 +211,22 @@ export async function GET(request: Request) {
       console.log(
         '[automations-cron] notifications dispatch:',
         JSON.stringify(notificationsResult)
+      );
+    }
+
+    // Fase 7 (SPEC 085 §9) — formulários. Sem interruptor de `.env`: conta
+    // sem formulário custa uma consulta barata (nenhuma resposta `partial`
+    // velha) e a varredura de Storage roda no máximo 1 vez por hora por
+    // processo. Não lança (ver `runFormsSweep`).
+    const formsResult = await runFormsSweep(admin, new Date());
+    if (
+      formsResult.abandoned > 0 ||
+      formsResult.removedObjects > 0 ||
+      formsResult.errors > 0
+    ) {
+      console.log(
+        '[automations-cron] forms sweep:',
+        JSON.stringify(formsResult)
       );
     }
   });

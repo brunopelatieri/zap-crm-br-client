@@ -3,6 +3,7 @@
 import {
   Archive,
   ArrowLeft,
+  ClipboardList,
   Copy,
   EyeOff,
   Loader2,
@@ -45,6 +46,7 @@ export const STATUS_STYLES: Record<FormStatus, string> = {
 };
 
 export interface PublishBarProps {
+  formId: string;
   name: string;
   status: FormStatus;
   dirty: boolean;
@@ -64,6 +66,7 @@ export interface PublishBarProps {
 
 /** Barra superior do construtor (SPEC 085 §4.3). */
 export function PublishBar({
+  formId,
   name,
   status,
   dirty,
@@ -116,6 +119,13 @@ export function PublishBar({
       </span>
 
       <div className="ml-auto flex flex-wrap items-center gap-1.5">
+        <Link
+          href={`/forms/${formId}/respostas`}
+          className={buttonVariants({ variant: 'outline' })}
+        >
+          <ClipboardList className="h-4 w-4" />
+          {t('responses')}
+        </Link>
         {status === 'published' && (
           <Button variant="outline" onClick={onShare}>
             <Share2 className="h-4 w-4" />

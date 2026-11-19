@@ -178,6 +178,8 @@ export async function applyBandActions(
             user_id,
             type: 'form_response_received',
             contact_id: input.contactId,
+            form_id: input.formId,
+            form_response_id: input.responseId,
             actor_user_id: null,
             title: input.notification!.title.slice(0, 200),
             body: input.notification!.body ?? null,

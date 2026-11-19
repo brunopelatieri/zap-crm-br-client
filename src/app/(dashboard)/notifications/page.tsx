@@ -17,6 +17,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { getDateFnsLocale } from '@/lib/i18n/date-fns-locale';
 import { Button } from '@/components/ui/button';
+import { notificationHref } from '@/lib/forms/notification-link';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -129,6 +130,10 @@ export default function NotificationsPage() {
       if (!n.read_at) markRead(n.id);
       if (n.conversation_id) {
         router.push(`/inbox?c=${n.conversation_id}`);
+      } else if (n.type === 'form_response_received') {
+        // Link profundo (SPEC 085 F4): abre a resposta no painel lateral.
+        // Resposta apagada depois (`form_response_id` virou nulo): lista.
+        router.push(notificationHref(n));
       } else if (n.type === 'channel_payment_blocked') {
         // Sem conversa: o alerta é do número (canal). Leva à aba onde o
         // monitor de status de envio e o link de cobrança vão morar.
@@ -265,6 +270,11 @@ export default function NotificationsPage() {
                     {n.body && (
                       <p className="text-muted-foreground mt-0.5 truncate text-xs">
                         {n.body}
+                      </p>
+                    )}
+                    {n.type === 'form_response_received' && (
+                      <p className="text-primary mt-1 text-[11px] font-medium">
+                        {t('openResponse')}
                       </p>
                     )}
                     <p className="text-muted-foreground/70 mt-1 text-[11px]">

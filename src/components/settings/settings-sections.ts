@@ -1,4 +1,5 @@
 import {
+  ClipboardList,
   Coins,
   DoorOpen,
   FileText,
@@ -39,6 +40,7 @@ export const SETTINGS_SECTIONS = [
   'deals',
   'members',
   'contact-portal',
+  'forms',
   'api',
   'webhook-log',
   'danger',
@@ -138,6 +140,14 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     id: 'contact-portal',
     label: 'Contact area',
     icon: DoorOpen,
+    group: 'workspace',
+    minRole: 'admin',
+  },
+  // Formularios de captacao (SPEC 085 F4): estado das variaveis do servidor, `admin`+.
+  forms: {
+    id: 'forms',
+    label: 'Forms',
+    icon: ClipboardList,
     group: 'workspace',
     minRole: 'admin',
   },

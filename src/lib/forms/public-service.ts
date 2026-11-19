@@ -1115,7 +1115,7 @@ export async function submitResponse(
         form: form.name,
         band: band.label,
       });
-      await applyBandActions(db, {
+      const applied = await applyBandActions(db, {
         band,
         accountId,
         contactId: response.contact_id,
@@ -1127,6 +1127,14 @@ export async function submitResponse(
         auditUserId,
         notification: text,
       });
+      // O painel de respostas mostra o negócio criado (F4).
+      if (applied.dealId) {
+        await db
+          .from('form_responses')
+          .update({ deal_id: applied.dealId })
+          .eq('id', response.id)
+          .eq('account_id', accountId);
+      }
     });
   }
 

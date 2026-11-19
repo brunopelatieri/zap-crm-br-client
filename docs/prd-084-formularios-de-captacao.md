@@ -19,24 +19,24 @@
 
 ## 2. O que já existe (e por que isso encurta o trabalho)
 
-| Peça                                                                 | Onde                                                                                           | Papel aqui                                                                                                   |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `normalizeContactPhone`, dedup por `phone_normalized`                | `src/lib/phone/br.ts`, migração 022                                                            | A resposta vira contato pelo mesmo caminho do formulário manual (SPEC 050 D-5)                               |
-| `applyCustomValues` (upsert por `(contact_id, custom_field_id)`)     | `src/lib/ingest/custom-values.ts`                                                              | Mapear uma pergunta para um campo personalizado sem apagar os outros                                         |
-| Etiquetas aditivas, `resolveImportTagIds`                            | `src/lib/contacts/resolve-import-tags.ts`, SPEC 057 D-1                                        | Faixa de pontuação aplica etiqueta sem substituir as existentes                                              |
-| `createDeal`                                                         | `src/lib/pipelines/deals.ts`                                                                   | Faixa cria o negócio na etapa certa do funil                                                                 |
-| `runAutomationsForTrigger`, `interpolate` (`{{vars.*}}`)             | `src/lib/automations/engine.ts`                                                                | Gatilho `form_submitted` e variáveis `{{form.*}}` nas mensagens                                              |
-| `VariableMapping` (`static` / `field` / `custom_field`)              | `src/lib/whatsapp/broadcast-variables.ts`                                                      | Tipo novo `form_link`: link por destinatário no disparo                                                      |
-| `sendAndPersistOutbound`                                             | `src/lib/channels/send.ts`                                                                     | Botão "Enviar formulário" no inbox sai pelo canal da conversa                                                |
-| `FEATURE_KEYS`, `USAGE_QUOTA_KEYS`, `plan_feature_strict`            | `src/lib/plans/types.ts`, migração 096                                                         | Chave `forms_enabled` fail-closed; as três quotas aparecem na barra de uso e no console sem código novo      |
-| `enforce_contact_quota` (trigger + `account_usage_counters`)         | migração 067                                                                                   | Modelo da trigger de quota de `forms` e dos contadores mensais                                               |
-| Bucket privado por conta, `signStoragePath`                          | migração 040/078, `src/lib/storage/sign-media.ts`                                              | Bucket `form-uploads`, leitura só assinada                                                                   |
-| `/area` com sessão própria, `portalDb()`, `isolation.test.ts`        | `src/lib/contact-portal/`, SPEC 083                                                            | Formulários e respostas dentro da área, sem Supabase Auth                                                    |
-| `buildSystemPrompt`, `HANDOFF_SENTINEL`, `generateReply`             | `src/lib/ai/defaults.ts`, `generate.ts`                                                        | Bloco "perfil do lead" no prompt e sentinela `[[FORM:slug]]` para a IA oferecer um formulário                |
-| `recordActivity`, `ACTIVITY_CATALOG`                                 | `src/lib/activity/`                                                                            | Eventos `form.*` e `contact.form_*`                                                                          |
-| `checkRateLimit`, `RATE_LIMITS`                                      | `src/lib/rate-limit.ts`                                                                        | Tetos por IP da página pública                                                                               |
-| `resolveRequestOrigin`, `NEXT_PUBLIC_SITE_URL`                       | `src/lib/http/request-origin.ts`                                                               | Origem dos links; base do domínio próprio (SPEC 087)                                                         |
-| Middleware sai cedo em `/area`                                       | `src/middleware.ts`                                                                            | Mesmo padrão para `/f/**` (página pública sem `getUser()`)                                                   |
+| Peça                                                             | Onde                                                    | Papel aqui                                                                                              |
+| ---------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `normalizeContactPhone`, dedup por `phone_normalized`            | `src/lib/phone/br.ts`, migração 022                     | A resposta vira contato pelo mesmo caminho do formulário manual (SPEC 050 D-5)                          |
+| `applyCustomValues` (upsert por `(contact_id, custom_field_id)`) | `src/lib/ingest/custom-values.ts`                       | Mapear uma pergunta para um campo personalizado sem apagar os outros                                    |
+| Etiquetas aditivas, `resolveImportTagIds`                        | `src/lib/contacts/resolve-import-tags.ts`, SPEC 057 D-1 | Faixa de pontuação aplica etiqueta sem substituir as existentes                                         |
+| `createDeal`                                                     | `src/lib/pipelines/deals.ts`                            | Faixa cria o negócio na etapa certa do funil                                                            |
+| `runAutomationsForTrigger`, `interpolate` (`{{vars.*}}`)         | `src/lib/automations/engine.ts`                         | Gatilho `form_submitted` e variáveis `{{form.*}}` nas mensagens                                         |
+| `VariableMapping` (`static` / `field` / `custom_field`)          | `src/lib/whatsapp/broadcast-variables.ts`               | Tipo novo `form_link`: link por destinatário no disparo                                                 |
+| `sendAndPersistOutbound`                                         | `src/lib/channels/send.ts`                              | Botão "Enviar formulário" no inbox sai pelo canal da conversa                                           |
+| `FEATURE_KEYS`, `USAGE_QUOTA_KEYS`, `plan_feature_strict`        | `src/lib/plans/types.ts`, migração 096                  | Chave `forms_enabled` fail-closed; as três quotas aparecem na barra de uso e no console sem código novo |
+| `enforce_contact_quota` (trigger + `account_usage_counters`)     | migração 067                                            | Modelo da trigger de quota de `forms` e dos contadores mensais                                          |
+| Bucket privado por conta, `signStoragePath`                      | migração 040/078, `src/lib/storage/sign-media.ts`       | Bucket `form-uploads`, leitura só assinada                                                              |
+| `/area` com sessão própria, `portalDb()`, `isolation.test.ts`    | `src/lib/contact-portal/`, SPEC 083                     | Formulários e respostas dentro da área, sem Supabase Auth                                               |
+| `buildSystemPrompt`, `HANDOFF_SENTINEL`, `generateReply`         | `src/lib/ai/defaults.ts`, `generate.ts`                 | Bloco "perfil do lead" no prompt e sentinela `[[FORM:slug]]` para a IA oferecer um formulário           |
+| `recordActivity`, `ACTIVITY_CATALOG`                             | `src/lib/activity/`                                     | Eventos `form.*` e `contact.form_*`                                                                     |
+| `checkRateLimit`, `RATE_LIMITS`                                  | `src/lib/rate-limit.ts`                                 | Tetos por IP da página pública                                                                          |
+| `resolveRequestOrigin`, `NEXT_PUBLIC_SITE_URL`                   | `src/lib/http/request-origin.ts`                        | Origem dos links; base do domínio próprio (SPEC 087)                                                    |
+| Middleware sai cedo em `/area`                                   | `src/middleware.ts`                                     | Mesmo padrão para `/f/**` (página pública sem `getUser()`)                                              |
 
 **Achados que mudam o desenho:**
 
@@ -128,11 +128,11 @@ Uploads: o servidor valida tipo, tamanho declarado e quota, e devolve uma **URL 
 
 Ratificado no clarify. Chave de recurso `forms_enabled` lida por `plan_feature_strict` (ausente = `FALSE`, independe de `quotas_enforced`, conta sem plano = `FALSE`), mesmo raciocínio do PRD 082 D-2: formulário é porta pública, não teto de uso. E três quotas em `USAGE_QUOTA_KEYS` (aparecem na barra de uso do cliente e no editor de planos do console sem código novo):
 
-| Chave                  | Conta o quê                                                               | Estourou                                                                                                               |
-| ---------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `forms`                | Formulários **não arquivados** da conta (rascunho + publicados)           | Trigger recusa criar/desarquivar com `QUOTA_EXCEEDED:forms:…` (contrato de `src/lib/plans/errors.ts`)                  |
-| `form_responses_month` | Respostas **concluídas** no mês corrente (`America/Sao_Paulo`)            | Página pública mostra "indisponível no momento"; nada é gravado; aviso ao owner em 80 % e 100 % (outbox de notificações) |
-| `form_upload_mb`       | Bytes acumulados em `form-uploads` da conta (decrementa ao apagar)        | Bloco de arquivo vira opcional-sem-upload com aviso; o resto do formulário segue                                        |
+| Chave                  | Conta o quê                                                        | Estourou                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `forms`                | Formulários **não arquivados** da conta (rascunho + publicados)    | Trigger recusa criar/desarquivar com `QUOTA_EXCEEDED:forms:…` (contrato de `src/lib/plans/errors.ts`)                    |
+| `form_responses_month` | Respostas **concluídas** no mês corrente (`America/Sao_Paulo`)     | Página pública mostra "indisponível no momento"; nada é gravado; aviso ao owner em 80 % e 100 % (outbox de notificações) |
+| `form_upload_mb`       | Bytes acumulados em `form-uploads` da conta (decrementa ao apagar) | Bloco de arquivo vira opcional-sem-upload com aviso; o resto do formulário segue                                         |
 
 `NULL` = ilimitado e `0` = bloqueado, como em toda quota (PRD 058 D-3). O catálogo proposto (§7) vai no seed, nunca em migração (PRD 058 D-2). Perder o item ou estourar quota **nunca apaga** formulário, resposta ou arquivo (PRD 058 D-4): despublica na próxima requisição e preserva tudo.
 
@@ -197,26 +197,26 @@ Tudo acima **só com o item no plano** (D-11). Console `/admin`: a conta mostra 
 
 ### 6.1. Jornadas do lead (visitante)
 
-| Jornada | Gatilho                                                              | Resultado                                                                                                              |
-| ------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **L1**  | Abre o link genérico (bio, anúncio, QR)                              | Boas-vindas → blocos, um por tela → bloco Telefone → envio → agradecimento (com botão para o WhatsApp da conta, opcional) |
-| **L2**  | Recebe o link com token pelo WhatsApp (inbox, disparo, automação, IA) | Mesmo fluxo, sem o bloco Telefone; a resposta já nasce no contato certo                                                |
-| **L3**  | Desiste no meio                                                      | Rascunho local no navegador; no servidor, `partial` a partir da identidade (D-7); volta e continua de onde parou         |
-| **L4**  | Entra na área do contato (`/area`)                                   | Vê "Formulários": os que pode preencher e as respostas que o owner liberou (SPEC 086)                                   |
-| **L5**  | Formulário indisponível (despublicado, plano, quota, conta bloqueada) | Página neutra "Este formulário não está disponível no momento", igual para todos os motivos                            |
+| Jornada | Gatilho                                                               | Resultado                                                                                                                 |
+| ------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **L1**  | Abre o link genérico (bio, anúncio, QR)                               | Boas-vindas → blocos, um por tela → bloco Telefone → envio → agradecimento (com botão para o WhatsApp da conta, opcional) |
+| **L2**  | Recebe o link com token pelo WhatsApp (inbox, disparo, automação, IA) | Mesmo fluxo, sem o bloco Telefone; a resposta já nasce no contato certo                                                   |
+| **L3**  | Desiste no meio                                                       | Rascunho local no navegador; no servidor, `partial` a partir da identidade (D-7); volta e continua de onde parou          |
+| **L4**  | Entra na área do contato (`/area`)                                    | Vê "Formulários": os que pode preencher e as respostas que o owner liberou (SPEC 086)                                     |
+| **L5**  | Formulário indisponível (despublicado, plano, quota, conta bloqueada) | Página neutra "Este formulário não está disponível no momento", igual para todos os motivos                               |
 
 ### 6.2. Jornadas da equipe
 
-| Jornada | Quem   | O que                                                                                                                                        |
-| ------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **E1**  | admin  | `/forms` → Novo → escolhe modelo (em branco, captação de lead, pesquisa de satisfação, inscrição em evento) → edita blocos no construtor      |
-| **E2**  | admin  | Aba Tema: logo, cor primária, cor de fundo, cor do texto, fonte, imagem/vídeo por bloco, tela de boas-vindas e de agradecimento, idioma      |
-| **E3**  | admin  | Aba Classificação: pontos por opção, faixas e ações (etiqueta, negócio, atribuição, notificação)                                              |
-| **E4**  | admin  | Publicar → recebe link, QR code (gerado no cliente, sem serviço externo) e snippet de embed                                                  |
-| **E5**  | agent  | No inbox, "Enviar formulário" → escolhe → mensagem com link com token sai pelo canal da conversa                                             |
-| **E6**  | todos  | `/forms/<id>/respostas`: tabela com filtros (faixa, status, período, resposta de um bloco), detalhe com arquivos; na ficha do contato, aba "Formulários" |
-| **E7**  | admin  | Exportar CSV/XLSX; apagar respostas; arquivar                                                                                                |
-| **E8**  | admin  | Configurações → Formulários → Domínio próprio (SPEC 087), com tutorial                                                                       |
+| Jornada | Quem  | O que                                                                                                                                                    |
+| ------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **E1**  | admin | `/forms` → Novo → escolhe modelo (em branco, captação de lead, pesquisa de satisfação, inscrição em evento) → edita blocos no construtor                 |
+| **E2**  | admin | Aba Tema: logo, cor primária, cor de fundo, cor do texto, fonte, imagem/vídeo por bloco, tela de boas-vindas e de agradecimento, idioma                  |
+| **E3**  | admin | Aba Classificação: pontos por opção, faixas e ações (etiqueta, negócio, atribuição, notificação)                                                         |
+| **E4**  | admin | Publicar → recebe link, QR code (gerado no cliente, sem serviço externo) e snippet de embed                                                              |
+| **E5**  | agent | No inbox, "Enviar formulário" → escolhe → mensagem com link com token sai pelo canal da conversa                                                         |
+| **E6**  | todos | `/forms/<id>/respostas`: tabela com filtros (faixa, status, período, resposta de um bloco), detalhe com arquivos; na ficha do contato, aba "Formulários" |
+| **E7**  | admin | Exportar CSV/XLSX; apagar respostas; arquivar                                                                                                            |
+| **E8**  | admin | Configurações → Formulários → Domínio próprio (SPEC 087), com tutorial                                                                                   |
 
 ### 6.3. Telas (resumo; detalhe nas SPECs)
 
@@ -245,19 +245,19 @@ Como no PRD 082 D-1, o seed pode nascer com `forms_enabled: false` em todos os p
 
 ## 8. Riscos
 
-| #   | Risco                                                                                                  | Mitigação                                                                                                                                         |
-| --- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R-1 | Formulário público viralizado estoura banco, Storage ou quota de contatos                              | Três quotas (D-10), rate limit por IP, honeypot, tempo mínimo de preenchimento, Turnstile opcional por formulário, "indisponível" antes de começar |
-| R-2 | Spam de respostas gera contatos lixo e dispara automações/negócios em massa                            | Validação de telefone BR estrita (D-2), faixa só em resposta concluída (D-7), teto de disparo de automação por formulário por hora (SPEC 086)     |
-| R-3 | Upload malicioso                                                                                       | Allowlist de MIME e extensão, tamanho por tipo, bucket privado só com URL assinada, nunca servido inline (`Content-Disposition: attachment`)      |
-| R-4 | Token de link vazado reaproveitado                                                                     | Expiração (padrão 30 dias), vínculo ao formulário e ao contato, degradação para pedir telefone, revogação pelo formulário (D-3)                   |
-| R-5 | Página pública vaza dado da conta no HTML                                                              | Projeção explícita do que vai ao cliente (D-9), teste de contrato que serializa o payload público e falha se aparecer `account_id`, `points`, ids |
-| R-6 | Pontuação manipulada pelo cliente                                                                      | Pontos e faixa calculados só no servidor (D-5); payload de envio não tem campo de pontos                                                          |
-| R-7 | Embed abre clickjacking                                                                                | Exceção por rota e por origem cadastrada (D-13); sem origem, `DENY`                                                                               |
-| R-8 | Dado pessoal de visitante anônimo                                                                      | Nada é gravado antes da identidade (D-7); rascunho só no navegador                                                                                |
-| R-9 | Decisão de borda do domínio próprio trava a entrega                                                    | Separada na SPEC 087 (D-16); v1 funciona em `<app>/f/<slug>`                                                                                     |
-| R-10 | A IA oferece formulário fora de hora ou inventa slug                                                  | Só slugs marcados "a IA pode oferecer" entram no prompt; sentinela desconhecido é removido; um por resposta (D-12)                                |
-| R-11 | Varredura de abandono e arquivos órfãos nunca roda                                                    | É fase do `/api/automations/cron`, que já está agendado; `status.md` registra                                                                     |
+| #    | Risco                                                                       | Mitigação                                                                                                                                          |
+| ---- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R-1  | Formulário público viralizado estoura banco, Storage ou quota de contatos   | Três quotas (D-10), rate limit por IP, honeypot, tempo mínimo de preenchimento, Turnstile opcional por formulário, "indisponível" antes de começar |
+| R-2  | Spam de respostas gera contatos lixo e dispara automações/negócios em massa | Validação de telefone BR estrita (D-2), faixa só em resposta concluída (D-7), teto de disparo de automação por formulário por hora (SPEC 086)      |
+| R-3  | Upload malicioso                                                            | Allowlist de MIME e extensão, tamanho por tipo, bucket privado só com URL assinada, nunca servido inline (`Content-Disposition: attachment`)       |
+| R-4  | Token de link vazado reaproveitado                                          | Expiração (padrão 30 dias), vínculo ao formulário e ao contato, degradação para pedir telefone, revogação pelo formulário (D-3)                    |
+| R-5  | Página pública vaza dado da conta no HTML                                   | Projeção explícita do que vai ao cliente (D-9), teste de contrato que serializa o payload público e falha se aparecer `account_id`, `points`, ids  |
+| R-6  | Pontuação manipulada pelo cliente                                           | Pontos e faixa calculados só no servidor (D-5); payload de envio não tem campo de pontos                                                           |
+| R-7  | Embed abre clickjacking                                                     | Exceção por rota e por origem cadastrada (D-13); sem origem, `DENY`                                                                                |
+| R-8  | Dado pessoal de visitante anônimo                                           | Nada é gravado antes da identidade (D-7); rascunho só no navegador                                                                                 |
+| R-9  | Decisão de borda do domínio próprio trava a entrega                         | Separada na SPEC 087 (D-16); v1 funciona em `<app>/f/<slug>`                                                                                       |
+| R-10 | A IA oferece formulário fora de hora ou inventa slug                        | Só slugs marcados "a IA pode oferecer" entram no prompt; sentinela desconhecido é removido; um por resposta (D-12)                                 |
+| R-11 | Varredura de abandono e arquivos órfãos nunca roda                          | É fase do `/api/automations/cron`, que já está agendado; `status.md` registra                                                                      |
 
 ## 9. Critérios de aceite
 
@@ -275,17 +275,17 @@ Como no PRD 082 D-1, o seed pode nascer com `forms_enabled: false` em todos os p
 
 ## 10. Sequência sugerida
 
-| Fase | Entrega                                                                                                        | Pronto quando                                               | Modelo recomendado                                               |
-| ---- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
-| F0   | Ratificar D-1…D-16 e o catálogo do §7 — **feita em 2026-11-06**                                                | Registradas aqui                                            | Decisão humana (Opus 5.5 ou Fable 5.1 para discutir alternativas) |
-| F1   | SPEC 085: migrações, tipos, módulos puros (`src/lib/forms/`) com testes                                        | Gate local passa; `anon` sem acesso                         | Sonnet 5.5                                                       |
-| F2   | SPEC 085: construtor (`/forms`, `/forms/<id>`)                                                                 | Cria/publica formulário completo                            | Sonnet 5.5 (UI guiada pela SPEC)                                 |
-| F3   | SPEC 085: página pública, envio, upload, quotas, página neutra                                                  | Critérios 1–7                                               | Sonnet 5.5; Opus 5.5 revisa a projeção pública (R-5)             |
-| F4   | SPEC 085: respostas, ficha, exportação, arquivar/apagar, console                                                | Critério 6 completo                                         | Sonnet 5.5                                                       |
-| F5   | Migrações no `vn` com confirmação; seed reconciliado                                                           | Asserções passam; `get_advisors` limpo                      | Opus 5.5                                                         |
-| F6   | SPEC 086: automações, disparos, flows, inbox, atividade, notificação, funil                                    | Critério 8 (parte)                                          | Sonnet 5.5                                                       |
-| F7   | SPEC 086: área do contato, IA (leitura + sentinela), webhook `form.submitted`, `/api/v1/forms`, MCP            | Critérios 8 e 9                                             | Opus 5.5 para o prompt e a projeção da IA; Sonnet 5.5 no resto   |
-| F8   | `/security-review`, roteiro manual, SPEC 081 no `vn` (D-15), piloto por `limit_overrides`                      | Critério 10; conta piloto em produção                       | Opus 5.5 na revisão; Haiku 5.5 no checklist                      |
-| F9   | SPEC 087: decisão de borda, verificação de DNS, roteamento por host, tutorial                                   | Critério 11                                                 | Opus 5.5 decide a borda; Sonnet 5.5 implementa                   |
+| Fase | Entrega                                                                                             | Pronto quando                          | Modelo recomendado                                                |
+| ---- | --------------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| F0   | Ratificar D-1…D-16 e o catálogo do §7 — **feita em 2026-11-06**                                     | Registradas aqui                       | Decisão humana (Opus 5.5 ou Fable 5.1 para discutir alternativas) |
+| F1   | SPEC 085: migrações, tipos, módulos puros (`src/lib/forms/`) com testes                             | Gate local passa; `anon` sem acesso    | Sonnet 5.5                                                        |
+| F2   | SPEC 085: construtor (`/forms`, `/forms/<id>`)                                                      | Cria/publica formulário completo       | Sonnet 5.5 (UI guiada pela SPEC)                                  |
+| F3   | SPEC 085: página pública, envio, upload, quotas, página neutra                                      | Critérios 1–7                          | Sonnet 5.5; Opus 5.5 revisa a projeção pública (R-5)              |
+| F4   | SPEC 085: respostas, ficha, exportação, arquivar/apagar, console                                    | Critério 6 completo                    | Sonnet 5.5                                                        |
+| F5   | Migrações no `vn` com confirmação; seed reconciliado                                                | Asserções passam; `get_advisors` limpo | Opus 5.5                                                          |
+| F6   | SPEC 086: automações, disparos, flows, inbox, atividade, notificação, funil                         | Critério 8 (parte)                     | Sonnet 5.5                                                        |
+| F7   | SPEC 086: área do contato, IA (leitura + sentinela), webhook `form.submitted`, `/api/v1/forms`, MCP | Critérios 8 e 9                        | Opus 5.5 para o prompt e a projeção da IA; Sonnet 5.5 no resto    |
+| F8   | `/security-review`, roteiro manual, SPEC 081 no `vn` (D-15), piloto por `limit_overrides`           | Critério 10; conta piloto em produção  | Opus 5.5 na revisão; Haiku 5.5 no checklist                       |
+| F9   | SPEC 087: decisão de borda, verificação de DNS, roteamento por host, tutorial                       | Critério 11                            | Opus 5.5 decide a borda; Sonnet 5.5 implementa                    |
 
 Cada fase abre sessão própria com `/code-review high` ao fim, como de costume na casa.

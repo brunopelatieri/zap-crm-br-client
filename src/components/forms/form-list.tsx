@@ -20,6 +20,7 @@ import {
   Star,
   Ticket,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -381,12 +382,12 @@ function FormCard({
       : `${Math.round(form.completion_rate * 100)}%`;
 
   return (
-    <li>
+    <li className="relative">
       <button
         type="button"
         onClick={onOpen}
         className={cn(
-          'border-border bg-card hover:border-primary/40 flex w-full flex-col rounded-lg border p-4 text-left transition-colors',
+          'border-border bg-card hover:border-primary/40 flex w-full flex-col rounded-lg border p-4 pb-10 text-left transition-colors',
           form.status === 'archived' && 'opacity-70'
         )}
       >
@@ -433,6 +434,12 @@ function FormCard({
           </div>
         </dl>
       </button>
+      <Link
+        href={`/forms/${form.id}/respostas`}
+        className="text-primary absolute right-4 bottom-3 text-xs font-medium hover:underline"
+      >
+        {t('viewResponses')}
+      </Link>
     </li>
   );
 }

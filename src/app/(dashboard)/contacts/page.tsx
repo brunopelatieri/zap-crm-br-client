@@ -68,6 +68,7 @@ import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { isUuid } from '@/lib/api/uuid';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { HarvestedContactsTab } from '@/components/contacts/harvested-contacts-tab';
 
@@ -102,8 +103,21 @@ function ContactsListView() {
   const [formOpen, setFormOpen] = useState(false);
   const [editContact, setEditContact] = useState<Contact | null>(null);
   const [editContactTags, setEditContactTags] = useState<ContactTag[]>([]);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailContactId, setDetailContactId] = useState<string | null>(null);
+  // Link profundo `/contacts?contact=<id>&tab=forms` (SPEC 085 F4): abre a
+  // ficha, na aba de formularios, vindo da tela de respostas.
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepContactId = searchParams.get('contact');
+  const deepContactValid = isUuid(deepContactId);
+  const [detailOpen, setDetailOpen] = useState(deepContactValid);
+  const [detailContactId, setDetailContactId] = useState<string | null>(
+    deepContactValid ? deepContactId : null
+  );
+  const [detailTab, setDetailTab] = useState<'details' | 'forms'>(
+    deepContactValid && searchParams.get('tab') === 'forms'
+      ? 'forms'
+      : 'details'
+  );
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
@@ -269,6 +283,7 @@ function ContactsListView() {
   }
 
   function openDetail(contactId: string) {
+    setDetailTab('details');
     setDetailContactId(contactId);
     setDetailOpen(true);
   }
@@ -948,9 +963,14 @@ function ContactsListView() {
       {/* Contact Detail Sheet */}
       <ContactDetailView
         open={detailOpen}
-        onOpenChange={setDetailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open);
+          // Link profundo: sem limpar a URL, recarregar reabriria a ficha.
+          if (!open && deepContactId) router.replace('/contacts');
+        }}
         contactId={detailContactId}
         onUpdated={fetchContacts}
+        initialTab={detailTab}
       />
 
       {/* Import Modal */}

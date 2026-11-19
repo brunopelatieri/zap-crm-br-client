@@ -82,6 +82,14 @@ describe('activityHref', () => {
         })
       )
     ).toBe('/forms');
+    // F4: exportar/apagar respostas levam à tela de respostas.
+    for (const action of ['form.exported', 'form.responses_deleted'] as const) {
+      expect(
+        activityHref(
+          makeRow({ resource_type: 'form', action, resource_id: 'form-1' })
+        )
+      ).toBe('/forms/form-1/respostas');
+    }
     expect(
       activityHref(
         makeRow({

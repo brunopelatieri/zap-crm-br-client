@@ -52,18 +52,21 @@ export const YES_NO_OPTION_IDS = ['yes', 'no'] as const;
 
 export type FormStatus = 'draft' | 'published' | 'archived';
 export type FormLocale = AppLocale;
-export type ResponseStatus = 'partial' | 'completed' | 'abandoned';
+export const RESPONSE_STATUSES = ['partial', 'completed', 'abandoned'] as const;
+export type ResponseStatus = (typeof RESPONSE_STATUSES)[number];
 export type IdentityMode = 'phone' | 'token';
-export type ResponseSource =
-  | 'link'
-  | 'inbox'
-  | 'broadcast'
-  | 'automation'
-  | 'flow'
-  | 'portal'
-  | 'ai'
-  | 'api'
-  | 'embed';
+export const RESPONSE_SOURCES = [
+  'link',
+  'inbox',
+  'broadcast',
+  'automation',
+  'flow',
+  'portal',
+  'ai',
+  'api',
+  'embed',
+] as const;
+export type ResponseSource = (typeof RESPONSE_SOURCES)[number];
 export type PortalVisibility = 'none' | 'fill' | 'responses' | 'both';
 
 // ------------------------------------------------------------
@@ -315,6 +318,8 @@ export interface FormResponse {
   score: number | null;
   band_key: string | null;
   upload_bytes: number;
+  /** Negócio criado pela faixa (migração 098); `null` se a faixa não cria. */
+  deal_id?: string | null;
   utm: Record<string, string> | null;
   locale: string | null;
   ip_hash: string | null;

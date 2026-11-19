@@ -982,6 +982,15 @@
       "resumed": "AI resumed.",
       "updateError": "Couldn’t update the AI assistant.",
       "networkError": "Couldn’t reach the server."
+    },
+    "formsCard": {
+      "title": "Forms",
+      "empty": "No form answered yet.",
+      "loadError": "Could not load the forms.",
+      "answeredWhen": "Answered {when}",
+      "score": "{score} pts",
+      "band": "Band: {band}",
+      "viewAll": "See all"
     }
   },
   "Contacts": {
@@ -1083,7 +1092,8 @@
         "deals": "Deals",
         "noTags": "No tags",
         "noDeals": "No deals",
-        "addNotePlaceholder": "Add a note..."
+        "addNotePlaceholder": "Add a note...",
+        "forms": "Forms"
       },
       "actions": {
         "edit": "Edit",
@@ -1410,6 +1420,16 @@
         "cold_limit": "The QRCode channel reached its limit for first messages.",
         "send_failed": "WhatsApp did not accept the message."
       }
+    },
+    "formsTab": {
+      "title": "Forms",
+      "empty": "This contact has not answered any form yet.",
+      "loadError": "Could not load the form responses.",
+      "notInPlan": "Forms are not included in your plan.",
+      "answeredWhen": "Answered {when}",
+      "startedWhen": "Started {when}",
+      "showIncomplete": "Include incomplete responses",
+      "openForm": "Open form"
     }
   },
   "Import": {
@@ -2981,7 +3001,8 @@
       "title": "New response: {form}",
       "body": "{contact} answered the form.",
       "bodyWithBand": "{contact} answered the form and landed in “{band}”."
-    }
+    },
+    "openResponse": "View response"
   },
   "Agents": {
     "page": {
@@ -3625,7 +3646,8 @@
       "webhook-log": "Webhook log",
       "retention": "Retention",
       "danger": "Danger zone",
-      "contact-portal": "Contact area"
+      "contact-portal": "Contact area",
+      "forms": "Forms"
     },
     "groups": {
       "account": "Account",
@@ -3928,6 +3950,24 @@
       "saveFailed": "Could not save the settings",
       "loadFailed": "Could not load the settings",
       "neverConfigured": "The area has not been set up for this account yet."
+    },
+    "forms": {
+      "title": "Forms",
+      "desc": "Server settings used by the form builder. The values of these variables are never shown here.",
+      "loadFailed": "Could not load the form settings.",
+      "notInPlan": "Forms are not included in this account’s plan.",
+      "present": "Configured",
+      "absent": "Not configured",
+      "secretTitle": "Personal links",
+      "secretVariable": "FORM_LINK_SECRET",
+      "secretPresent": "Personal links with a token are available: the contact skips the phone question.",
+      "secretAbsent": "FORM_LINK_SECRET is missing or shorter than 32 characters. Personal links are unavailable; the generic link keeps working.",
+      "turnstileTitle": "Turnstile bot protection",
+      "turnstileSiteKey": "TURNSTILE_SITE_KEY",
+      "turnstileSecretKey": "TURNSTILE_SECRET_KEY",
+      "turnstilePresent": "Turnstile is configured. You can turn it on for each form in the builder.",
+      "turnstileAbsent": "Both Turnstile variables must be set. Until then the Turnstile switch stays disabled in the builder.",
+      "openForms": "Open forms"
     }
   },
   "Platform": {
@@ -4538,7 +4578,8 @@
       "completionRate": "Completion rate",
       "lastResponse": "Last response",
       "never": "No responses yet",
-      "noRate": "—"
+      "noRate": "—",
+      "viewResponses": "View responses"
     },
     "create": {
       "title": "New form",
@@ -4699,7 +4740,8 @@
         "archivedNotice": "This form is archived. Restore it to edit.",
         "issuesTitle": "The form cannot be published yet",
         "issuesDescription": "Fix the points below and try again.",
-        "issuesClose": "Close"
+        "issuesClose": "Close",
+        "responses": "Responses"
       },
       "blocks": {
         "add": "Add block",
@@ -5007,6 +5049,142 @@
         "phoneLabel": "Phone preview",
         "desktopLabel": "Desktop preview",
         "filesDisabled": "Preview: file upload is disabled."
+      }
+    },
+    "responses": {
+      "title": "Responses",
+      "subtitle": "Responses to “{name}”",
+      "back": "Back to the form",
+      "loadError": "Could not load the responses.",
+      "retry": "Try again",
+      "empty": "No responses yet.",
+      "emptyHint": "Share the form link to start receiving responses.",
+      "noMatches": "No response matches these filters.",
+      "viewerNote": "You can view the responses. Exporting and deleting need admin access.",
+      "total": "{count, plural, one {# response} other {# responses}}",
+      "columns": {
+        "contact_name": "Contact",
+        "contact_phone": "Phone",
+        "status": "Status",
+        "source": "Source",
+        "started_at": "Started",
+        "completed_at": "Completed",
+        "score": "Score",
+        "band": "Band"
+      },
+      "status": {
+        "partial": "In progress",
+        "completed": "Completed",
+        "abandoned": "Abandoned"
+      },
+      "source": {
+        "link": "Link",
+        "inbox": "Inbox",
+        "broadcast": "Broadcast",
+        "automation": "Automation",
+        "flow": "Flow",
+        "portal": "Contact area",
+        "ai": "AI",
+        "api": "API",
+        "embed": "Embed"
+      },
+      "values": {
+        "yes": "Yes",
+        "no": "No",
+        "empty": "—"
+      },
+      "filters": {
+        "label": "Filters",
+        "search": "Search",
+        "searchPlaceholder": "Name or phone",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "band": "Band",
+        "allBands": "All bands",
+        "source": "Source",
+        "allSources": "All sources",
+        "from": "From",
+        "to": "To",
+        "block": "Answer to",
+        "blockAny": "Any question",
+        "blockValue": "Equals",
+        "blockValuePlaceholder": "Value",
+        "clear": "Clear filters"
+      },
+      "table": {
+        "selectAll": "Select all responses on this page",
+        "selectRow": "Select this response",
+        "chooseColumns": "Columns",
+        "fixedColumns": "Fixed columns",
+        "blockColumns": "Form questions",
+        "noContactName": "No name",
+        "openDetail": "Open response",
+        "selected": "{count, plural, one {# selected} other {# selected}}",
+        "pagination": "Page {page} of {pages}",
+        "previous": "Previous",
+        "next": "Next",
+        "date": "Date"
+      },
+      "detail": {
+        "title": "Response",
+        "contact": "Contact",
+        "openContact": "Open contact",
+        "status": "Status",
+        "source": "Source",
+        "started": "Started",
+        "completed": "Completed",
+        "score": "Score",
+        "band": "Band",
+        "answers": "Answers",
+        "noAnswer": "No answer",
+        "files": "Files",
+        "download": "Download",
+        "deal": "Deal created",
+        "openDeal": "Open pipeline",
+        "utm": "Campaign (UTM)",
+        "version": "Form version {version}",
+        "close": "Close",
+        "form": "Form",
+        "openForm": "Open form",
+        "removedBlock": "Question removed from the form"
+      },
+      "actions": {
+        "export": "Export",
+        "exportSelected": "Export selected",
+        "delete": "Delete",
+        "deleteSelected": "Delete selected",
+        "deleteAll": "Delete all responses"
+      },
+      "export": {
+        "title": "Export responses",
+        "description": "Download the responses as a spreadsheet. Each question becomes a column. Every export is logged for audit.",
+        "format": "Format",
+        "csv": "CSV",
+        "xlsx": "Excel (.xlsx)",
+        "scope": "What to export",
+        "scopeFilter": "All responses that match the current filters",
+        "scopeSelection": "{count, plural, one {# selected response} other {# selected responses}}",
+        "columns": "Questions to include",
+        "allColumns": "All questions",
+        "submit": "Download",
+        "cancel": "Cancel",
+        "exporting": "Preparing the file…",
+        "success": "{count, plural, one {# response exported} other {# responses exported}}",
+        "tooLarge": "Too many responses to export at once ({total}). Narrow the filters and try again.",
+        "error": "Could not export the responses. Try again.",
+        "filenamePrefix": "responses"
+      },
+      "delete": {
+        "title": "Delete responses",
+        "descriptionSelected": "{count, plural, one {# response} other {# responses}} and the uploaded files will be permanently deleted. This cannot be undone.",
+        "descriptionAll": "All responses of this form and their uploaded files will be permanently deleted. This cannot be undone.",
+        "confirmLabel": "Type “{name}” to confirm",
+        "confirmPlaceholder": "Form name",
+        "submit": "Delete permanently",
+        "cancel": "Cancel",
+        "deleting": "Deleting…",
+        "success": "{count, plural, one {# response deleted} other {# responses deleted}}",
+        "error": "Could not delete the responses. Try again."
       }
     }
   }

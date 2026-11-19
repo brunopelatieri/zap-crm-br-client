@@ -247,6 +247,9 @@ describe('applyBandActions (PRD 084 D-5)', () => {
         user_id: USER_ID,
         type: 'form_response_received',
         contact_id: CONTACT_ID,
+        // Link profundo de /notifications (F4).
+        form_id: FORM_ID,
+        form_response_id: RESPONSE_ID,
         actor_user_id: null,
         title: 'Nova resposta',
         body: 'Ana respondeu',

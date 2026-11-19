@@ -74,8 +74,13 @@ export function activityHref(row: {
       return '/plan';
     case 'form':
       // `form.deleted` já saiu acima (DESTRUCTIVE_ACTIONS). `/forms/[id]` é o
-      // construtor (SPEC 085 F2); a tela de respostas entra na F4.
-      return row.resource_id ? `/forms/${row.resource_id}` : '/forms';
+      // construtor (SPEC 085 F2); exportar e apagar respostas levam à tela
+      // de respostas (F4).
+      if (!row.resource_id) return '/forms';
+      return row.action === 'form.exported' ||
+        row.action === 'form.responses_deleted'
+        ? `/forms/${row.resource_id}/respostas`
+        : `/forms/${row.resource_id}`;
     case 'export':
     case 'tag':
       return null;

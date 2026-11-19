@@ -44,6 +44,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { ContactFormsTab } from '@/components/contacts/contact-forms-tab';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -74,6 +75,8 @@ interface ContactDetailViewProps {
   onOpenChange: (open: boolean) => void;
   contactId: string | null;
   onUpdated: () => void;
+  /** Aba aberta ao montar (link profundo `?contact=...&tab=forms`). */
+  initialTab?: 'details' | 'forms';
 }
 
 export function ContactDetailView({
@@ -81,6 +84,7 @@ export function ContactDetailView({
   onOpenChange,
   contactId,
   onUpdated,
+  initialTab = 'details',
 }: ContactDetailViewProps) {
   const t = useTranslations('Contacts.detailView');
   const tConsent = useTranslations('Contacts.detailView.consent');
@@ -645,7 +649,7 @@ export function ContactDetailView({
 
               {/* Tabs */}
               <Tabs
-                defaultValue="details"
+                defaultValue={initialTab}
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <TabsList className="bg-muted/50 border-border mx-4 mt-3 border-b">
@@ -678,6 +682,12 @@ export function ContactDetailView({
                     className="data-active:bg-muted data-active:text-primary text-muted-foreground"
                   >
                     {t('tabs.deals')}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="forms"
+                    className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+                  >
+                    {t('tabs.forms')}
                   </TabsTrigger>
                 </TabsList>
 
@@ -1046,6 +1056,14 @@ export function ContactDetailView({
                       </Button>
                     </div>
                   )}
+                </TabsContent>
+
+                {/* Forms Tab (SPEC 085 F4) */}
+                <TabsContent
+                  value="forms"
+                  className="flex-1 overflow-y-auto px-4 py-3"
+                >
+                  {contactId ? <ContactFormsTab contactId={contactId} /> : null}
                 </TabsContent>
 
                 {/* Deals Tab */}

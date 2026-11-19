@@ -40,6 +40,7 @@ import {
   type ContactSavePatch,
 } from '@/components/contacts/contact-form';
 import { ContactPortalAccessCard } from '@/components/contacts/contact-portal-access-card';
+import { ContactFormsCard } from '@/components/inbox/contact-forms-card';
 import { toContactTagRowsFromTags } from '@/lib/tags';
 
 interface SiblingThread {
@@ -473,6 +474,12 @@ export function ContactSidebar({
               enquanto o novo carrega. */}
           <div className="mt-4">
             <ContactPortalAccessCard key={contact.id} contactId={contact.id} />
+          </div>
+
+          {/* Formularios (SPEC 085 F4): ultima resposta concluida. O botao
+              "Enviar formulario" e da SPEC 086. */}
+          <div className="mt-4">
+            <ContactFormsCard key={contact.id} contactId={contact.id} />
           </div>
 
           {/* Divider */}

@@ -982,6 +982,15 @@
       "resumed": "IA retomada.",
       "updateError": "Não foi possível atualizar o assistente de IA.",
       "networkError": "Não foi possível conectar ao servidor."
+    },
+    "formsCard": {
+      "title": "Formulários",
+      "empty": "Nenhum formulário respondido ainda.",
+      "loadError": "Não foi possível carregar os formulários.",
+      "answeredWhen": "Respondeu {when}",
+      "score": "{score} pts",
+      "band": "Faixa: {band}",
+      "viewAll": "Ver todas"
     }
   },
   "Contacts": {
@@ -1083,7 +1092,8 @@
         "deals": "Negócios",
         "noTags": "Nenhuma etiqueta",
         "noDeals": "Nenhum negócio",
-        "addNotePlaceholder": "Adicionar uma nota..."
+        "addNotePlaceholder": "Adicionar uma nota...",
+        "forms": "Formulários"
       },
       "actions": {
         "edit": "Editar",
@@ -1410,6 +1420,16 @@
         "cold_limit": "O canal QRCode chegou ao limite de primeiras mensagens.",
         "send_failed": "O WhatsApp não aceitou a mensagem."
       }
+    },
+    "formsTab": {
+      "title": "Formulários",
+      "empty": "Este contato ainda não respondeu nenhum formulário.",
+      "loadError": "Não foi possível carregar as respostas de formulário.",
+      "notInPlan": "Formulários não estão incluídos no seu plano.",
+      "answeredWhen": "Respondeu {when}",
+      "startedWhen": "Começou {when}",
+      "showIncomplete": "Incluir respostas incompletas",
+      "openForm": "Abrir formulário"
     }
   },
   "Import": {
@@ -2981,7 +3001,8 @@
       "body": "{contact} respondeu ao formulário.",
       "bodyWithBand": "{contact} respondeu ao formulário e caiu em “{band}”."
     },
-    "unread": "Não lida"
+    "unread": "Não lida",
+    "openResponse": "Ver resposta"
   },
   "Agents": {
     "page": {
@@ -3625,7 +3646,8 @@
       "webhook-log": "Log de webhook",
       "retention": "Retenção",
       "danger": "Zona de risco",
-      "contact-portal": "Área do contato"
+      "contact-portal": "Área do contato",
+      "forms": "Formulários"
     },
     "groups": {
       "account": "Conta",
@@ -3928,6 +3950,24 @@
       "saveFailed": "Não foi possível salvar as configurações",
       "loadFailed": "Não foi possível carregar as configurações",
       "neverConfigured": "A área ainda não foi configurada nesta conta."
+    },
+    "forms": {
+      "title": "Formulários",
+      "desc": "Configurações do servidor usadas pelo construtor de formulários. Os valores dessas variáveis nunca aparecem aqui.",
+      "loadFailed": "Não foi possível carregar as configurações de formulários.",
+      "notInPlan": "Formulários não estão incluídos no plano desta conta.",
+      "present": "Configurado",
+      "absent": "Não configurado",
+      "secretTitle": "Links pessoais",
+      "secretVariable": "FORM_LINK_SECRET",
+      "secretPresent": "Links pessoais com token estão disponíveis: o contato pula a pergunta do telefone.",
+      "secretAbsent": "FORM_LINK_SECRET está ausente ou tem menos de 32 caracteres. Links pessoais ficam indisponíveis; o link genérico continua funcionando.",
+      "turnstileTitle": "Proteção anti-robô Turnstile",
+      "turnstileSiteKey": "TURNSTILE_SITE_KEY",
+      "turnstileSecretKey": "TURNSTILE_SECRET_KEY",
+      "turnstilePresent": "O Turnstile está configurado. Você pode ligá-lo em cada formulário, no construtor.",
+      "turnstileAbsent": "As duas variáveis do Turnstile precisam estar definidas. Até lá, o interruptor do Turnstile fica desabilitado no construtor.",
+      "openForms": "Abrir formulários"
     }
   },
   "Platform": {
@@ -4538,7 +4578,8 @@
       "completionRate": "Taxa de conclusão",
       "lastResponse": "Última resposta",
       "never": "Sem respostas ainda",
-      "noRate": "—"
+      "noRate": "—",
+      "viewResponses": "Ver respostas"
     },
     "create": {
       "title": "Novo formulário",
@@ -4699,7 +4740,8 @@
         "archivedNotice": "Este formulário está arquivado. Restaure para editar.",
         "issuesTitle": "O formulário ainda não pode ser publicado",
         "issuesDescription": "Corrija os pontos abaixo e tente de novo.",
-        "issuesClose": "Fechar"
+        "issuesClose": "Fechar",
+        "responses": "Respostas"
       },
       "blocks": {
         "add": "Adicionar bloco",
@@ -5007,6 +5049,142 @@
         "phoneLabel": "Prévia no celular",
         "desktopLabel": "Prévia no computador",
         "filesDisabled": "Prévia: o envio de arquivo está desligado."
+      }
+    },
+    "responses": {
+      "title": "Respostas",
+      "subtitle": "Respostas de “{name}”",
+      "back": "Voltar ao formulário",
+      "loadError": "Não foi possível carregar as respostas.",
+      "retry": "Tentar de novo",
+      "empty": "Nenhuma resposta ainda.",
+      "emptyHint": "Compartilhe o link do formulário para começar a receber respostas.",
+      "noMatches": "Nenhuma resposta corresponde a estes filtros.",
+      "viewerNote": "Você pode ver as respostas. Exportar e apagar exigem acesso de administrador.",
+      "total": "{count, plural, one {# resposta} other {# respostas}}",
+      "columns": {
+        "contact_name": "Contato",
+        "contact_phone": "Telefone",
+        "status": "Status",
+        "source": "Origem",
+        "started_at": "Início",
+        "completed_at": "Conclusão",
+        "score": "Pontuação",
+        "band": "Faixa"
+      },
+      "status": {
+        "partial": "Em andamento",
+        "completed": "Concluída",
+        "abandoned": "Abandonada"
+      },
+      "source": {
+        "link": "Link",
+        "inbox": "Inbox",
+        "broadcast": "Disparo",
+        "automation": "Automação",
+        "flow": "Flow",
+        "portal": "Área do contato",
+        "ai": "IA",
+        "api": "API",
+        "embed": "Incorporado"
+      },
+      "values": {
+        "yes": "Sim",
+        "no": "Não",
+        "empty": "—"
+      },
+      "filters": {
+        "label": "Filtros",
+        "search": "Buscar",
+        "searchPlaceholder": "Nome ou telefone",
+        "status": "Status",
+        "allStatuses": "Todos os status",
+        "band": "Faixa",
+        "allBands": "Todas as faixas",
+        "source": "Origem",
+        "allSources": "Todas as origens",
+        "from": "De",
+        "to": "Até",
+        "block": "Resposta de",
+        "blockAny": "Qualquer pergunta",
+        "blockValue": "Igual a",
+        "blockValuePlaceholder": "Valor",
+        "clear": "Limpar filtros"
+      },
+      "table": {
+        "selectAll": "Selecionar todas as respostas desta página",
+        "selectRow": "Selecionar esta resposta",
+        "chooseColumns": "Colunas",
+        "fixedColumns": "Colunas fixas",
+        "blockColumns": "Perguntas do formulário",
+        "noContactName": "Sem nome",
+        "openDetail": "Abrir resposta",
+        "selected": "{count, plural, one {# selecionada} other {# selecionadas}}",
+        "pagination": "Página {page} de {pages}",
+        "previous": "Anterior",
+        "next": "Próxima",
+        "date": "Data"
+      },
+      "detail": {
+        "title": "Resposta",
+        "contact": "Contato",
+        "openContact": "Abrir contato",
+        "status": "Status",
+        "source": "Origem",
+        "started": "Início",
+        "completed": "Conclusão",
+        "score": "Pontuação",
+        "band": "Faixa",
+        "answers": "Respostas",
+        "noAnswer": "Sem resposta",
+        "files": "Arquivos",
+        "download": "Baixar",
+        "deal": "Negócio criado",
+        "openDeal": "Abrir funil",
+        "utm": "Campanha (UTM)",
+        "version": "Versão {version} do formulário",
+        "close": "Fechar",
+        "form": "Formulário",
+        "openForm": "Abrir formulário",
+        "removedBlock": "Pergunta removida do formulário"
+      },
+      "actions": {
+        "export": "Exportar",
+        "exportSelected": "Exportar selecionadas",
+        "delete": "Apagar",
+        "deleteSelected": "Apagar selecionadas",
+        "deleteAll": "Apagar todas as respostas"
+      },
+      "export": {
+        "title": "Exportar respostas",
+        "description": "Baixe as respostas em planilha. Cada pergunta vira uma coluna. Toda exportação fica registrada para auditoria.",
+        "format": "Formato",
+        "csv": "CSV",
+        "xlsx": "Excel (.xlsx)",
+        "scope": "O que exportar",
+        "scopeFilter": "Todas as respostas que atendem aos filtros atuais",
+        "scopeSelection": "{count, plural, one {# resposta selecionada} other {# respostas selecionadas}}",
+        "columns": "Perguntas a incluir",
+        "allColumns": "Todas as perguntas",
+        "submit": "Baixar",
+        "cancel": "Cancelar",
+        "exporting": "Preparando o arquivo…",
+        "success": "{count, plural, one {# resposta exportada} other {# respostas exportadas}}",
+        "tooLarge": "Respostas demais para exportar de uma vez ({total}). Restrinja os filtros e tente de novo.",
+        "error": "Não foi possível exportar as respostas. Tente de novo.",
+        "filenamePrefix": "respostas"
+      },
+      "delete": {
+        "title": "Apagar respostas",
+        "descriptionSelected": "{count, plural, one {# resposta} other {# respostas}} e os arquivos enviados serão apagados de forma permanente. Não dá para desfazer.",
+        "descriptionAll": "Todas as respostas deste formulário e os arquivos enviados serão apagados de forma permanente. Não dá para desfazer.",
+        "confirmLabel": "Digite “{name}” para confirmar",
+        "confirmPlaceholder": "Nome do formulário",
+        "submit": "Apagar de vez",
+        "cancel": "Cancelar",
+        "deleting": "Apagando…",
+        "success": "{count, plural, one {# resposta apagada} other {# respostas apagadas}}",
+        "error": "Não foi possível apagar as respostas. Tente de novo."
       }
     }
   }

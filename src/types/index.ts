@@ -289,6 +289,9 @@ export interface Notification {
   contact_id?: string;
   /** Canal a que o alerta se refere (migração 086). */
   channel_id?: string;
+  /** Formulário e resposta do aviso `form_response_received` (migração 098). */
+  form_id?: string;
+  form_response_id?: string;
   /** Who triggered it. Null when an automation/system assigned it. */
   actor_user_id?: string;
   title: string;
