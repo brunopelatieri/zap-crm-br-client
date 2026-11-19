@@ -146,6 +146,46 @@ export function validateUploadRequest(
   return { ok: true, mime, ext, kind: allowed.kind, size, maxBytes };
 }
 
+const FORM_MEDIA_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/png': ['png'],
+  'image/webp': ['webp'],
+  'image/gif': ['gif'],
+};
+
+export type MediaValidation =
+  | { ok: true; mime: string; ext: string; size: number }
+  | { ok: false; reason: UploadRejectReason; maxBytes?: number };
+
+/**
+ * Pedido de upload de IMAGEM do construtor (`POST /api/forms/[id]/media`,
+ * bucket `form-media`): mesma ordem de `validateUploadRequest` (nome →
+ * MIME → extensão → tamanho), allowlist de imagem e teto de 5 MB.
+ */
+export function validateMediaRequest(req: UploadRequest): MediaValidation {
+  const name = typeof req.name === 'string' ? req.name.trim() : '';
+  if (!name || name.length > FILE_NAME_MAX || /[\\/\u0000-\u001f]/.test(name)) {
+    return { ok: false, reason: 'invalid_name' };
+  }
+  const mime = baseMimeType(req.mime);
+  if (!mime || !FORM_MEDIA_ALLOWED_MIMES.includes(mime)) {
+    return { ok: false, reason: 'file_type_not_allowed' };
+  }
+  const ext = fileExtension(name);
+  if (!ext || !FORM_MEDIA_EXTENSIONS[mime]?.includes(ext)) {
+    return { ok: false, reason: 'extension_mismatch' };
+  }
+  const size = Number(req.size);
+  if (!Number.isInteger(size) || size <= 0 || size > FORM_MEDIA_MAX_BYTES) {
+    return {
+      ok: false,
+      reason: 'file_too_large',
+      maxBytes: FORM_MEDIA_MAX_BYTES,
+    };
+  }
+  return { ok: true, mime, ext, size };
+}
+
 /** Só os MIME de `accept` que a allowlist global conhece (para o construtor). */
 export function normalizeAccept(
   accept: readonly string[] | undefined

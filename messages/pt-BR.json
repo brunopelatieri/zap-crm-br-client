@@ -183,6 +183,7 @@
     "contacts": "Contatos",
     "pipelines": "Funis",
     "broadcasts": "Disparos",
+    "forms": "Formulários",
     "automations": "Automações",
     "flows": "Fluxos",
     "aiAgents": "Agentes de IA",
@@ -4501,5 +4502,501 @@
     "removeFile": "Remover",
     "progress": "{current} de {total}",
     "networkError": "Não foi possível conectar. Verifique sua internet e tente de novo."
+  },
+  "Forms": {
+    "status": {
+      "draft": "Rascunho",
+      "published": "Publicado",
+      "archived": "Arquivado"
+    },
+    "list": {
+      "title": "Formulários",
+      "description": "Capte leads com formulários de uma pergunta por tela. Toda resposta fica ligada a um contato.",
+      "newForm": "Novo formulário",
+      "loadError": "Não foi possível carregar os formulários.",
+      "notInPlanTitle": "Formulários não estão incluídos no seu plano",
+      "notInPlanBody": "Peça ao titular da conta para mudar o plano e poder criar e publicar formulários.",
+      "quotaFull": "Você atingiu o limite de formulários do plano. Arquive um formulário ou mude de plano para criar mais.",
+      "filterLabel": "Filtrar por status",
+      "filterAll": "Todos",
+      "emptyTitle": "Nenhum formulário ainda",
+      "emptyBody": "Crie um formulário, compartilhe o link ou o QR code e cada resposta vira um contato.",
+      "createFirst": "Criar o primeiro formulário",
+      "noMatches": "Nenhum formulário com esse status.",
+      "responsesMonth": "Respostas no mês",
+      "completionRate": "Taxa de conclusão",
+      "lastResponse": "Última resposta",
+      "never": "Sem respostas ainda",
+      "noRate": "—"
+    },
+    "create": {
+      "title": "Novo formulário",
+      "description": "Comece por um modelo. Depois você pode mudar tudo.",
+      "name": "Nome (opcional)",
+      "namePlaceholder": "Ex.: Captação de lead",
+      "language": "Idioma do formulário",
+      "languageHint": "Os botões e as mensagens de validação da página pública usam este idioma, seja qual for o idioma do aparelho de quem responde.",
+      "cancel": "Cancelar",
+      "creating": "Criando o formulário…",
+      "templates": {
+        "blank": {
+          "name": "Em branco",
+          "description": "Só a pergunta do telefone. O resto você monta."
+        },
+        "lead_capture": {
+          "name": "Captação de lead",
+          "description": "Nome, WhatsApp, interesse, orçamento, prazo e consentimento, com pontuação por faixa."
+        },
+        "satisfaction": {
+          "name": "Pesquisa de satisfação",
+          "description": "Nota de 1 a 10 e o que pode melhorar."
+        },
+        "event_signup": {
+          "name": "Inscrição em evento",
+          "description": "Nome, WhatsApp, e-mail, acompanhantes e restrições."
+        }
+      }
+    },
+    "errors": {
+      "generic": "Algo deu errado. Tente de novo.",
+      "FEATURE_NOT_IN_PLAN": "Formulários não estão incluídos no seu plano.",
+      "QUOTA_EXCEEDED": "Você atingiu o limite de formulários do plano ({limit}). Arquive um formulário ou mude de plano.",
+      "FORM_LINK_SECRET_MISSING": "Os links pessoais não estão configurados neste servidor (FORM_LINK_SECRET). O link genérico continua funcionando.",
+      "FORM_HAS_RESPONSES": "Este formulário tem respostas e não pode ser excluído. Arquive-o.",
+      "INVALID_FORM": "O formulário tem dados inválidos. Revise os campos destacados.",
+      "INVALID_STATE": "Esta ação não está disponível para o status atual do formulário.",
+      "SLUG_TAKEN": "Este endereço de link já está em uso. Escolha outro.",
+      "INVALID_FILE": "Este arquivo não é permitido. Use uma imagem de até 5 MB."
+    },
+    "issues": {
+      "name_required": "Dê um nome ao formulário.",
+      "slug_invalid": "O endereço do link deve ter de 3 a 60 caracteres: letras minúsculas, números e hífens, sem hífen nas pontas.",
+      "slug_reserved": "Este endereço de link é reservado. Escolha outro.",
+      "locale_invalid": "Escolha um idioma para o formulário.",
+      "no_fields": "Adicione pelo menos um bloco.",
+      "no_input_fields": "Adicione pelo menos um bloco que peça uma resposta.",
+      "identity_required": "O formulário aceita o link genérico, então precisa de um bloco de telefone marcado como identidade do contato.",
+      "identity_not_phone": "Bloco “{field}”: só um bloco de telefone pode ser a identidade.",
+      "identity_duplicate": "Só um bloco pode ser a identidade do contato.",
+      "identity_not_first_input": "Bloco “{field}”: a identidade precisa ser o primeiro bloco que pede uma resposta.",
+      "identity_has_show_if": "Bloco “{field}”: o bloco de identidade não pode depender de outra resposta.",
+      "key_invalid": "Bloco “{field}”: a chave deve ter de 1 a 40 caracteres (letras minúsculas, números e sublinhado).",
+      "key_duplicate": "Bloco “{field}”: outro bloco já usa esta chave.",
+      "type_invalid": "Bloco “{field}”: tipo de bloco desconhecido.",
+      "label_required": "Bloco “{field}”: escreva a pergunta ou o texto.",
+      "options_required": "Bloco “{field}”: adicione as opções.",
+      "options_too_few": "Bloco “{field}”: adicione pelo menos duas opções.",
+      "option_id_invalid": "Bloco “{field}”: identificador de opção inválido.",
+      "option_id_duplicate": "Bloco “{field}”: duas opções têm o mesmo identificador.",
+      "option_label_required": "Bloco “{field}”: toda opção precisa de um texto.",
+      "yes_no_options_invalid": "Bloco “{field}”: um bloco sim/não precisa das opções sim e não.",
+      "show_if_unknown_field": "Bloco “{field}”: a condição aponta para um bloco que não existe.",
+      "show_if_forward_ref": "Bloco “{field}”: a condição deve depender de um bloco que vem antes dele.",
+      "show_if_self_ref": "Bloco “{field}”: a condição não pode depender dele mesmo.",
+      "show_if_op_invalid": "Bloco “{field}”: condição inválida.",
+      "jump_to_unknown_field": "Bloco “{field}”: uma opção pula para um bloco que não existe.",
+      "jump_to_not_allowed": "Bloco “{field}”: blocos de múltipla escolha não podem pular para outro bloco.",
+      "jump_to_backward": "Bloco “{field}”: uma opção só pode pular para frente.",
+      "jump_to_self": "Bloco “{field}”: uma opção não pode pular para o próprio bloco.",
+      "number_range_invalid": "Bloco “{field}”: o mínimo é maior que o máximo.",
+      "step_invalid": "Bloco “{field}”: o passo deve ser maior que zero.",
+      "max_length_invalid": "Bloco “{field}”: o tamanho máximo deve ser pelo menos 1.",
+      "choices_range_invalid": "Bloco “{field}”: o mínimo e o máximo de escolhas não cabem no número de opções.",
+      "rating_scale_invalid": "Bloco “{field}”: a escala da nota deve ser de 3 a 10.",
+      "max_files_invalid": "Bloco “{field}”: o número de arquivos deve ser de 1 a 5.",
+      "accept_not_allowed": "Bloco “{field}”: tipo de arquivo não permitido ({detail}).",
+      "points_range_invalid": "Bloco “{field}”: faixa de pontos inválida.",
+      "consent_must_be_required": "Bloco “{field}”: um bloco de consentimento deve ser obrigatório.",
+      "mapping_target_invalid": "Bloco “{field}”: este bloco não pode ser salvo no campo de contato escolhido.",
+      "mapping_tag_option_unknown": "Bloco “{field}”: uma etiqueta aponta para uma opção que não existe.",
+      "band_key_duplicate": "Duas faixas de pontuação têm o mesmo identificador.",
+      "band_range_invalid": "Uma faixa de pontuação tem intervalo inválido.",
+      "band_overlap": "As faixas de pontuação se sobrepõem.",
+      "band_gap": "Há um buraco entre as faixas de pontuação.",
+      "band_no_zero": "A primeira faixa de pontuação deve começar em 0.",
+      "band_open_end_missing": "A última faixa de pontuação deve ficar sem máximo.",
+      "redirect_url_not_https": "O endereço de redirecionamento deve começar com https://.",
+      "theme_color_invalid": "A cor “{detail}” não é válida. Use o formato #rrggbb.",
+      "embed_origin_invalid": "O endereço de incorporação “{detail}” não é válido. Use https://dominio.",
+      "embed_origins_too_many": "Você pode cadastrar no máximo 10 endereços de incorporação.",
+      "token_ttl_invalid": "A validade do link pessoal deve ser de 1 a 365 dias."
+    },
+    "share": {
+      "title": "Compartilhar o formulário",
+      "description": "Use o link na bio, nos anúncios e nas mensagens, imprima o QR code ou incorpore o formulário no seu site.",
+      "loadError": "Não foi possível carregar o link.",
+      "notPublished": "O formulário não está publicado, então quem abrir o link verá a página “indisponível” até você publicar.",
+      "link": "Link",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "copyError": "Não foi possível copiar. Selecione o texto e copie manualmente.",
+      "tokenMissing": "Os links pessoais (um por contato) não estão configurados neste servidor. Este link genérico funciona normalmente.",
+      "qrAlt": "QR code do link do formulário",
+      "qrHint": "Gerado no seu navegador. Nenhum serviço externo recebe o link.",
+      "qrDownload": "Baixar o QR code",
+      "embed": "Incorporar no seu site",
+      "embedOrigins": "Sites permitidos: {origins}.",
+      "embedNoOrigins": "Nenhum site está autorizado a incorporar este formulário ainda. Cadastre os endereços dos sites nas Configurações; senão os navegadores bloqueiam.",
+      "copyEmbed": "Copiar o código"
+    },
+    "builder": {
+      "state": {
+        "notFound": "Formulário não encontrado.",
+        "forbidden": "Só administradores podem editar formulários.",
+        "loadError": "Não foi possível carregar o formulário.",
+        "back": "Voltar aos formulários"
+      },
+      "mobile": {
+        "blocks": "Blocos",
+        "preview": "Prévia",
+        "panel": "Ajustes"
+      },
+      "tabs": {
+        "block": "Bloco",
+        "theme": "Tema",
+        "logic": "Lógica",
+        "scoring": "Classificação",
+        "settings": "Configurações",
+        "noBlock": "Selecione um bloco na lista para editá-lo."
+      },
+      "bar": {
+        "back": "Voltar aos formulários",
+        "name": "Nome do formulário",
+        "saving": "Salvando…",
+        "saved": "Tudo salvo",
+        "unsaved": "Alterações não salvas",
+        "save": "Salvar",
+        "savedToast": "Formulário salvo.",
+        "publish": "Publicar",
+        "publishedToast": "Formulário publicado.",
+        "unpublish": "Despublicar",
+        "unpublishToast": "Formulário despublicado.",
+        "share": "Compartilhar",
+        "more": "Mais ações",
+        "duplicate": "Duplicar",
+        "duplicatedToast": "Formulário duplicado.",
+        "archive": "Arquivar",
+        "archiveConfirm": "Arquivar “{name}”? Ele sai do ar e deixa de contar no limite de formulários. As respostas são mantidas.",
+        "archiveToast": "Formulário arquivado.",
+        "restore": "Restaurar",
+        "restoreToast": "Formulário restaurado como rascunho.",
+        "delete": "Excluir",
+        "deleteConfirm": "Excluir “{name}” de vez? Não dá para desfazer.",
+        "deletedToast": "Formulário excluído.",
+        "deleteBlockedResponses": "Formulário com respostas não pode ser excluído. Arquive-o.",
+        "deleteBlockedPublished": "Despublique o formulário antes de excluí-lo.",
+        "archivedNotice": "Este formulário está arquivado. Restaure para editar.",
+        "issuesTitle": "O formulário ainda não pode ser publicado",
+        "issuesDescription": "Corrija os pontos abaixo e tente de novo.",
+        "issuesClose": "Fechar"
+      },
+      "blocks": {
+        "add": "Adicionar bloco",
+        "drag": "Arrastar para reordenar",
+        "untitled": "Bloco sem título",
+        "identity": "Identidade",
+        "required": "Obrigatório",
+        "hasLogic": "Tem lógica",
+        "duplicate": "Duplicar bloco",
+        "delete": "Excluir bloco",
+        "identityLocked": "Este bloco identifica o contato e não pode ser removido enquanto o formulário aceitar o link genérico.",
+        "identityNoDuplicate": "O bloco de identidade não pode ser duplicado.",
+        "deleteWithLogic": "Outros blocos ({count}) dependem deste. As condições e os pulos deles serão limpos. Excluir mesmo assim?"
+      },
+      "palette": {
+        "title": "Adicionar um bloco",
+        "description": "Cada bloco é uma tela na página pública."
+      },
+      "types": {
+        "short_text": {
+          "name": "Texto curto",
+          "hint": "Uma linha, com máscara opcional de CPF ou CEP."
+        },
+        "long_text": {
+          "name": "Texto longo",
+          "hint": "Várias linhas para uma resposta maior."
+        },
+        "email": {
+          "name": "E-mail",
+          "hint": "Endereço de e-mail validado."
+        },
+        "phone": {
+          "name": "Telefone",
+          "hint": "WhatsApp com DDD. Pode identificar o contato."
+        },
+        "number": {
+          "name": "Número",
+          "hint": "Resposta numérica com mínimo e máximo."
+        },
+        "date": {
+          "name": "Data",
+          "hint": "Seletor de data."
+        },
+        "single_select": {
+          "name": "Escolha única",
+          "hint": "Uma opção; avança sozinho."
+        },
+        "multi_select": {
+          "name": "Múltipla escolha",
+          "hint": "Várias opções, com mínimo e máximo."
+        },
+        "dropdown": {
+          "name": "Lista suspensa",
+          "hint": "Uma lista para muitas opções."
+        },
+        "yes_no": {
+          "name": "Sim / Não",
+          "hint": "Dois botões."
+        },
+        "rating": {
+          "name": "Nota",
+          "hint": "Uma escala de 1 até 10."
+        },
+        "file_upload": {
+          "name": "Envio de arquivo",
+          "hint": "Imagens, PDF e documentos, com limite de tamanho."
+        },
+        "statement": {
+          "name": "Declaração",
+          "hint": "Só texto e mídia, com botão Continuar."
+        },
+        "consent": {
+          "name": "Consentimento",
+          "hint": "Caixa que precisa ser aceita. Pode registrar o opt-in."
+        }
+      },
+      "editor": {
+        "content": "Conteúdo",
+        "label": "Pergunta",
+        "consentText": "Texto do consentimento",
+        "description": "Descrição (opcional)",
+        "required": "Obrigatório",
+        "consentRequiredHint": "Um bloco de consentimento sempre precisa ser aceito.",
+        "identityRequiredHint": "O bloco de identidade é sempre obrigatório.",
+        "identity": "Usar como identidade do contato",
+        "identityHint": "Ligado, a resposta identifica (ou cria) o contato. Ele continua sendo a primeira pergunta.",
+        "identityHintGeneric": "O formulário aceita o link genérico, então este bloco é obrigatório para identificar o contato. Desligue “aceitar o link genérico” nas Configurações para mudar.",
+        "options": "Opções",
+        "optionsHint": "Os pontos de cada opção ficam na aba Classificação.",
+        "optionDefault": "Opção",
+        "addOption": "Adicionar opção",
+        "removeOption": "Remover opção",
+        "rules": "Regras",
+        "maxLength": "Tamanho máximo",
+        "mask": "Máscara",
+        "maskHint": "Só formata o que é digitado. Não valida o documento.",
+        "maskNone": "Nenhuma",
+        "min": "Mínimo",
+        "max": "Máximo",
+        "step": "Passo",
+        "scale": "Escala (3 a 10)",
+        "scaleHint": "Quem responde escolhe um número de 1 até este valor.",
+        "minChoices": "Mínimo de escolhas",
+        "maxChoices": "Máximo de escolhas",
+        "maxFiles": "Máximo de arquivos (1 a 5)",
+        "accept": "Tipos aceitos",
+        "acceptHint": "Deixe tudo desmarcado para aceitar todos os tipos permitidos.",
+        "acceptGroups": {
+          "images": "Imagens (JPG, PNG, WebP)",
+          "pdf": "PDF",
+          "office": "Word e Excel",
+          "text": "Texto e CSV",
+          "audio": "Áudio (MP3, OGG)",
+          "video": "Vídeo (MP4)"
+        },
+        "media": "Imagem ou vídeo",
+        "mediaHint": "Aparece acima da pergunta.",
+        "advanced": "Avançado",
+        "key": "Chave do bloco",
+        "keyHint": "Nome estável usado pelas condições e pelas respostas. Letras minúsculas, números e sublinhado.",
+        "keyInvalid": "Inválida ou já usada. Use de 1 a 40 letras minúsculas, números ou sublinhado.",
+        "mapping": {
+          "title": "Salvar no contato",
+          "description": "Só o que você mapear aqui é gravado no contato. O resto fica na resposta.",
+          "target": "Salvar esta resposta como",
+          "none": "Não salvar no contato",
+          "contactName": "Nome do contato",
+          "contactEmail": "E-mail do contato",
+          "contactCompany": "Empresa do contato",
+          "contactOptIn": "Opt-in do contato (consentimento)",
+          "customField": "Campo personalizado",
+          "noCustomFields": "Nenhum campo personalizado ainda. Crie nas Configurações.",
+          "tag": "Etiqueta por opção",
+          "tagHint": "Escolha a etiqueta adicionada ao contato para cada opção. Etiquetas são sempre adicionadas, nunca removidas.",
+          "noTag": "Sem etiqueta",
+          "overwrite": "Sobrescrever o valor existente",
+          "overwriteHint": "Desligado: só preenche o campo quando ele está vazio."
+        }
+      },
+      "media": {
+        "image": "Imagem",
+        "upload": "Enviar imagem",
+        "replace": "Trocar imagem",
+        "remove": "Remover",
+        "tooLarge": "A imagem é grande demais (máximo 5 MB).",
+        "notAllowed": "Este tipo de arquivo não é permitido. Use JPG, PNG, WebP ou GIF.",
+        "uploadError": "Não foi possível enviar a imagem. Tente de novo.",
+        "videoPlaceholder": "Link do YouTube ou do Vimeo",
+        "useVideo": "Usar vídeo",
+        "videoHint": "Só links do YouTube e do Vimeo são aceitos.",
+        "videoInvalid": "Este link não é um vídeo válido do YouTube ou do Vimeo."
+      },
+      "theme": {
+        "brand": "Marca",
+        "logo": "Logo",
+        "colors": {
+          "primary": "Destaque",
+          "background": "Fundo",
+          "text": "Texto",
+          "button": "Botão"
+        },
+        "lowContrast": "A cor do texto tem pouco contraste com o fundo (abaixo de 4,5:1). Pode ficar difícil de ler.",
+        "font": "Fonte",
+        "fonts": {
+          "system": "Do sistema",
+          "serif": "Com serifa",
+          "rounded": "Arredondada",
+          "mono": "Monoespaçada"
+        },
+        "radius": "Cantos",
+        "radii": {
+          "rounded": "Arredondados",
+          "square": "Quadrados"
+        },
+        "language": "Idioma do formulário",
+        "languageHint": "Os botões e as mensagens da página pública usam este idioma.",
+        "welcome": "Tela de boas-vindas",
+        "welcomeTitle": "Título",
+        "welcomeDescription": "Descrição",
+        "welcomeButton": "Botão de começar",
+        "welcomeMedia": "Imagem ou vídeo",
+        "thankYou": "Tela de agradecimento",
+        "thankTitle": "Título",
+        "thankBody": "Mensagem",
+        "whatsappCta": "Botão para falar no WhatsApp",
+        "whatsappCtaHint": "Abre uma conversa com o número de WhatsApp padrão da conta.",
+        "whatsappText": "Mensagem já preenchida na conversa",
+        "redirectUrl": "Redirecionar depois do envio",
+        "redirectUrlHint": "Opcional. Deve começar com https://. Quem respondeu é redirecionado após 3 segundos.",
+        "redirectUrlInvalid": "O endereço deve começar com https://."
+      },
+      "logic": {
+        "intro": "Lógica do bloco “{block}”. As condições só olham para blocos que vêm antes dele.",
+        "showIf": "Mostrar este bloco só se…",
+        "showIfHint": "Uma condição sobre um bloco anterior.",
+        "identityNoLogic": "O bloco de identidade sempre aparece.",
+        "noPrevious": "Não há bloco anterior para depender.",
+        "whenBlock": "Bloco anterior",
+        "always": "Sempre mostrar",
+        "operator": "Condição",
+        "ops": {
+          "eq": "for",
+          "neq": "não for",
+          "contains": "contiver",
+          "answered": "foi respondido"
+        },
+        "value": "Valor",
+        "jump": "Pular depois de responder",
+        "jumpHint": "Escolha para onde ir em cada opção. Os blocos do meio são pulados.",
+        "next": "Próximo bloco",
+        "multiNoJump": "Blocos de múltipla escolha não podem pular para outro bloco.",
+        "dependents": "Blocos que dependem deste"
+      },
+      "scoring": {
+        "intro": "Dê pontos às respostas e agrupe o total em faixas. A pontuação é sempre calculada no servidor quando o formulário é enviado.",
+        "points": "Pontos",
+        "pointsHint": "Pontos por opção, ou por faixa de valores em números e notas.",
+        "noScoredBlocks": "Nenhum bloco pontua ainda. Adicione um bloco de escolha, número ou nota.",
+        "pointsFor": "Pontos para",
+        "rangeFrom": "De",
+        "rangeTo": "Até",
+        "rangePoints": "Pontos",
+        "addRange": "Adicionar faixa de valores",
+        "removeRange": "Remover faixa de valores",
+        "maxScore": "Maior pontuação possível: {max}",
+        "bands": "Faixas",
+        "bandsHint": "Cada faixa aplica as ações dela quando o total cai dentro. As faixas começam em 0 e cobrem toda pontuação.",
+        "bandDefault": "Faixa",
+        "bandLabel": "Nome da faixa",
+        "bandMin": "De (pontos)",
+        "bandMax": "Até (pontos)",
+        "bandOpen": "Sem máximo",
+        "addBand": "Adicionar faixa",
+        "removeBand": "Remover faixa",
+        "bandIssues": {
+          "band_key_duplicate": "Duas faixas têm o mesmo identificador.",
+          "band_range_invalid": "Uma faixa tem intervalo inválido.",
+          "band_overlap": "As faixas se sobrepõem.",
+          "band_gap": "Há um buraco entre as faixas.",
+          "band_no_zero": "A primeira faixa deve começar em 0.",
+          "band_open_end_missing": "A última faixa deve ficar sem máximo."
+        },
+        "actionTags": "Etiquetas a adicionar",
+        "noTags": "Nenhuma etiqueta ainda. Crie nas Configurações.",
+        "actionDeal": "Criar um negócio",
+        "noDeal": "Não criar negócio",
+        "dealStage": "Etapa",
+        "dealTitle": "Título do negócio",
+        "dealTitleHint": "Usa o nome do contato e o nome do formulário, como no exemplo mostrado.",
+        "dealAssign": "Atribuir o negócio",
+        "assignNone": "Não atribuir",
+        "assignSpecific": "A um membro específico",
+        "assignRoundRobin": "Rodízio entre os membros",
+        "actionNotify": "Notificar membros"
+      },
+      "settings": {
+        "link": "Link e identidade",
+        "slug": "Endereço do link",
+        "suggestSlug": "Sugerir",
+        "slugInvalid": "Use de 3 a 60 letras minúsculas, números ou hífens, sem hífen nas pontas.",
+        "slugReserved": "Este endereço é reservado. Escolha outro.",
+        "slugPublishedWarning": "O formulário está publicado. Mudar o endereço quebra os links já compartilhados.",
+        "acceptGeneric": "Aceitar o link genérico",
+        "acceptGenericHint": "Ligado: qualquer pessoa com o link pode responder, e o formulário pede o telefone primeiro. Desligado: só funcionam links pessoais.",
+        "confirmPhone": "Confirmar o telefone mesmo com link pessoal",
+        "confirmPhoneHint": "Desligado: o link pessoal pula a pergunta do telefone.",
+        "tokenTtl": "Validade do link pessoal (dias)",
+        "tokenTtlHint": "Depois desse prazo o link volta a pedir o telefone.",
+        "tokenMissing": "Os links pessoais não estão configurados neste servidor (FORM_LINK_SECRET). O link genérico funciona normalmente.",
+        "answers": "Respostas e proteção",
+        "multiple": "Permitir mais de uma resposta por contato",
+        "multipleHint": "Desligado: quem já respondeu vê uma mensagem de agradecimento.",
+        "turnstile": "Cloudflare Turnstile",
+        "turnstileHint": "Adiciona uma verificação contra robôs antes do envio.",
+        "turnstileMissing": "Não configurado neste servidor (TURNSTILE_SITE_KEY e TURNSTILE_SECRET_KEY).",
+        "honeypot": "Um campo escondido e um tempo mínimo de preenchimento já protegem todo formulário contra robôs.",
+        "noindex": "Esconder dos buscadores",
+        "noindexHint": "Adiciona a tag noindex na página pública.",
+        "embed": "Incorporar em um site",
+        "embedHint": "Só os sites cadastrados podem mostrar este formulário dentro de um iframe. Use https://dominio, sem caminho.",
+        "addOrigin": "Adicionar",
+        "removeOrigin": "Remover site",
+        "originInvalid": "Inválido ou já adicionado. Use https://dominio, sem caminho.",
+        "portalAndAi": "Área do contato e IA",
+        "portalAndAiHint": "Preparado aqui e usado pelas integrações que vêm a seguir.",
+        "portal": "Visibilidade na área do contato",
+        "portalOptions": {
+          "none": "Não aparece",
+          "fill": "O contato pode preencher",
+          "responses": "O contato vê as próprias respostas",
+          "both": "Preencher e ver respostas"
+        },
+        "aiOfferable": "A IA pode oferecer este formulário",
+        "aiOfferableHint": "Deixa o assistente de IA enviar o link quando combinar com a conversa.",
+        "aiHint": "Quando oferecer",
+        "aiHintHint": "Uma instrução curta para a IA, por exemplo quando o lead pedir um orçamento.",
+        "internal": "Nota interna",
+        "description": "Descrição",
+        "descriptionHint": "Só a sua equipe vê isto."
+      },
+      "preview": {
+        "phone": "Celular",
+        "desktop": "Computador",
+        "restart": "Reiniciar",
+        "phoneLabel": "Prévia no celular",
+        "desktopLabel": "Prévia no computador",
+        "filesDisabled": "Prévia: o envio de arquivo está desligado."
+      }
+    }
   }
 }

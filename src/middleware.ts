@@ -120,6 +120,9 @@ export async function middleware(request: NextRequest) {
     '/pipelines',
     '/broadcasts',
     '/automations',
+    // SPEC 085 F2: `/forms` é a área da equipe. A página pública é
+    // `/f/<slug>` (F3) — o prefixo `/forms` NÃO a alcança.
+    '/forms',
     '/settings',
   ];
   if (

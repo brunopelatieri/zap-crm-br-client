@@ -69,6 +69,39 @@ const SECURITY_HEADERS = [
   },
 ] as const;
 
+/**
+ * CSP APLICADA (não Report-Only) das páginas da área do contato (SPEC 083
+ * F5-06). `/area` recebe senha e código de acesso, e hoje não há HTML de
+ * usuário renderizado, então não há XSS conhecido: isto é defesa em
+ * profundidade contra exfiltração. O ganho está em `connect-src 'self'`
+ * (um script injetado não manda senha a outro host) e `form-action 'self'`.
+ *
+ * `'unsafe-inline'` em `script-src` fica enquanto o Next exigir o script
+ * inline de hidratação e o `theme-boot` do layout raiz (CSP por nonce é
+ * trabalho futuro, como na política Report-Only do resto do app).
+ * `'unsafe-eval'` só no `next dev` (o React/HMR de desenvolvimento usa
+ * `eval`); o build de produção não o recebe.
+ *
+ * Calculada dentro de `headers()` para ler `NODE_ENV` na hora. A política
+ * Report-Only do catch-all continua valendo também em `/area` (outra
+ * chave de cabeçalho, sem conflito): o navegador aplica as duas.
+ */
+function contactPortalCsp(): string {
+  const dev = process.env.NODE_ENV !== 'production';
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ''}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "base-uri 'self'",
+  ].join('; ');
+}
+
 const nextConfig: NextConfig = {
   /**
    * Saída `standalone` (só o necessário para rodar: `.next/standalone/server.js`
@@ -204,6 +237,14 @@ const nextConfig: NextConfig = {
             key: 'Cache-Control',
             value: 'public, max-age=31536000, immutable',
           },
+        ],
+      },
+      {
+        // CSP aplicada só nas páginas da área do contato (F5-06). As
+        // rotas `/area/api/*` também passam por aqui: inofensivo em JSON.
+        source: '/area/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: contactPortalCsp() },
         ],
       },
       {

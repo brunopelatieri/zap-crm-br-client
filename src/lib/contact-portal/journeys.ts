@@ -90,6 +90,21 @@ export async function requestAccessCode(
     deliver: async () => {
       try {
         const db = deps.db();
+
+        // F5-05: este pedido é ANÔNIMO (qualquer um digita o telefone de
+        // outro). Contato que pediu para sair (`opted_out`) não recebe
+        // código: a resposta da rota já saiu igual (`{ok:true}`, mesmo piso
+        // de tempo), então nada denuncia isso a quem pediu. Ele continua
+        // com a J2 (palavra-chave), que é ele quem inicia. Leitura que
+        // falha ou contato que sumiu: não envia (falha fechada).
+        const { data: contact } = await db
+          .from('contacts')
+          .select('opt_in_status')
+          .eq('id', contactId)
+          .eq('account_id', accountId)
+          .maybeSingle();
+        if (!contact || contact.opt_in_status === 'opted_out') return;
+
         const settings =
           await createPortalAccountService(db).getSettings(accountId);
         if (!settings) return;

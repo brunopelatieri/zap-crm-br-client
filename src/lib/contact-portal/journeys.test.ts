@@ -133,7 +133,10 @@ describe('requestAccessCode', () => {
   it('código emitido: o envio fica para depois da resposta, com as configurações da conta', async () => {
     const svc = fakeService();
     const db = fakeDb(
-      { accounts: { name: 'Valen Ranch' } },
+      {
+        accounts: { name: 'Valen Ranch' },
+        contacts: { opt_in_status: 'opted_in' },
+      },
       {
         account_id: 'a1',
         enabled: true,
@@ -184,7 +187,7 @@ describe('requestAccessCode', () => {
   it('o envio em segundo plano nunca lança', async () => {
     deliverAccessCode.mockRejectedValue(new Error('meta down'));
     const db = fakeDb(
-      {},
+      { contacts: { opt_in_status: 'opted_in' } },
       { account_id: 'a1', public_code: 'ABCD2345', eligible: true }
     );
     const r = await requestAccessCode(
@@ -198,6 +201,59 @@ describe('requestAccessCode', () => {
       deps(fakeService(), db)
     );
     await expect(r.deliver!()).resolves.toBeUndefined();
+    expect(deliverAccessCode).toHaveBeenCalledTimes(1);
+  });
+
+  describe('opt-out no pedido anônimo (F5-05)', () => {
+    const input = {
+      rawPhone: '19992496598',
+      publicCode: null,
+      purpose: 'reset' as const,
+      ipHash: IP,
+      siteOrigin: null,
+    };
+    const settings = {
+      account_id: 'a1',
+      enabled: true,
+      channel_id: 'ch1',
+      public_code: 'ABCD2345',
+      eligible: true,
+    };
+
+    it('contato opted_out: a rota continua recebendo um envio agendado, que não envia nada', async () => {
+      const db = fakeDb(
+        { contacts: { opt_in_status: 'opted_out' }, accounts: { name: 'X' } },
+        settings
+      );
+      const r = await requestAccessCode(input, deps(fakeService(), db));
+      // Indistinguível por fora: `deliver` existe como em qualquer pedido.
+      expect(r.deliver).not.toBeNull();
+      await r.deliver!();
+      expect(deliverAccessCode).not.toHaveBeenCalled();
+    });
+
+    it('contato que não é opted_out recebe normalmente', async () => {
+      for (const status of ['opted_in', 'unknown', null]) {
+        deliverAccessCode.mockClear();
+        const db = fakeDb(
+          {
+            contacts: { opt_in_status: status },
+            accounts: { name: 'X' },
+          },
+          settings
+        );
+        const r = await requestAccessCode(input, deps(fakeService(), db));
+        await r.deliver!();
+        expect(deliverAccessCode).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('contato que sumiu ou leitura sem linha: falha fechada, não envia', async () => {
+      const db = fakeDb({ accounts: { name: 'X' } }, settings);
+      const r = await requestAccessCode(input, deps(fakeService(), db));
+      await r.deliver!();
+      expect(deliverAccessCode).not.toHaveBeenCalled();
+    });
   });
 });
 

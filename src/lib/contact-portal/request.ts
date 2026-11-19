@@ -1,9 +1,12 @@
 // ============================================================
 // O que as rotas da área tiram da requisição (SPEC 083 E-6, SPEC 083 §7.1).
 //
-// IP: o primeiro valor de `x-forwarded-for` (o Traefik da stack fica na
-// frente), como as rotas de convite já fazem. Vai para o banco só como
-// sha256 — os contadores de limite nunca guardam IP em claro.
+// IP: o ÚLTIMO valor de `x-forwarded-for` (o Traefik da stack fica na
+// frente e acrescenta o endereço que viu; o cliente só prefixa), depois
+// `x-real-ip`, depois "unknown". Vai para o banco só como sha256 — os
+// contadores de limite nunca guardam IP em claro. Depende de o proxy ser
+// o único a escrever no fim da lista: o teste de campo do Traefik
+// (SPEC 083 §15.5) segue sendo do mantenedor.
 //
 // Origem: toda escrita em `/area/api/**` confere o cabeçalho `Origin`.
 // Vale se for a origem pública do app (`NEXT_PUBLIC_SITE_URL`) OU se o
@@ -20,8 +23,17 @@
 import { createHash } from 'node:crypto';
 
 export function getClientIp(request: Request): string {
+  // O ÚLTIMO valor: é o que o proxy confiável (Traefik) acrescenta. Um
+  // cliente só consegue PREFIXAR a lista (`x-forwarded-for: <forjado>`), e
+  // o primeiro valor era justamente o que ele controlava (F5-03).
   const xff = request.headers.get('x-forwarded-for');
-  if (xff) return xff.split(',')[0].trim();
+  if (xff) {
+    const hops = xff
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+    if (hops.length > 0) return hops[hops.length - 1];
+  }
   const xri = request.headers.get('x-real-ip');
   if (xri) return xri.trim();
   return 'unknown';

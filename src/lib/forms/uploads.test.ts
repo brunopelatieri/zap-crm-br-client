@@ -8,6 +8,7 @@ import {
   normalizeAccept,
   parseUploadPath,
   uploadPathBelongsTo,
+  validateMediaRequest,
   validateUploadRequest,
   verifyUploadedObject,
   type StorageLister,
@@ -200,5 +201,39 @@ describe('verifyUploadedObject (SPEC 085 §4.2 item 6)', () => {
     await expect(
       verifyUploadedObject(storageWith(null, true).storage, path, 10)
     ).resolves.toEqual({ ok: false, reason: 'storage_error' });
+  });
+});
+
+describe('validateMediaRequest (construtor, bucket form-media)', () => {
+  it('imagem dentro de 5 MB passa, com MIME normalizado', () => {
+    expect(
+      validateMediaRequest({
+        name: 'Logo.PNG',
+        mime: 'image/png; charset=binary',
+        size: 1024,
+      })
+    ).toEqual({ ok: true, mime: 'image/png', ext: 'png', size: 1024 });
+    expect(
+      validateMediaRequest({ name: 'a.gif', mime: 'image/gif', size: 10 }).ok
+    ).toBe(true);
+  });
+
+  it('recusa PDF, extensão divergente, nome com barra e arquivo grande', () => {
+    expect(
+      validateMediaRequest({ name: 'a.pdf', mime: 'application/pdf', size: 10 })
+    ).toEqual({ ok: false, reason: 'file_type_not_allowed' });
+    expect(
+      validateMediaRequest({ name: 'a.png', mime: 'image/jpeg', size: 10 })
+    ).toEqual({ ok: false, reason: 'extension_mismatch' });
+    expect(
+      validateMediaRequest({ name: '../a.png', mime: 'image/png', size: 10 })
+    ).toEqual({ ok: false, reason: 'invalid_name' });
+    expect(
+      validateMediaRequest({
+        name: 'a.png',
+        mime: 'image/png',
+        size: 6 * 1024 * 1024,
+      })
+    ).toMatchObject({ ok: false, reason: 'file_too_large' });
   });
 });

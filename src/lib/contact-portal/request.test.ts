@@ -19,16 +19,67 @@ afterEach(() => {
 });
 
 describe('IP do cliente', () => {
-  it('primeiro valor de x-forwarded-for, depois x-real-ip, depois "unknown"', () => {
+  it('último valor de x-forwarded-for (o que o proxy acrescenta), depois x-real-ip, depois "unknown"', () => {
     expect(
       getClientIp(
         req('http://x/', { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' })
       )
-    ).toBe('203.0.113.7');
+    ).toBe('10.0.0.1');
     expect(getClientIp(req('http://x/', { 'x-real-ip': '198.51.100.2' }))).toBe(
       '198.51.100.2'
     );
     expect(getClientIp(req('http://x/'))).toBe('unknown');
+  });
+
+  it('cabeçalho forjado com vários valores: o prefixo do cliente é ignorado (F5-03)', () => {
+    // O atacante manda `x-forwarded-for: 1.1.1.1, 2.2.2.2`; o proxy anexa
+    // o endereço real dele ao fim.
+    const forged = getClientIp(
+      req('http://x/', {
+        'x-forwarded-for': '1.1.1.1, 2.2.2.2, 198.51.100.9',
+      })
+    );
+    expect(forged).toBe('198.51.100.9');
+    // Mesmo IP real, outro prefixo forjado: mesmo balde de limite.
+    expect(
+      getClientIp(
+        req('http://x/', { 'x-forwarded-for': '9.9.9.9, 198.51.100.9' })
+      )
+    ).toBe(forged);
+  });
+
+  it('valor único, com espaços ao redor', () => {
+    expect(
+      getClientIp(req('http://x/', { 'x-forwarded-for': '  203.0.113.7  ' }))
+    ).toBe('203.0.113.7');
+  });
+
+  it('x-forwarded-for vazio ou só de vírgulas cai para x-real-ip e depois "unknown"', () => {
+    expect(
+      getClientIp(
+        req('http://x/', { 'x-forwarded-for': '', 'x-real-ip': '198.51.100.2' })
+      )
+    ).toBe('198.51.100.2');
+    expect(
+      getClientIp(
+        req('http://x/', {
+          'x-forwarded-for': ' , ,',
+          'x-real-ip': '198.51.100.2',
+        })
+      )
+    ).toBe('198.51.100.2');
+    expect(getClientIp(req('http://x/', { 'x-forwarded-for': ' , ' }))).toBe(
+      'unknown'
+    );
+    expect(getClientIp(req('http://x/', { 'x-forwarded-for': '' }))).toBe(
+      'unknown'
+    );
+  });
+
+  it('último valor vazio (vírgula no fim) usa o anterior', () => {
+    expect(
+      getClientIp(req('http://x/', { 'x-forwarded-for': '203.0.113.7,' }))
+    ).toBe('203.0.113.7');
   });
 
   it('vai para o banco só como sha256 hex', () => {

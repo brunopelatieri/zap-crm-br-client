@@ -10,7 +10,7 @@
 // da SPEC 083, P-7 → SPEC 083 §9).
 // ============================================================
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import nextConfig from '../next.config';
 
@@ -33,6 +33,78 @@ async function cacheControlFor(pathname: string): Promise<string | null> {
   }
   return value;
 }
+
+async function headerFor(pathname: string, key: string) {
+  const rules = (await nextConfig.headers?.()) ?? [];
+  let value: string | null = null;
+  for (const rule of rules) {
+    if (!matches(rule.source, pathname)) continue;
+    for (const h of rule.headers) {
+      if (h.key.toLowerCase() === key.toLowerCase()) value = h.value;
+    }
+  }
+  return value;
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('CSP aplicada na área do contato (SPEC 083 F5-06)', () => {
+  it.each([
+    '/area',
+    '/area/painel',
+    '/area/c/KRCFRZDW/codigo',
+    '/area/api/login',
+  ])('%s sai com Content-Security-Policy aplicada', async (path) => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const csp = await headerFor(path, 'Content-Security-Policy');
+    expect(csp).not.toBeNull();
+    const directives = csp!.split('; ');
+    expect(directives).toEqual(
+      expect.arrayContaining([
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+        "base-uri 'self'",
+      ])
+    );
+    // Nenhum host de fora e nada de eval em produção.
+    expect(csp).not.toMatch(/https?:|wss?:|unsafe-eval|\*/);
+  });
+
+  it('em desenvolvimento o script-src aceita eval (HMR do Next)', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(await headerFor('/area', 'Content-Security-Policy')).toContain(
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    );
+  });
+
+  it.each([
+    '/',
+    '/dashboard',
+    '/inbox',
+    '/login',
+    '/areas',
+    '/api/contacts',
+    '/api/contact-portal/settings',
+  ])('%s (fora da área) não ganha a política aplicada', async (path) => {
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(await headerFor(path, 'Content-Security-Policy')).toBeNull();
+  });
+
+  it('o catch-all segue Report-Only, e também vale em /area', async () => {
+    for (const path of ['/dashboard', '/area']) {
+      const ro = await headerFor(path, 'Content-Security-Policy-Report-Only');
+      expect(ro).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
+    }
+  });
+});
 
 describe('Cache-Control da área do contato', () => {
   it.each([

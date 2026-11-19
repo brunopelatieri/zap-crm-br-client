@@ -63,6 +63,36 @@ describe('activityHref', () => {
     ).toBe('/broadcasts/bcast-1');
   });
 
+  it('formulário leva ao construtor; excluído não tem destino (SPEC 085 F2)', () => {
+    expect(
+      activityHref(
+        makeRow({
+          resource_type: 'form',
+          action: 'form.published',
+          resource_id: 'form-1',
+        })
+      )
+    ).toBe('/forms/form-1');
+    expect(
+      activityHref(
+        makeRow({
+          resource_type: 'form',
+          action: 'form.exported',
+          resource_id: null,
+        })
+      )
+    ).toBe('/forms');
+    expect(
+      activityHref(
+        makeRow({
+          resource_type: 'form',
+          action: 'form.deleted',
+          resource_id: 'form-1',
+        })
+      )
+    ).toBeNull();
+  });
+
   it('campanha sem id cai na listagem', () => {
     expect(
       activityHref(

@@ -36,6 +36,27 @@ function walk(dir: string): string[] {
 const rel = (f: string) => path.relative(SRC, f).split(path.sep).join('/');
 const isTest = (f: string) => /\.test\.tsx?$/.test(f);
 
+/** Todas as RPCs `public.portal_*` da área (migrações 093–096), `service_role` só. */
+const PORTAL_RPC_NAMES = [
+  'portal_request_code',
+  'portal_complete_code',
+  'portal_login',
+  'portal_create_session',
+  'portal_resolve_session',
+  'portal_select_account',
+  'portal_change_password',
+  'portal_logout',
+  'portal_public_account',
+  'portal_account_settings_get',
+  'portal_account_settings_set',
+  'portal_access_status',
+  'portal_active_contact_ids',
+  'portal_invite',
+  'portal_set_blocked',
+  'portal_end_sessions',
+  'portal_account_summary',
+] as const;
+
 const sourceFiles = walk(SRC).filter((f) => !isTest(f));
 // Lido uma vez: são ~700 arquivos e várias varreduras.
 const contents = new Map<string, string>();
@@ -118,10 +139,40 @@ describe('isolamento da área do contato', () => {
   });
 
   it('as RPCs portal_* só são chamadas de dentro de lib/contact-portal', () => {
+    // Lista FECHADA (F5-07): `portal_*` também é nome de coluna de outros
+    // módulos (ex.: `forms.portal_visibility`), e uma expressão aberta
+    // acusava falso positivo. Função nova da área entra aqui junto com a
+    // migração — e o teste abaixo cobra a lista contra o SQL.
+    const callsPortalRpc = new RegExp(
+      `['"](${PORTAL_RPC_NAMES.join('|')})['"]`
+    );
     const offenders = sourceFiles
       .filter((f) => !f.startsWith(PORTAL_LIB))
-      .filter((f) => /['"]portal_[a-z_]+['"]/.test(read(f)))
+      .filter((f) => callsPortalRpc.test(read(f)))
       .map(rel);
     expect(offenders).toEqual([]);
+  });
+
+  it('a lista de RPCs da área bate com as funções criadas nas migrações', () => {
+    const migrationsDir = path.resolve(SRC, '..', 'supabase', 'migrations');
+    let files: string[];
+    try {
+      files = readdirSync(migrationsDir).filter((n) =>
+        /^(09[3-9]|1\d\d)_contact_portal.*\.sql$/.test(n)
+      );
+    } catch {
+      return; // migrações ficam fora do git: sem a pasta (fork), nada a conferir
+    }
+    if (files.length === 0) return;
+    const created = new Set<string>();
+    for (const name of files) {
+      const sql = readFileSync(path.join(migrationsDir, name), 'utf-8');
+      for (const m of sql.matchAll(
+        /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+public\.(portal_[a-z_]+)/gi
+      )) {
+        created.add(m[1]);
+      }
+    }
+    expect([...created].sort()).toEqual([...PORTAL_RPC_NAMES].sort());
   });
 });

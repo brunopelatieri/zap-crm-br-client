@@ -183,6 +183,7 @@
     "contacts": "Contacts",
     "pipelines": "Pipelines",
     "broadcasts": "Broadcasts",
+    "forms": "Forms",
     "automations": "Automations",
     "flows": "Flows",
     "aiAgents": "AI Agents",
@@ -4501,5 +4502,501 @@
     "removeFile": "Remove",
     "progress": "{current} of {total}",
     "networkError": "Could not connect. Check your internet and try again."
+  },
+  "Forms": {
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "archived": "Archived"
+    },
+    "list": {
+      "title": "Forms",
+      "description": "Capture leads with one-question-at-a-time forms. Every answer is linked to a contact.",
+      "newForm": "New form",
+      "loadError": "Could not load the forms.",
+      "notInPlanTitle": "Forms are not included in your plan",
+      "notInPlanBody": "Ask the account owner to change the plan to create and publish forms.",
+      "quotaFull": "You reached the form limit of your plan. Archive a form or upgrade the plan to create more.",
+      "filterLabel": "Filter by status",
+      "filterAll": "All",
+      "emptyTitle": "No forms yet",
+      "emptyBody": "Create a form, share the link or the QR code, and every answer becomes a contact.",
+      "createFirst": "Create your first form",
+      "noMatches": "No forms with this status.",
+      "responsesMonth": "Responses this month",
+      "completionRate": "Completion rate",
+      "lastResponse": "Last response",
+      "never": "No responses yet",
+      "noRate": "—"
+    },
+    "create": {
+      "title": "New form",
+      "description": "Start from a template. You can change everything afterwards.",
+      "name": "Name (optional)",
+      "namePlaceholder": "e.g. Lead capture",
+      "language": "Form language",
+      "languageHint": "Buttons and validation messages on the public page use this language, whatever language the visitor device uses.",
+      "cancel": "Cancel",
+      "creating": "Creating the form…",
+      "templates": {
+        "blank": {
+          "name": "Blank",
+          "description": "Only the phone question. Build the rest yourself."
+        },
+        "lead_capture": {
+          "name": "Lead capture",
+          "description": "Name, WhatsApp, interest, budget, timeline and consent, scored by band."
+        },
+        "satisfaction": {
+          "name": "Satisfaction survey",
+          "description": "A 1 to 10 score and what could be better."
+        },
+        "event_signup": {
+          "name": "Event registration",
+          "description": "Name, WhatsApp, email, guests and restrictions."
+        }
+      }
+    },
+    "errors": {
+      "generic": "Something went wrong. Try again.",
+      "FEATURE_NOT_IN_PLAN": "Forms are not included in your plan.",
+      "QUOTA_EXCEEDED": "You reached the form limit of your plan ({limit}). Archive a form or upgrade the plan.",
+      "FORM_LINK_SECRET_MISSING": "Personal links are not configured on this server (FORM_LINK_SECRET). The generic link still works.",
+      "FORM_HAS_RESPONSES": "This form has responses and cannot be deleted. Archive it instead.",
+      "INVALID_FORM": "The form has invalid data. Review the highlighted fields.",
+      "INVALID_STATE": "This action is not available for the current status of the form.",
+      "SLUG_TAKEN": "This link address is already in use. Choose another one.",
+      "INVALID_FILE": "This file is not allowed. Use an image up to 5 MB."
+    },
+    "issues": {
+      "name_required": "Give the form a name.",
+      "slug_invalid": "The link address must have 3 to 60 characters: lowercase letters, numbers and hyphens, without a hyphen at the ends.",
+      "slug_reserved": "This link address is reserved. Choose another one.",
+      "locale_invalid": "Choose a language for the form.",
+      "no_fields": "Add at least one block.",
+      "no_input_fields": "Add at least one block that asks for an answer.",
+      "identity_required": "The form accepts the generic link, so it needs a phone block marked as the contact identity.",
+      "identity_not_phone": "Block “{field}”: only a phone block can be the identity.",
+      "identity_duplicate": "Only one block can be the contact identity.",
+      "identity_not_first_input": "Block “{field}”: the identity must be the first block that asks for an answer.",
+      "identity_has_show_if": "Block “{field}”: the identity block cannot depend on another answer.",
+      "key_invalid": "Block “{field}”: the key must have 1 to 40 characters (lowercase letters, numbers and underscore).",
+      "key_duplicate": "Block “{field}”: another block already uses this key.",
+      "type_invalid": "Block “{field}”: unknown block type.",
+      "label_required": "Block “{field}”: write the question or the text.",
+      "options_required": "Block “{field}”: add the options.",
+      "options_too_few": "Block “{field}”: add at least two options.",
+      "option_id_invalid": "Block “{field}”: invalid option identifier.",
+      "option_id_duplicate": "Block “{field}”: two options share the same identifier.",
+      "option_label_required": "Block “{field}”: every option needs a text.",
+      "yes_no_options_invalid": "Block “{field}”: a yes/no block needs the yes and no options.",
+      "show_if_unknown_field": "Block “{field}”: the condition points to a block that does not exist.",
+      "show_if_forward_ref": "Block “{field}”: the condition must depend on a block that comes before it.",
+      "show_if_self_ref": "Block “{field}”: the condition cannot depend on itself.",
+      "show_if_op_invalid": "Block “{field}”: invalid condition.",
+      "jump_to_unknown_field": "Block “{field}”: an option jumps to a block that does not exist.",
+      "jump_to_not_allowed": "Block “{field}”: multiple choice blocks cannot jump to another block.",
+      "jump_to_backward": "Block “{field}”: an option can only jump forward.",
+      "jump_to_self": "Block “{field}”: an option cannot jump to its own block.",
+      "number_range_invalid": "Block “{field}”: the minimum is greater than the maximum.",
+      "step_invalid": "Block “{field}”: the step must be greater than zero.",
+      "max_length_invalid": "Block “{field}”: the maximum length must be at least 1.",
+      "choices_range_invalid": "Block “{field}”: the minimum and maximum choices do not fit the number of options.",
+      "rating_scale_invalid": "Block “{field}”: the rating scale must be from 3 to 10.",
+      "max_files_invalid": "Block “{field}”: the number of files must be from 1 to 5.",
+      "accept_not_allowed": "Block “{field}”: file type not allowed ({detail}).",
+      "points_range_invalid": "Block “{field}”: invalid points range.",
+      "consent_must_be_required": "Block “{field}”: a consent block must be required.",
+      "mapping_target_invalid": "Block “{field}”: this block cannot be mapped to the chosen contact field.",
+      "mapping_tag_option_unknown": "Block “{field}”: a tag points to an option that does not exist.",
+      "band_key_duplicate": "Two score bands share the same identifier.",
+      "band_range_invalid": "A score band has an invalid range.",
+      "band_overlap": "Score bands overlap.",
+      "band_gap": "There is a gap between score bands.",
+      "band_no_zero": "The first score band must start at 0.",
+      "band_open_end_missing": "The last score band must have no maximum.",
+      "redirect_url_not_https": "The redirect address must start with https://.",
+      "theme_color_invalid": "The color “{detail}” is not valid. Use the #rrggbb format.",
+      "embed_origin_invalid": "The embed address “{detail}” is not valid. Use https://domain.",
+      "embed_origins_too_many": "You can register at most 10 embed addresses.",
+      "token_ttl_invalid": "The personal link validity must be from 1 to 365 days."
+    },
+    "share": {
+      "title": "Share the form",
+      "description": "Use the link in your bio, ads or messages, print the QR code, or embed the form on your site.",
+      "loadError": "Could not load the link.",
+      "notPublished": "The form is not published, so visitors will see a “not available” page until you publish it.",
+      "link": "Link",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyError": "Could not copy. Select the text and copy it manually.",
+      "tokenMissing": "Personal links (one per contact) are not configured on this server. This generic link works normally.",
+      "qrAlt": "QR code of the form link",
+      "qrHint": "Generated in your browser. No external service receives the link.",
+      "qrDownload": "Download the QR code",
+      "embed": "Embed on your site",
+      "embedOrigins": "Allowed sites: {origins}.",
+      "embedNoOrigins": "No site is allowed to embed this form yet. Register the site addresses in Settings, otherwise browsers will block it.",
+      "copyEmbed": "Copy the code"
+    },
+    "builder": {
+      "state": {
+        "notFound": "Form not found.",
+        "forbidden": "Only administrators can edit forms.",
+        "loadError": "Could not load the form.",
+        "back": "Back to forms"
+      },
+      "mobile": {
+        "blocks": "Blocks",
+        "preview": "Preview",
+        "panel": "Settings"
+      },
+      "tabs": {
+        "block": "Block",
+        "theme": "Theme",
+        "logic": "Logic",
+        "scoring": "Scoring",
+        "settings": "Settings",
+        "noBlock": "Select a block in the list to edit it."
+      },
+      "bar": {
+        "back": "Back to forms",
+        "name": "Form name",
+        "saving": "Saving…",
+        "saved": "All changes saved",
+        "unsaved": "Unsaved changes",
+        "save": "Save",
+        "savedToast": "Form saved.",
+        "publish": "Publish",
+        "publishedToast": "Form published.",
+        "unpublish": "Unpublish",
+        "unpublishToast": "Form unpublished.",
+        "share": "Share",
+        "more": "More actions",
+        "duplicate": "Duplicate",
+        "duplicatedToast": "Form duplicated.",
+        "archive": "Archive",
+        "archiveConfirm": "Archive “{name}”? It goes offline and stops counting against your form limit. Responses are kept.",
+        "archiveToast": "Form archived.",
+        "restore": "Restore",
+        "restoreToast": "Form restored as a draft.",
+        "delete": "Delete",
+        "deleteConfirm": "Delete “{name}” permanently? This cannot be undone.",
+        "deletedToast": "Form deleted.",
+        "deleteBlockedResponses": "Forms with responses cannot be deleted. Archive it instead.",
+        "deleteBlockedPublished": "Unpublish the form before deleting it.",
+        "archivedNotice": "This form is archived. Restore it to edit.",
+        "issuesTitle": "The form cannot be published yet",
+        "issuesDescription": "Fix the points below and try again.",
+        "issuesClose": "Close"
+      },
+      "blocks": {
+        "add": "Add block",
+        "drag": "Drag to reorder",
+        "untitled": "Untitled block",
+        "identity": "Identity",
+        "required": "Required",
+        "hasLogic": "Has logic",
+        "duplicate": "Duplicate block",
+        "delete": "Delete block",
+        "identityLocked": "This block identifies the contact and cannot be removed while the form accepts the generic link.",
+        "identityNoDuplicate": "The identity block cannot be duplicated.",
+        "deleteWithLogic": "Other blocks ({count}) depend on this one. Their conditions and jumps will be cleared. Delete anyway?"
+      },
+      "palette": {
+        "title": "Add a block",
+        "description": "Each block is one screen on the public page."
+      },
+      "types": {
+        "short_text": {
+          "name": "Short text",
+          "hint": "One line, with optional CPF or CEP mask."
+        },
+        "long_text": {
+          "name": "Long text",
+          "hint": "Several lines for a longer answer."
+        },
+        "email": {
+          "name": "Email",
+          "hint": "Validated email address."
+        },
+        "phone": {
+          "name": "Phone",
+          "hint": "WhatsApp number with area code. Can identify the contact."
+        },
+        "number": {
+          "name": "Number",
+          "hint": "Numeric answer with minimum and maximum."
+        },
+        "date": {
+          "name": "Date",
+          "hint": "Date picker."
+        },
+        "single_select": {
+          "name": "Single choice",
+          "hint": "One option; moves on by itself."
+        },
+        "multi_select": {
+          "name": "Multiple choice",
+          "hint": "Several options, with minimum and maximum."
+        },
+        "dropdown": {
+          "name": "Dropdown",
+          "hint": "A list for many options."
+        },
+        "yes_no": {
+          "name": "Yes / No",
+          "hint": "Two buttons."
+        },
+        "rating": {
+          "name": "Rating",
+          "hint": "A scale from 1 to up to 10."
+        },
+        "file_upload": {
+          "name": "File upload",
+          "hint": "Images, PDF and documents, with size limits."
+        },
+        "statement": {
+          "name": "Statement",
+          "hint": "Only text and media, with a Continue button."
+        },
+        "consent": {
+          "name": "Consent",
+          "hint": "Checkbox that must be accepted. Can record the opt-in."
+        }
+      },
+      "editor": {
+        "content": "Content",
+        "label": "Question",
+        "consentText": "Consent text",
+        "description": "Description (optional)",
+        "required": "Required",
+        "consentRequiredHint": "A consent block must always be accepted.",
+        "identityRequiredHint": "The identity block is always required.",
+        "identity": "Use as contact identity",
+        "identityHint": "When on, the answer identifies (or creates) the contact. It stays the first question.",
+        "identityHintGeneric": "The form accepts the generic link, so this block is required to identify the contact. Turn off “accept the generic link” in Settings to change it.",
+        "options": "Options",
+        "optionsHint": "Points for each option are set in the Scoring tab.",
+        "optionDefault": "Option",
+        "addOption": "Add option",
+        "removeOption": "Remove option",
+        "rules": "Rules",
+        "maxLength": "Maximum length",
+        "mask": "Mask",
+        "maskHint": "Only formats what is typed. It does not validate the document.",
+        "maskNone": "None",
+        "min": "Minimum",
+        "max": "Maximum",
+        "step": "Step",
+        "scale": "Scale (3 to 10)",
+        "scaleHint": "The visitor picks a number from 1 up to this value.",
+        "minChoices": "Minimum choices",
+        "maxChoices": "Maximum choices",
+        "maxFiles": "Maximum files (1 to 5)",
+        "accept": "Accepted types",
+        "acceptHint": "Leave all unchecked to accept every allowed type.",
+        "acceptGroups": {
+          "images": "Images (JPG, PNG, WebP)",
+          "pdf": "PDF",
+          "office": "Word and Excel",
+          "text": "Text and CSV",
+          "audio": "Audio (MP3, OGG)",
+          "video": "Video (MP4)"
+        },
+        "media": "Image or video",
+        "mediaHint": "Shown above the question.",
+        "advanced": "Advanced",
+        "key": "Block key",
+        "keyHint": "Stable name used by conditions and by the answers. Lowercase letters, numbers and underscore.",
+        "keyInvalid": "Invalid or already used. Use 1 to 40 lowercase letters, numbers or underscore.",
+        "mapping": {
+          "title": "Save to the contact",
+          "description": "Only what you map here is written to the contact. Everything else stays in the response.",
+          "target": "Save this answer as",
+          "none": "Do not save to the contact",
+          "contactName": "Contact name",
+          "contactEmail": "Contact email",
+          "contactCompany": "Contact company",
+          "contactOptIn": "Contact opt-in (consent)",
+          "customField": "Custom field",
+          "noCustomFields": "No custom fields yet. Create them in Settings.",
+          "tag": "Tag by option",
+          "tagHint": "Choose the tag added to the contact for each option. Tags are always added, never removed.",
+          "noTag": "No tag",
+          "overwrite": "Overwrite existing value",
+          "overwriteHint": "Off: only fills the field when it is empty."
+        }
+      },
+      "media": {
+        "image": "Image",
+        "upload": "Upload image",
+        "replace": "Replace image",
+        "remove": "Remove",
+        "tooLarge": "The image is too large (maximum 5 MB).",
+        "notAllowed": "This file type is not allowed. Use JPG, PNG, WebP or GIF.",
+        "uploadError": "Could not upload the image. Try again.",
+        "videoPlaceholder": "YouTube or Vimeo link",
+        "useVideo": "Use video",
+        "videoHint": "Only YouTube and Vimeo links are accepted.",
+        "videoInvalid": "This link is not a valid YouTube or Vimeo video."
+      },
+      "theme": {
+        "brand": "Brand",
+        "logo": "Logo",
+        "colors": {
+          "primary": "Highlight",
+          "background": "Background",
+          "text": "Text",
+          "button": "Button"
+        },
+        "lowContrast": "The text color has low contrast against the background (below 4.5:1). It may be hard to read.",
+        "font": "Font",
+        "fonts": {
+          "system": "System",
+          "serif": "Serif",
+          "rounded": "Rounded",
+          "mono": "Monospace"
+        },
+        "radius": "Corners",
+        "radii": {
+          "rounded": "Rounded",
+          "square": "Square"
+        },
+        "language": "Form language",
+        "languageHint": "Buttons and messages of the public page use this language.",
+        "welcome": "Welcome screen",
+        "welcomeTitle": "Title",
+        "welcomeDescription": "Description",
+        "welcomeButton": "Start button",
+        "welcomeMedia": "Image or video",
+        "thankYou": "Thank you screen",
+        "thankTitle": "Title",
+        "thankBody": "Message",
+        "whatsappCta": "Button to talk on WhatsApp",
+        "whatsappCtaHint": "Opens a chat with your default WhatsApp number.",
+        "whatsappText": "Message pre-filled in the chat",
+        "redirectUrl": "Redirect after sending",
+        "redirectUrlHint": "Optional. Must start with https://. The visitor is redirected after 3 seconds.",
+        "redirectUrlInvalid": "The address must start with https://."
+      },
+      "logic": {
+        "intro": "Logic for the block “{block}”. Conditions only look at blocks that come before it.",
+        "showIf": "Show this block only if…",
+        "showIfHint": "One condition on a previous block.",
+        "identityNoLogic": "The identity block is always shown.",
+        "noPrevious": "There is no previous block to depend on.",
+        "whenBlock": "Previous block",
+        "always": "Always show",
+        "operator": "Condition",
+        "ops": {
+          "eq": "is",
+          "neq": "is not",
+          "contains": "contains",
+          "answered": "was answered"
+        },
+        "value": "Value",
+        "jump": "Jump after answering",
+        "jumpHint": "Choose where to go for each option. The blocks in between are skipped.",
+        "next": "Next block",
+        "multiNoJump": "Multiple choice blocks cannot jump to another block.",
+        "dependents": "Blocks that depend on this one"
+      },
+      "scoring": {
+        "intro": "Give points to answers and group the total into bands. The score is always calculated on the server when the form is sent.",
+        "points": "Points",
+        "pointsHint": "Points per option, or per value range for numbers and ratings.",
+        "noScoredBlocks": "No block can score yet. Add a choice, number or rating block.",
+        "pointsFor": "Points for",
+        "rangeFrom": "From",
+        "rangeTo": "To",
+        "rangePoints": "Points",
+        "addRange": "Add range",
+        "removeRange": "Remove range",
+        "maxScore": "Highest possible score: {max}",
+        "bands": "Bands",
+        "bandsHint": "Each band applies its actions when the total falls inside it. Bands must start at 0 and cover every score.",
+        "bandDefault": "Band",
+        "bandLabel": "Band name",
+        "bandMin": "From (points)",
+        "bandMax": "To (points)",
+        "bandOpen": "No maximum",
+        "addBand": "Add band",
+        "removeBand": "Remove band",
+        "bandIssues": {
+          "band_key_duplicate": "Two bands share the same identifier.",
+          "band_range_invalid": "A band has an invalid range.",
+          "band_overlap": "Bands overlap.",
+          "band_gap": "There is a gap between bands.",
+          "band_no_zero": "The first band must start at 0.",
+          "band_open_end_missing": "The last band must have no maximum."
+        },
+        "actionTags": "Tags to add",
+        "noTags": "No tags yet. Create them in Settings.",
+        "actionDeal": "Create a deal",
+        "noDeal": "Do not create a deal",
+        "dealStage": "Stage",
+        "dealTitle": "Deal title",
+        "dealTitleHint": "Uses the contact name and the form name, as in the example shown.",
+        "dealAssign": "Assign the deal",
+        "assignNone": "Do not assign",
+        "assignSpecific": "To a specific member",
+        "assignRoundRobin": "Round robin between members",
+        "actionNotify": "Notify members"
+      },
+      "settings": {
+        "link": "Link and identity",
+        "slug": "Link address",
+        "suggestSlug": "Suggest",
+        "slugInvalid": "Use 3 to 60 lowercase letters, numbers or hyphens, without a hyphen at the ends.",
+        "slugReserved": "This address is reserved. Choose another one.",
+        "slugPublishedWarning": "The form is published. Changing the address breaks links already shared.",
+        "acceptGeneric": "Accept the generic link",
+        "acceptGenericHint": "On: anyone with the link can answer, and the form asks for the phone first. Off: only personal links work.",
+        "confirmPhone": "Confirm the phone even with a personal link",
+        "confirmPhoneHint": "Off: a personal link skips the phone question.",
+        "tokenTtl": "Personal link validity (days)",
+        "tokenTtlHint": "After this period the link asks for the phone again.",
+        "tokenMissing": "Personal links are not configured on this server (FORM_LINK_SECRET). The generic link works normally.",
+        "answers": "Responses and protection",
+        "multiple": "Allow more than one response per contact",
+        "multipleHint": "Off: a contact who already answered sees a thank-you message instead.",
+        "turnstile": "Cloudflare Turnstile",
+        "turnstileHint": "Adds a bot check before sending.",
+        "turnstileMissing": "Not configured on this server (TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY).",
+        "honeypot": "A hidden field and a minimum filling time already protect every form against bots.",
+        "noindex": "Hide from search engines",
+        "noindexHint": "Adds the noindex tag to the public page.",
+        "embed": "Embed on a site",
+        "embedHint": "Only the registered sites can show this form inside an iframe. Use https://domain, without a path.",
+        "addOrigin": "Add",
+        "removeOrigin": "Remove site",
+        "originInvalid": "Invalid or already added. Use https://domain, without a path.",
+        "portalAndAi": "Contact area and AI",
+        "portalAndAiHint": "Prepared here and used by the integrations that come next.",
+        "portal": "Visibility in the contact area",
+        "portalOptions": {
+          "none": "Not shown",
+          "fill": "The contact can fill it",
+          "responses": "The contact sees own responses",
+          "both": "Fill and see responses"
+        },
+        "aiOfferable": "The AI may offer this form",
+        "aiOfferableHint": "Lets the AI assistant send the link when it fits the conversation.",
+        "aiHint": "When to offer",
+        "aiHintHint": "A short instruction for the AI, e.g. when the lead asks for a quote.",
+        "internal": "Internal note",
+        "description": "Description",
+        "descriptionHint": "Only your team sees this."
+      },
+      "preview": {
+        "phone": "Phone",
+        "desktop": "Desktop",
+        "restart": "Restart",
+        "phoneLabel": "Phone preview",
+        "desktopLabel": "Desktop preview",
+        "filesDisabled": "Preview: file upload is disabled."
+      }
+    }
   }
 }
