@@ -223,6 +223,16 @@ export const RATE_LIMITS = {
    *  limite de taxa da Meta é por WABA (200/h no padrão) — daí 6/min,
    *  somado ao 1 leitura forçada por WABA a cada 60 s do servidor. */
   billingRefresh: { limit: 6, windowMs: 60_000 },
+  /** Rotas PÚBLICAS dos formulários (`/api/forms/public/[slug]/**`, SPEC
+   *  085 §7.2), por IP — o visitante não tem sessão. `start` cria contato
+   *  e resposta, então é o mais apertado depois do envio; `autosave` é um
+   *  PATCH por bloco respondido (um formulário de 20 blocos preenchido
+   *  rápido faz uma rajada); `upload` assina URL de Storage; `submit`
+   *  dispara mapeamento, faixa e atividade. */
+  formStart: { limit: 30, windowMs: 60_000 },
+  formAutosave: { limit: 120, windowMs: 60_000 },
+  formUpload: { limit: 20, windowMs: 60_000 },
+  formSubmit: { limit: 10, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

@@ -376,6 +376,11 @@ export interface PublicFormPayload {
     allow_multiple_responses: boolean;
     confirm_phone_with_token: boolean;
     turnstile_site_key: string | null;
+    /**
+     * `false` quando a quota de bytes de upload da conta acabou (PRD D-10):
+     * só o bloco de arquivo some (o resto do formulário segue).
+     */
+    uploads_available: boolean;
   };
   /** Blocos com entrada × 10 s (SPEC §4.2 item 2). */
   estimated_seconds: number;

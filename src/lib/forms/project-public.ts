@@ -37,6 +37,8 @@ export interface ProjectPublicOptions {
   identity: PublicIdentityMode;
   /** `TURNSTILE_SITE_KEY` quando o formulário tem Turnstile ligado e o deploy tem a chave. */
   turnstileSiteKey?: string | null;
+  /** `false` com a quota de upload cheia (PRD D-10); padrão `true`. */
+  uploadsAvailable?: boolean;
 }
 
 function projectMedia(
@@ -167,6 +169,7 @@ export function toPublicPayload(
         settings.turnstile === true && opts.turnstileSiteKey
           ? opts.turnstileSiteKey
           : null,
+      uploads_available: opts.uploadsAvailable !== false,
     },
     estimated_seconds: inputCount * SECONDS_PER_INPUT_FIELD,
   };

@@ -740,3 +740,60 @@ select count(*) filter (where prosecdef and has_function_privilege('anon', oid, 
        count(*) filter (where prosecdef and has_function_privilege('authenticated', oid, 'EXECUTE')) as definer_auth
 from pg_proc where pronamespace = 'public'::regnamespace;
 ```
+
+### 15.6. Correções aplicadas (2026-11-19)
+
+Sessão de correção da F5 (Sonnet 5.5; a recomendação era Opus 5.5 pela reescrita de funções de segurança, e as duas funções alteradas foram conferidas contra o SQL vivo do `vn` antes de escrever a 099). Sem git. **A migração 099 está escrita e NÃO foi aplicada:** o mantenedor deu o OK no diálogo, mas o `apply_migration` foi recusado no momento da chamada, e a chamada não foi repetida. Nada foi escrito no `vn` nesta sessão; as consultas foram só `SELECT` (projeto confirmado por `get_project_url`, ref `awylbf…`).
+
+| ID                  | Situação                 | Arquivo                                                                           | Evidência                                                                                                                                                                                                                                                                                                                                     |
+| ------------------- | ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F5-07               | **Corrigido**            | `src/lib/contact-portal/isolation.test.ts`                                        | Lista fechada das 17 RPCs `portal_*` (conferida contra os `CREATE FUNCTION public.portal_*` de 093–096), mais um teste que cobra a lista contra as migrações. 8 de 8 passam. `account-api.ts` já tinha contornado com `Omit`; o comentário dele ficou obsoleto                                                                                |
+| F5-03               | **Parcial** (código)     | `src/lib/contact-portal/request.ts`, `request.test.ts`                            | `getClientIp` lê o **último** valor de `x-forwarded-for`, com fallback `x-real-ip` e `unknown`. Testes: cabeçalho forjado com vários valores, valor único, vazio, só vírgulas, vírgula no fim e ausente. Hash inalterado. **Pendentes (mantenedor):** teste de campo do Traefik (§15.5), `rateLimit` em `/area/api` e corpo máximo no Traefik |
+| F5-04               | **Pronto, não aplicado** | `supabase/migrations/099_contact_portal_session_ceiling.sql` (local, fora do git) | `portal_resolve_session` exige `s.created_at > NOW() - make_interval(secs => p_ttl_s)`. Assinatura, retorno e privilégios intactos; asserções `DO` no fim. Estado vivo do `vn` conferido em 2026-11-19: ainda sem o teto (corpo da 093)                                                                                                       |
+| F5-10               | **Pronto, não aplicado** | idem                                                                              | `portal_account_settings_set` apaga `session_access` da conta, e as sessões que ficam sem acesso, quando `enabled` passa de `true` a `false` (sob `FOR UPDATE` na linha de `settings`). Quem tem acesso em outra conta continua logado nela. Perda do item do plano segue preservando (D-6)                                                   |
+| F5-06               | **Corrigido**            | `next.config.ts`, `src/next-config.test.ts`                                       | Regra `/area/:path*` com `Content-Security-Policy` **aplicado**; `'unsafe-eval'` só fora de produção. 54 testes passam. Em `next start` (build de produção), `curl -I`: `/area` e `/area/c/ZZZZZZZZ` saem com a política; `/login` e `/dashboard` seguem só com a Report-Only. `/area` hidratou e o console ficou sem violações               |
+| F5-05               | **Parcial** (TypeScript) | `src/lib/contact-portal/journeys.ts`, `journeys.test.ts`                          | O envio em segundo plano da J3/J5 não envia a contato `opted_out` (nem se a leitura falhar), e registra só o motivo no log. A resposta da rota e o piso de tempo não mudam; a J2 permanece. **Resta para a migração da F7:** `portal_request_code` ainda grava e consome o código do contato `opted_out`; teto por conta (`send_account`)     |
+| F5-13               | **Proposto**             | conta `5e0564ad-a8f6-4dec-89a1-7e7bdc1775be`                                      | Proposta abaixo. Não executado                                                                                                                                                                                                                                                                                                                |
+| F5-01               | Pendente                 | SPEC 081 (090/091)                                                                | Tarefa própria, com OK do mantenedor; continua bloqueando a F6                                                                                                                                                                                                                                                                                |
+| F5-02               | Pendente                 | `plans` (`valen_ranch_personal`)                                                  | Decisão do mantenedor; bloqueia a F6                                                                                                                                                                                                                                                                                                          |
+| F5-08               | Pendente (F7)            | `request.ts` (`hashIp`)                                                           | HMAC do IP, junto com a migração do teto diário                                                                                                                                                                                                                                                                                               |
+| F5-09               | Pendente (F7)            | `limits.ts`, 095                                                                  | Teto diário por telefone (PRD 082 D-10)                                                                                                                                                                                                                                                                                                       |
+| F5-11, F5-12, F5-14 | Sem mudança (INFO)       | —                                                                                 | Como na §15.2                                                                                                                                                                                                                                                                                                                                 |
+
+**Gate:** `typecheck`, `i18n:check`, `lint` (0 erros, 7 avisos antigos), `test` (325 arquivos, 4.672 testes) e `build` passam. `format:check` acusa só `docs/` e `docker/runtime-env.mjs`, o baseline aceito.
+
+**`/code-review high` sobre estas correções:** 8 achados; 2 corrigidos (log do motivo da supressão e leitura de opt-in em paralelo com `getSettings`) e 6 registrados como follow-up:
+
+- O IP assume **um** proxy confiável; com outro proxy ou CDN antes do Traefik todos cairiam no mesmo balde (o inverso de F5-03). O teste do Traefik antes da F6 decide.
+- `peek` e `redeem` de `/api/invitations/[token]` têm cópias locais de `getClientIp` que ainda leem o **primeiro** valor. Usar um helper único.
+- O opt-out é filtrado depois de o banco gravar o código (ver F5-05, parcial).
+- A regex do teste de isolamento só casa o nome entre aspas simples ou duplas.
+- Comentário obsoleto em `src/lib/forms/account-api.ts` (SPEC 085).
+- `contact_portal.housekeep()` não apaga sessões acima do teto de 30 dias (ficam inertes até `expires_at`); entrariam na 099 ou na migração da F7.
+
+**F5-13: proposta (não executada).** Com a 099 aplicada, uma única chamada desliga a área da conta de teste e encerra as 2 sessões vivas (a função nova faz as duas coisas):
+
+```sql
+select public.portal_account_settings_set(
+  '5e0564ad-a8f6-4dec-89a1-7e7bdc1775be'::uuid,
+  '{"enabled": false}'::jsonb,
+  null::uuid
+);
+```
+
+Conferência por `SELECT`: `enabled = false` em `contact_portal.settings` e zero linhas em `contact_portal.sessions` e `session_access` desta conta. Alternativa sem a 099: desligar na UI da conta e chamar `DELETE /api/contact-portal/contacts/<id>/sessions` para cada contato com sessão.
+
+**Conferir a 099 pelos objetos depois de aplicada:**
+
+```sql
+select p.proname,
+       p.prosrc like '%s.created_at > NOW() - make_interval%' as teto,
+       p.prosrc like '%DELETE FROM contact_portal.sessions%' as encerra_sessoes,
+       has_function_privilege('anon', p.oid, 'EXECUTE') as anon,
+       has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role
+from pg_proc p
+where p.pronamespace = 'public'::regnamespace
+  and p.proname in ('portal_resolve_session', 'portal_account_settings_set');
+```
+
+Depois, `get_advisors` (security): nenhuma `portal_*` em WARN.

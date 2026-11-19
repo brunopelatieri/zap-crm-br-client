@@ -97,16 +97,29 @@ export async function requestAccessCode(
         // de tempo), então nada denuncia isso a quem pediu. Ele continua
         // com a J2 (palavra-chave), que é ele quem inicia. Leitura que
         // falha ou contato que sumiu: não envia (falha fechada).
-        const { data: contact } = await db
-          .from('contacts')
-          .select('opt_in_status')
-          .eq('id', contactId)
-          .eq('account_id', accountId)
-          .maybeSingle();
-        if (!contact || contact.opt_in_status === 'opted_out') return;
-
-        const settings =
-          await createPortalAccountService(db).getSettings(accountId);
+        const [{ data: contact, error: contactError }, settings] =
+          await Promise.all([
+            db
+              .from('contacts')
+              .select('opt_in_status')
+              .eq('id', contactId)
+              .eq('account_id', accountId)
+              .maybeSingle(),
+            createPortalAccountService(db).getSettings(accountId),
+          ]);
+        if (!contact || contact.opt_in_status === 'opted_out') {
+          // Só o motivo no log: nunca telefone nem código.
+          console.warn(
+            `[contact-portal] code not delivered (${
+              contactError
+                ? 'contact_read_failed'
+                : contact
+                  ? 'opted_out'
+                  : 'contact_not_found'
+            })`
+          );
+          return;
+        }
         if (!settings) return;
         const [authTemplate, account] = await Promise.all([
           loadAuthTemplate(db, accountId, settings.authTemplateId),
