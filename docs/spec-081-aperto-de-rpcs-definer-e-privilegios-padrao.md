@@ -1,15 +1,15 @@
 # SPEC 081 — Aperto das RPCs `SECURITY DEFINER` e dos privilégios padrão
 
-|                   |                                                                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**        | Migrações escritas e testadas num Postgres descartável. **Nada aplicado no `vn`.** O achado no banco real ainda não foi confirmado nem descartado |
-| **Data**          | 2026-11-05                                                                                                                                        |
-| **Origem**        | Porte da SPEC 080 do Valen Ranch (migrações 090, 091 e 092 de lá).                                                                                |
-| **Código do app** | Nenhum em `src/`                                                                                                                                  |
-| **Migrações**     | `090_tighten_definer_rpc_grants_and_search_path.sql`, `091_default_privileges_closed.sql`                                                         |
-| **Conferência**   | `scripts/verify-090-rpc-grants.sql` (só lê)                                                                                                       |
-| **Contexto**      | [`supabase-rls-mcp`](./context/supabase-rls-mcp.md) (D-19, D-20) · [`status.md`](./context/status.md)                                             |
-| **Depende disto** | [`PRD 082`](./prd-082-area-do-contato.md) D-8: a área do contato só vai a produção depois desta SPEC aplicada no `vn`                             |
+|                   |                                                                                                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**        | **090 e 091 aplicadas no `vn` em 2026-11-19** (SQL Editor, como `postgres`). Achado confirmado antes e fechado depois, conferido por script e advisor (§6). **Falta a fumaça no app (§5 passo 7)** |
+| **Data**          | 2026-11-05                                                                                                                                                                                         |
+| **Origem**        | Porte da SPEC 080 do Valen Ranch (migrações 090, 091 e 092 de lá).                                                                                                                                 |
+| **Código do app** | Nenhum em `src/`                                                                                                                                                                                   |
+| **Migrações**     | `090_tighten_definer_rpc_grants_and_search_path.sql`, `091_default_privileges_closed.sql`                                                                                                          |
+| **Conferência**   | `scripts/verify-090-rpc-grants.sql` (só lê)                                                                                                                                                        |
+| **Contexto**      | [`supabase-rls-mcp`](./context/supabase-rls-mcp.md) (D-19, D-20) · [`status.md`](./context/status.md)                                                                                              |
+| **Depende disto** | [`PRD 082`](./prd-082-area-do-contato.md) D-8: a área do contato só vai a produção depois desta SPEC aplicada no `vn`                                                                              |
 
 > `/supabase` e `/scripts` estão no `.gitignore`: os três arquivos SQL acima não entram em commit. Só esta SPEC e os `.md` de contexto vão para o Git.
 
@@ -137,7 +137,46 @@ Rode no diretório do ZAP, com o projeto `vn` confirmado pelo mantenedor. Os pas
 
 ---
 
-## 6. Pontas abertas
+## 6. Resultado da aplicação no `vn` (2026-11-19)
+
+Projeto confirmado pelo mantenedor (`get_project_url` → `awylbfsywsrnkztvovud`). Passos 1–3 e 6 lidos por uma sessão com `execute_sql` e `get_advisors` (só leitura); passos 4 e 5 aplicados **pelo mantenedor no SQL Editor**, 090 e 091 em execuções separadas. Como não passaram por `apply_migration`, **não há registro em `schema_migrations`**: a prova é o script.
+
+### Antes (passo 3)
+
+| Linha                         | Resultado                                                                                                                | Conclusão                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `achado`                      | `exec_anon=true` e `exec_authenticated=true` nas 4 funções; `exec_public=true` nas 3 que não são `recount_account_usage` | **Achado confirmado**    |
+| `definer_anon`/`definer_auth` | 23 / 30                                                                                                                  | Bate com o §1            |
+| `assinatura`, `definer_extra` | vazias                                                                                                                   | A 090 podia ser aplicada |
+| `default_acl`                 | `f`, `r` e `S` do `postgres` com `anon`, `authenticated`, `service_role`                                                 | Bate com o §1            |
+| `plans_policy`                | `plans_select_catalog` e `plans_select_own` ambas `PUBLIC`                                                               | Estado de antes da 090   |
+
+### Depois (passo 6)
+
+| Conferência                   | Esperado                                                         | Obtido                                                                |
+| ----------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `achado` (4 funções)          | fechadas                                                         | `anon`, `authenticated` e `PUBLIC` em `false`; só `service_role=true` |
+| `definer_anon`                | 1, `peek_invitation(text)`                                       | **1**, `peek_invitation(text)`                                        |
+| `definer_auth`                | 20                                                               | **20**                                                                |
+| `assinatura`, `definer_extra` | vazias                                                           | **vazias**                                                            |
+| `default_acl` do `postgres`   | função `{postgres, service_role}`; tabela e sequência sem `anon` | **bate**; o do `supabase_admin` não muda (previsto na 091)            |
+| `plans_select_own`            | só `authenticated`                                               | **`authenticated`**; `plans_select_catalog` segue `PUBLIC`            |
+| Lints 0028, 0029, 0011, 0014  | 1, 20, 1, 1                                                      | 1, 20, 1 e **2** (ver abaixo)                                         |
+
+**Divergências, nenhuma causada pela 090/091:**
+
+- **0014 com 2, não 1.** `pg_net` também está em `public`, além do `vector` (D-5). Risco aceito, a mesma lógica; mover é outra tarefa.
+- **0008 (INFO, 16 tabelas com RLS e sem policy):** 6 em `contact_portal` e 10 em `public`. Fail-closed; não consta do §5 e não vem desta SPEC.
+- **`auth_leaked_password_protection` (WARN):** configuração do painel de Auth, fora desta SPEC.
+
+### Pendente
+
+- **Passo 7, fumaça no app:** login, cadastro, painel, inbox, criar e apagar contato, ingestão por `/api/v1/ingest/contact`, disparo, abrir `/join/[token]` sem sessão e aceitar o convite. Resultado ainda não registrado. Só depois disso a F5-01 da SPEC 083 §15 pode ser dada como fechada e a D-8 do PRD 082 satisfeita.
+- Se algo quebrar: devolver o `GRANT` só da função afetada, só ao papel do caminho quebrado (§5, fim).
+
+---
+
+## 7. Pontas abertas
 
 - **Numeração da área do contato.** Resolvida em 2026-11-05: a 092 foi tomada pelo `app_id` por canal (`092_whatsapp_config_app_id.sql`, já aplicada no `vn`), então as migrações da área passam a **093/094/095**, mais uma 096 só do ZAP (guarda por plano). O antigo `docs/feature-spec-area-do-contato-zap-crm-br.md` foi substituído por [`PRD 082`](./prd-082-area-do-contato.md) e [`SPEC 083`](./spec-083-area-do-contato.md), que já trazem esses números. O PRD 082 D-8 exige esta SPEC aplicada no `vn` antes da primeira conta real com a área.
 - **Registro de migrações no `vn`.** `list_migrations` para em 085 e não prova nada. Confira pelo script.
