@@ -2,7 +2,7 @@
 
 > **O que é este arquivo:** o PRD do ZAP CRM BR para a **área do contato**, feature já implementada no Valen Ranch (SPEC 084, roteiro de teste manual e SPEC 085 daquele repositório, `main` em `e778c97`) e portada para cá. Substitui o antigo `docs/feature-spec-area-do-contato-zap-crm-br.md`, que misturava produto e execução num arquivo só e não seguia a numeração da casa. O detalhe técnico está na SPEC 083.
 
-**Status:** decisões D-1…D-11 (§4) **ratificadas pelo mantenedor em 2026-11-05**. Próxima fase: F1 (§9). Nada foi alterado ainda em `src/`, `messages/` ou `supabase/`.
+**Status:** decisões D-1…D-11 (§4) **ratificadas pelo mantenedor em 2026-11-05**. F1 a F3 feitas em 2026-11-05/06 (código e migrações 093–096 em produção no `vn`). **F4 encerrada por declaração do mantenedor em 2026-11-19** (SPEC 083 §14.1: só os cenários 1 e 3 foram medidos como aprovados). Próxima fase: F5, revisão de segurança. F6 espera a SPEC 081 no `vn` e o texto de aceite definitivo (D-8, D-9).
 **Data:** 2026-11-05.
 **SPEC de execução:** [`docs/spec-083-area-do-contato.md`](./spec-083-area-do-contato.md).
 **Pré-requisito em produção:** [`SPEC 081`](./spec-081-aperto-de-rpcs-definer-e-privilegios-padrao.md) aplicada no `vn` (D-8).
