@@ -2,7 +2,7 @@
 
 |                   |                                                                                                                                                                                                    |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**        | **090 e 091 aplicadas no `vn` em 2026-11-19** (SQL Editor, como `postgres`). Achado confirmado antes e fechado depois, conferido por script e advisor (§6). **Falta a fumaça no app (§5 passo 7)** |
+| **Status**        | **090 e 091 aplicadas no `vn` em 2026-11-19** (SQL Editor, como `postgres`). Achado confirmado antes e fechado depois, conferido por script e advisor (§6). **Fumaça no app parcial (§6): leituras e acesso `anon` passaram; faltam cadastro, criar/apagar contato, ingestão, envio de disparo e aceitar convite** |
 | **Data**          | 2026-11-05                                                                                                                                                                                         |
 | **Origem**        | Porte da SPEC 080 do Valen Ranch (migrações 090, 091 e 092 de lá).                                                                                                                                 |
 | **Código do app** | Nenhum em `src/`                                                                                                                                                                                   |
@@ -169,10 +169,35 @@ Projeto confirmado pelo mantenedor (`get_project_url` → `awylbfsywsrnkztvovud`
 - **0008 (INFO, 16 tabelas com RLS e sem policy):** 6 em `contact_portal` e 10 em `public`. Fail-closed; não consta do §5 e não vem desta SPEC.
 - **`auth_leaked_password_protection` (WARN):** configuração do painel de Auth, fora desta SPEC.
 
+### Fumaça no app (passo 7), parcial, 2026-11-19
+
+Feita por uma sessão do Claude no navegador do app, já logada em `zap.local.ia.br` (conta de produção do `vn`), mais chamadas REST como `anon` com a chave pública. Nenhum dado real foi criado, alterado ou apagado.
+
+| Item do §5 passo 7                  | Resultado                                                                                                                                                                                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Painel                              | **Passou.** Carrega, com os cartões e o gráfico                                                                                                                                                                                                    |
+| Caixa de entrada                    | **Passou.** Filtro Todas lista as 229 conversas. Nenhuma conversa foi aberta, para não enviar confirmação de leitura a clientes reais                                                                                                              |
+| Contatos e funis                    | **Passou.** Lista de contatos (RLS e predicados `is_account_member`) e o quadro de funis (232 negócios) carregam                                                                                                                                   |
+| Disparos                            | **Passou só a leitura.** A lista de campanhas carrega. **Nada foi enviado**                                                                                                                                                                        |
+| Criar contato                       | **Inconclusivo.** A conta está na cota do plano `vn_personal` (1437 de 1437): o app respondeu "Limite de contatos atingido", e a API devolveu 400. É a cota funcionando, e o `recount_account_usage` já respondia sem `42501`. Não tem relação com a 090/091 |
+| `plans` como `anon`                 | **200**                                                                                                                                                                                                                                            |
+| `peek_invitation` como `anon`       | **200**, `{"ok": false, "reason": "not_found"}` com token inexistente (o parâmetro é `p_token_hash`)                                                                                                                                               |
+| `/join/[token]` sem sessão          | **200**                                                                                                                                                                                                                                            |
+| `contacts` como `anon`              | **42501** (`permission denied for function is_account_member`), como a SPEC prevê em "Efeito colateral aceito"                                                                                                                                     |
+| `recount_account_usage` como `anon` | **42501**                                                                                                                                                                                                                                          |
+
+Logs do `vn` depois da aplicação: os únicos `permission denied` foram às 14:50, em `portal_public_account` e `plan_feature_strict`, chamadas como `anon` em sondagem de isolamento; ambas são só `service_role` por desenho (093–096). Os 409 em `system_notifications` (índice de dedupe) já ocorriam em 17 e 18/11.
+
 ### Pendente
 
-- **Passo 7, fumaça no app:** login, cadastro, painel, inbox, criar e apagar contato, ingestão por `/api/v1/ingest/contact`, disparo, abrir `/join/[token]` sem sessão e aceitar o convite. Resultado ainda não registrado. Só depois disso a F5-01 da SPEC 083 §15 pode ser dada como fechada e a D-8 do PRD 082 satisfeita.
-- Se algo quebrar: devolver o `GRANT` só da função afetada, só ao papel do caminho quebrado (§5, fim).
+Não cobertos pela sessão, a cargo do mantenedor:
+
+- **Cadastro** de conta nova e **aceitar o convite** (exigem criar conta e digitar senha).
+- **Criar e apagar contato.** A conta de produção está na cota; usar uma conta de teste ou aumentar o limite temporariamente.
+- **Ingestão** por `/api/v1/ingest/contact` (o plano `vn_personal` tem `api_v1_enabled: false`; o caminho usa `supabaseAdmin`, e o `service_role` manteve o `EXECUTE`).
+- **Envio de disparo** (o plano tem `broadcasts_enabled: false`).
+
+Só depois disso a F5-01 da SPEC 083 §15 pode ser dada como fechada e a D-8 do PRD 082 satisfeita. Se algo quebrar: devolver o `GRANT` só da função afetada, só ao papel do caminho quebrado (§5, fim).
 
 ---
 

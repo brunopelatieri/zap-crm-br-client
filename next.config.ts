@@ -116,24 +116,23 @@ function contactPortalCsp(): string {
  * cookies e Vimeo), as imagens assinadas e o PUT direto ao Storage.
  */
 function formPageSecurityHeaders() {
-  return SECURITY_HEADERS.filter((h) => h.key !== 'X-Frame-Options').map(
-    (h) =>
-      h.key === 'Content-Security-Policy-Report-Only'
-        ? {
-            key: h.key,
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https:",
-              "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co",
-              'frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com',
-              "base-uri 'self'",
-              "form-action 'self'",
-            ].join('; '),
-          }
-        : h
+  return SECURITY_HEADERS.filter((h) => h.key !== 'X-Frame-Options').map((h) =>
+    h.key === 'Content-Security-Policy-Report-Only'
+      ? {
+          key: h.key,
+          value: [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob: https:",
+            "font-src 'self' data:",
+            "connect-src 'self' https://*.supabase.co",
+            'frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com https://player.vimeo.com',
+            "base-uri 'self'",
+            "form-action 'self'",
+          ].join('; '),
+        }
+      : h
   );
 }
 

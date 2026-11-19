@@ -159,6 +159,20 @@ describe('toPublicPayload — contrato E-9 (PRD 084 R-5)', () => {
     expect(off.settings.turnstile_site_key).toBeNull();
   });
 
+  it('uploads_available: verdadeiro por padrão, falso quando a quota de upload acabou', () => {
+    const { form, fields } = loadedForm();
+    expect(
+      toPublicPayload(form, fields, { identity: 'phone' }).settings
+        .uploads_available
+    ).toBe(true);
+    expect(
+      toPublicPayload(form, fields, {
+        identity: 'phone',
+        uploadsAvailable: false,
+      }).settings.uploads_available
+    ).toBe(false);
+  });
+
   it('redirect sem https é descartado na projeção', () => {
     const form = makeForm({
       theme: { thank_you: { redirect_url: 'http://inseguro.com' } },

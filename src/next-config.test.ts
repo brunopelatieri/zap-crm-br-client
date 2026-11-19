@@ -187,3 +187,58 @@ describe('Cache-Control das páginas da CRM (SPEC 083 §9)', () => {
     expect(await cacheControlFor('/_next/image')).toBeNull();
   });
 });
+
+describe('cabeçalhos da página pública dos formulários (SPEC 085 E-12)', () => {
+  it.each(['/f/captacao', '/f/captacao/'])(
+    '%s NÃO sai com X-Frame-Options (o middleware decide por formulário)',
+    async (path) => {
+      expect(await headerFor(path, 'X-Frame-Options')).toBeNull();
+    }
+  );
+
+  it('nem o CSP Report-Only de /f/** manda frame-ancestors fixo', async () => {
+    const ro = await headerFor(
+      '/f/captacao',
+      'Content-Security-Policy-Report-Only'
+    );
+    expect(ro).not.toBeNull();
+    expect(ro).not.toContain('frame-ancestors');
+    // O que a página de fato carrega.
+    expect(ro).toContain('https://challenges.cloudflare.com');
+    expect(ro).toContain('https://www.youtube-nocookie.com');
+    expect(ro).toContain('https://*.supabase.co');
+  });
+
+  it.each([
+    '/',
+    '/dashboard',
+    '/forms',
+    '/forms/abc',
+    '/fx',
+    '/api/forms/public/captacao/start',
+    '/api/forms',
+    '/area',
+    '/login',
+  ])('%s (fora de /f/) segue com X-Frame-Options: DENY', async (path) => {
+    expect(await headerFor(path, 'X-Frame-Options')).toBe('DENY');
+  });
+
+  it('o restante dos cabeçalhos de segurança continua valendo em /f/**', async () => {
+    expect(await headerFor('/f/captacao', 'X-Content-Type-Options')).toBe(
+      'nosniff'
+    );
+    expect(
+      await headerFor('/f/captacao', 'Strict-Transport-Security')
+    ).toContain('max-age=');
+    expect(await headerFor('/f/captacao', 'Referrer-Policy')).toBe(
+      'strict-origin-when-cross-origin'
+    );
+  });
+
+  it('a página e a API pública são privadas, sem cache compartilhado', async () => {
+    expect(await cacheControlFor('/f/captacao')).toBe('private, no-store');
+    expect(await cacheControlFor('/api/forms/public/captacao/submit')).toBe(
+      'no-store'
+    );
+  });
+});

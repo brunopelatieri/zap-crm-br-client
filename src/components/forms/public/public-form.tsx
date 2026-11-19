@@ -156,6 +156,7 @@ export function PublicForm({
   useEffect(() => {
     if (!jumpTo) return;
     if (fields.some((f) => f.key === jumpTo)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setErrorCode(null);
       // Mesmo bloco → mesmo objeto: sem render nem efeito de foco a cada tecla
       // digitada no painel do construtor.
@@ -170,6 +171,7 @@ export function PublicForm({
   // O bloco da tela foi apagado/renomeado no construtor: volta ao início.
   useEffect(() => {
     if (screen.kind === 'field' && !fields.some((f) => f.key === screen.key)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setScreen({ kind: 'welcome' });
     }
   }, [fields, screen]);
@@ -291,14 +293,16 @@ export function PublicForm({
         const r = await live.submit(finalAnswers, turnstileToken);
         setSubmitting(false);
         if (!r.ok) {
+          // O token do Turnstile é de uso único: em QUALQUER recusa o widget
+          // recomeça, senão o reenvio corrigido sairia com um token gasto.
+          setTurnstileToken(null);
+          setTurnstileNonce((n) => n + 1);
           const first = r.errors?.[0];
           if (first && fields.some((f) => f.key === first.key)) {
             setErrorCode(first.code as AnswerErrorCode);
             setScreen({ kind: 'field', key: first.key });
             return;
           }
-          setTurnstileToken(null);
-          setTurnstileNonce((n) => n + 1);
           handleServerCode(r.code);
           return;
         }
@@ -312,6 +316,9 @@ export function PublicForm({
 
   const advance = useCallback(
     async (from: PublicField, answersNow: Answers) => {
+      // Enter repetido durante o envio não pode empilhar histórico nem
+      // disparar outro `start`/envio.
+      if (submitting) return;
       // Na prévia o envio de arquivo está desligado: validar bloqueava o
       // fluxo num `file_upload` obrigatório.
       const result =
@@ -365,6 +372,7 @@ export function PublicForm({
       turnstileKey,
       turnstileToken,
       handleServerCode,
+      submitting,
     ]
   );
 
@@ -511,7 +519,7 @@ export function PublicForm({
           {isLive && (
             <input
               type="text"
-              name="website"
+              name="hp_extra_note"
               tabIndex={-1}
               autoComplete="off"
               aria-hidden="true"
@@ -708,7 +716,9 @@ export function PublicForm({
                 </button>
               ) : null}
               {thankYou?.redirect_url ? (
-                <p className="text-sm opacity-60">{t('thankYou.redirecting')}</p>
+                <p className="text-sm opacity-60">
+                  {t('thankYou.redirecting')}
+                </p>
               ) : null}
             </div>
           )}
@@ -733,7 +743,10 @@ export function PublicForm({
 
           {screen.kind === 'unavailable' && (
             <div className="flex flex-col items-start gap-4">
-              <AlertCircle className="h-10 w-10 opacity-60" aria-hidden="true" />
+              <AlertCircle
+                className="h-10 w-10 opacity-60"
+                aria-hidden="true"
+              />
               <h1 className="text-2xl font-semibold">
                 {t('unavailable.title')}
               </h1>

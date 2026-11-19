@@ -653,7 +653,17 @@ export function validateAnswer(
           (raw as FileRef[]).every((f) => uploadPathBelongsTo(f.path, scope));
         if (!inScope) return { code: 'invalidFile' };
       }
-      return { ok: true, value: raw as FileRef[] };
+      // Só os quatro campos: o resto do objeto que o navegador mandou (lixo,
+      // JSON arbitrário) não entra no instantâneo nem na exportação.
+      return {
+        ok: true,
+        value: (raw as FileRef[]).map((f) => ({
+          path: f.path,
+          name: f.name,
+          mime: f.mime,
+          size: f.size,
+        })),
+      };
     }
     case 'consent': {
       if (raw !== true) return { code: 'consentRequired' };
