@@ -15,7 +15,7 @@ paths:
 - Arquivo do visitante: bucket privado, URL assinada curta com `download`, caminho conferido contra a pasta da resposta. Exportar é `admin`+, auditado em `contact_exports` e com `neutralizeFormula` em toda célula; apagar exige o nome do formulário.
 - Quota no banco (trigger), mês em `America/Sao_Paulo` no SQL e no TS. 097/098 aplicadas no `vn` (F5); schema novo é migração nova com confirmação. Piloto: `forms_enabled` **junto** com as 3 quotas em `limit_overrides` (chave ausente = ilimitado), só com confirmação.
 - A página pública só assina mídia `account-<conta do formulário>/…` (o admin grava `theme`/`media` direto pela RLS); upload tem teto por IP e por conta (`formUploadAccount`).
-- Cron: fase `forms` em `/api/automations/cron` (`sweep.ts`): `abandoned` após 24 h, objetos órfãos ou de abandonadas > 7 dias; `completed` nunca perde arquivo.
+- Cron: fase `forms` em `/api/automations/cron` (`sweep.ts`): `abandoned` após 24 h, objetos órfãos ou de abandonadas > 7 dias; em `completed` só sai objeto **fora de `answers`** com > 24 h (referenciado nunca; sem ler `answers`/Storage, nada), até 100 pastas `completed` por conta e varredura.
 - i18n: `Forms` e `PublicForm` nos dois dicionários; `i18n:check` e placeholders ICU idênticos.
 
 Detalhe: leia `docs/context/formularios.md`.

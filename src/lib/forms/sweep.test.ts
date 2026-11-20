@@ -4,13 +4,18 @@ import {
   ABANDON_AFTER_MS,
   ABANDONED_FILES_GRACE_MS,
   ACCOUNTS_PER_RUN,
+  FOLDERS_PRUNED_PER_ACCOUNT,
+  UNREFERENCED_FILES_GRACE_MS,
   ORPHAN_SCAN_INTERVAL_MS,
   abandonStalePartials,
   expiredCutoffIso,
   nextAccountSlice,
+  nextFolderSlice,
   pickAccountFolders,
+  referencedFilePaths,
   runFormsSweep,
   selectResponseFoldersToRemove,
+  selectUnreferencedObjects,
   staleCutoffIso,
   type SweepState,
 } from './sweep';
@@ -69,6 +74,136 @@ describe('selectResponseFoldersToRemove', () => {
   });
 });
 
+describe('referencedFilePaths', () => {
+  const entry = (value: unknown, type = 'file_upload') => ({
+    type,
+    label: 'x',
+    value,
+  });
+
+  it('junta os caminhos de todos os blocos de arquivo, em minúsculas', () => {
+    const set = referencedFilePaths({
+      a: entry([{ path: 'P/A.pdf' }, { path: 'p/b.pdf' }]),
+      b: entry('texto', 'short_text'),
+      c: entry(null),
+    });
+    expect([...(set ?? [])].sort()).toEqual(['p/a.pdf', 'p/b.pdf']);
+  });
+
+  it('forma inesperada devolve null (nada pode ser removido)', () => {
+    expect(referencedFilePaths(null)).toBeNull();
+    expect(referencedFilePaths([])).toBeNull();
+    expect(referencedFilePaths('x')).toBeNull();
+    expect(referencedFilePaths({ a: 'x' })).toBeNull();
+    expect(referencedFilePaths({ a: entry('p/a.pdf') })).toBeNull();
+    expect(
+      referencedFilePaths({ a: entry([{ name: 'sem path' }]) })
+    ).toBeNull();
+    expect(referencedFilePaths({ a: entry([null]) })).toBeNull();
+  });
+
+  it('resposta sem arquivos é válida e vazia', () => {
+    expect(referencedFilePaths({})?.size).toBe(0);
+  });
+});
+
+describe('selectUnreferencedObjects', () => {
+  const PREFIX = `${ACC}/${FORM}/${uuid(10)}`;
+  const obj = (name: string, created: string | null | undefined) => ({
+    name,
+    created_at: created,
+  });
+  const answersWith = (...names: string[]) => ({
+    doc: {
+      type: 'file_upload',
+      label: 'Doc',
+      value: names.map((n) => ({ path: `${PREFIX}/${n}` })),
+    },
+  });
+
+  it('a folga é de 24 h (maior que a URL assinada de 2 h)', () => {
+    expect(UNREFERENCED_FILES_GRACE_MS).toBe(24 * H);
+  });
+
+  it('remove o antigo sem referência; mantém referenciado, recente e sem idade', () => {
+    const out = selectUnreferencedObjects(
+      PREFIX,
+      [
+        obj('ref.pdf', ago(3 * D)),
+        obj('velho.pdf', ago(25 * H)),
+        obj('novo.pdf', ago(23 * H)),
+        obj('sem-data.pdf', null),
+        obj('lixo.pdf', 'não é data'),
+      ],
+      answersWith('ref.pdf'),
+      NOW
+    );
+    expect(out).toEqual([`${PREFIX}/velho.pdf`]);
+  });
+
+  it('referenciado nunca sai, por mais velho que seja', () => {
+    expect(
+      selectUnreferencedObjects(
+        PREFIX,
+        [obj('ref.pdf', ago(400 * D))],
+        answersWith('ref.pdf'),
+        NOW
+      )
+    ).toEqual([]);
+  });
+
+  it('usa o instante mais recente entre criação e alteração', () => {
+    expect(
+      selectUnreferencedObjects(
+        PREFIX,
+        [{ name: 'a.pdf', created_at: ago(3 * D), updated_at: ago(1 * H) }],
+        {},
+        NOW
+      )
+    ).toEqual([]);
+  });
+
+  it('sem answers legível nada é removido', () => {
+    const objs = [obj('velho.pdf', ago(30 * D))];
+    expect(selectUnreferencedObjects(PREFIX, objs, null, NOW)).toEqual([]);
+    expect(selectUnreferencedObjects(PREFIX, objs, undefined, NOW)).toEqual([]);
+    expect(selectUnreferencedObjects(PREFIX, objs, 'x', NOW)).toEqual([]);
+  });
+
+  it('resposta concluída sem arquivos: tudo que passou da folga sai', () => {
+    expect(
+      selectUnreferencedObjects(
+        PREFIX,
+        [obj('a.pdf', ago(2 * D)), obj('b.pdf', ago(2 * H))],
+        {},
+        NOW
+      )
+    ).toEqual([`${PREFIX}/a.pdf`]);
+  });
+});
+
+describe('nextFolderSlice', () => {
+  const ids = ['d', 'a', 'c', 'b'];
+
+  it('começa depois do cursor, em ordem alfabética e circular', () => {
+    expect(nextFolderSlice(ids, undefined, 2)).toEqual(['a', 'b']);
+    expect(nextFolderSlice(ids, 'b', 2)).toEqual(['c', 'd']);
+    expect(nextFolderSlice(ids, 'c', 3)).toEqual(['d', 'a', 'b']);
+  });
+
+  it('cursor depois do último (ou de pasta que sumiu) não perde nem repete', () => {
+    expect(nextFolderSlice(ids, 'd', 2)).toEqual(['a', 'b']);
+    // 'bb' já não existe: continua no primeiro maior.
+    expect(nextFolderSlice(ids, 'bb', 1)).toEqual(['c']);
+  });
+
+  it('vazio e limite maior que a lista', () => {
+    expect(nextFolderSlice([], undefined, 5)).toEqual([]);
+    expect(nextFolderSlice(ids, undefined, 0)).toEqual([]);
+    expect(nextFolderSlice(ids, undefined, 9)).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
 describe('contas e cursor', () => {
   it('só pastas account-<uuid>, ordenadas', () => {
     expect(
@@ -103,13 +238,29 @@ interface Row {
   id: string;
   status: string;
   updated_at: string;
+  answers?: unknown;
+}
+
+type ScalarCol = 'id' | 'status' | 'updated_at';
+
+interface TreeEntry {
+  name: string;
+  id: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 function makeWorld(opts: {
   rows: Row[];
   /** caminho (sem barra final) → entradas */
-  tree: Record<string, { name: string; id: string | null }[]>;
+  tree: Record<string, TreeEntry[]>;
   dbError?: boolean;
+  /** Só a leitura de `answers` falha (o resto do banco responde). */
+  answersError?: boolean;
+  /** `list` falha nestes prefixos. */
+  listErrorPrefixes?: string[];
+  /** `remove` falha. */
+  removeError?: boolean;
   proofsDeleted?: number;
 }) {
   const proofCuts: { column: string; value: string }[] = [];
@@ -120,12 +271,37 @@ function makeWorld(opts: {
   const db = {
     storage: {
       from: () => ({
-        list: async (prefix: string, o: { limit: number; offset: number }) => ({
-          data: (opts.tree[prefix] ?? []).slice(o.offset, o.offset + o.limit),
-          error: null,
-        }),
+        list: async (prefix: string, o: { limit: number; offset: number }) =>
+          opts.listErrorPrefixes?.includes(prefix)
+            ? { data: null, error: { message: 'boom' } }
+            : {
+                data: (opts.tree[prefix] ?? []).slice(
+                  o.offset,
+                  o.offset + o.limit
+                ),
+                error: null,
+              },
         remove: async (paths: string[]) => {
+          if (opts.removeError) {
+            return { data: null, error: { message: 'boom' } };
+          }
           removed.push(paths);
+          // Como o Storage real: o objeto removido some da próxima listagem
+          // e a pasta que fica vazia some junto (pasta é só prefixo).
+          for (const path of paths) {
+            const slash = path.lastIndexOf('/');
+            const dir = path.slice(0, slash);
+            opts.tree[dir] = (opts.tree[dir] ?? []).filter(
+              (e) => e.name !== path.slice(slash + 1)
+            );
+            if (opts.tree[dir].length === 0) {
+              const up = dir.lastIndexOf('/');
+              const parent = dir.slice(0, up);
+              opts.tree[parent] = (opts.tree[parent] ?? []).filter(
+                (e) => e.name !== dir.slice(up + 1)
+              );
+            }
+          }
           return { data: null, error: null };
         },
       }),
@@ -154,12 +330,16 @@ function makeWorld(opts: {
       expect(table).toBe('form_responses');
       const ctx: {
         mode: 'select' | 'update';
+        cols?: string;
         patch?: unknown;
         filters: ((r: Row) => boolean)[];
       } = { mode: 'select', filters: [] };
       const chain: Record<string, unknown> = {};
       const done = () => {
         if (opts.dbError) return { data: null, error: { message: 'boom' } };
+        if (opts.answersError && ctx.cols?.includes('answers')) {
+          return { data: null, error: { message: 'boom' } };
+        }
         const hit = rows.filter((r) => ctx.filters.every((f) => f(r)));
         if (ctx.mode === 'update') {
           updates.push({ ids: hit.map((r) => r.id), patch: ctx.patch });
@@ -167,21 +347,24 @@ function makeWorld(opts: {
         }
         return { data: hit, error: null };
       };
-      chain.select = () => chain;
+      chain.select = (cols?: string) => {
+        ctx.cols = cols;
+        return chain;
+      };
       chain.update = (patch: unknown) => {
         ctx.mode = 'update';
         ctx.patch = patch;
         return chain;
       };
-      chain.eq = (c: keyof Row, v: string) => {
+      chain.eq = (c: ScalarCol, v: string) => {
         ctx.filters.push((r) => r[c] === v);
         return chain;
       };
-      chain.lt = (c: keyof Row, v: string) => {
+      chain.lt = (c: ScalarCol, v: string) => {
         ctx.filters.push((r) => r[c] < v);
         return chain;
       };
-      chain.in = (c: keyof Row, v: string[]) => {
+      chain.in = (c: ScalarCol, v: string[]) => {
         ctx.filters.push((r) => v.includes(r[c]));
         return chain;
       };
@@ -223,7 +406,11 @@ describe('abandonStalePartials', () => {
 });
 
 describe('runFormsSweep', () => {
-  const fresh = (): SweepState => ({ cursor: 0, lastScanAt: 0 });
+  const fresh = (): SweepState => ({
+    cursor: 0,
+    lastScanAt: 0,
+    pruneCursors: {},
+  });
   const folder = (name: string) => ({ name, id: null });
   const file = (name: string) => ({ name, id: `obj-${name}` });
 
@@ -306,5 +493,205 @@ describe('runFormsSweep', () => {
     expect(w.removed).toEqual([]);
     expect(res.removedObjects).toBe(0);
     expect(res.errors).toBeGreaterThan(0);
+  });
+});
+
+describe('runFormsSweep — objetos sem referência em resposta concluída', () => {
+  const fresh = (): SweepState => ({
+    cursor: 0,
+    lastScanAt: 0,
+    pruneCursors: {},
+  });
+  const folder = (name: string): TreeEntry => ({ name, id: null });
+  const file = (name: string, created: string | null): TreeEntry => ({
+    name,
+    id: `obj-${name}`,
+    created_at: created,
+    updated_at: created,
+  });
+
+  const RID = uuid(10);
+  const PREFIX = `${ACC}/${FORM}/${RID}`;
+  const answers = {
+    doc: {
+      type: 'file_upload',
+      label: 'Doc',
+      value: [{ path: `${PREFIX}/ok.pdf`, name: 'ok.pdf' }],
+    },
+  };
+
+  const world = (
+    over: Partial<Parameters<typeof makeWorld>[0]> = {},
+    rowAnswers: unknown = answers
+  ) =>
+    makeWorld({
+      rows: [
+        {
+          id: RID,
+          status: 'completed',
+          updated_at: ago(40 * D),
+          answers: rowAnswers,
+        },
+      ],
+      tree: {
+        '': [folder(ACC)],
+        [ACC]: [folder(FORM)],
+        [`${ACC}/${FORM}`]: [folder(RID)],
+        [PREFIX]: [
+          file('ok.pdf', ago(3 * D)), // referenciado
+          file('extra-1.pdf', ago(3 * D)), // sem referência e antigo
+          file('extra-2.exe', ago(26 * H)), // sem referência e antigo
+          file('recente.pdf', ago(2 * H)), // sem referência, dentro da folga
+        ],
+      },
+      ...over,
+    });
+
+  it('remove o antigo sem referência; referenciado e recente ficam', async () => {
+    const w = world();
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(w.removed.flat().sort()).toEqual([
+      `${PREFIX}/extra-1.pdf`,
+      `${PREFIX}/extra-2.exe`,
+    ]);
+    expect(res).toMatchObject({
+      removedUnreferenced: 2,
+      removedObjects: 2,
+      removedFolders: 0,
+      errors: 0,
+    });
+  });
+
+  it('nunca remove o arquivo referenciado, por mais antigo que seja', async () => {
+    const w = world({
+      tree: {
+        '': [folder(ACC)],
+        [ACC]: [folder(FORM)],
+        [`${ACC}/${FORM}`]: [folder(RID)],
+        [PREFIX]: [file('ok.pdf', ago(900 * D))],
+      },
+    });
+    await runFormsSweep(w.db, NOW, fresh());
+    expect(w.removed).toEqual([]);
+  });
+
+  it('não lê a idade do objeto: nada é removido', async () => {
+    const w = world({
+      tree: {
+        '': [folder(ACC)],
+        [ACC]: [folder(FORM)],
+        [`${ACC}/${FORM}`]: [folder(RID)],
+        [PREFIX]: [file('extra.pdf', null)],
+      },
+    });
+    await runFormsSweep(w.db, NOW, fresh());
+    expect(w.removed).toEqual([]);
+  });
+
+  it('erro ao ler answers não remove nada e conta o erro', async () => {
+    const w = world({ answersError: true });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(w.removed).toEqual([]);
+    expect(res.removedUnreferenced).toBe(0);
+    expect(res.errors).toBeGreaterThan(0);
+  });
+
+  it('answers ilegível (null ou forma estranha) não remove nada', async () => {
+    for (const bad of [null, 'x', { doc: 'x' }]) {
+      const w = world({}, bad);
+      await runFormsSweep(w.db, NOW, fresh());
+      expect(w.removed).toEqual([]);
+    }
+  });
+
+  it('erro ao listar a pasta da resposta não remove nada', async () => {
+    const w = world({ listErrorPrefixes: [PREFIX] });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(w.removed).toEqual([]);
+    expect(res.errors).toBeGreaterThan(0);
+  });
+
+  it('erro no remove conta o erro e não conta objeto removido', async () => {
+    const w = world({ removeError: true });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(res.removedUnreferenced).toBe(0);
+    expect(res.removedObjects).toBe(0);
+    expect(res.errors).toBeGreaterThan(0);
+  });
+
+  it('não mexe em resposta partial nem abandonada recente', async () => {
+    for (const status of ['partial', 'abandoned']) {
+      const w = makeWorld({
+        rows: [{ id: RID, status, updated_at: ago(2 * D), answers: {} }],
+        tree: {
+          '': [folder(ACC)],
+          [ACC]: [folder(FORM)],
+          [`${ACC}/${FORM}`]: [folder(RID)],
+          [PREFIX]: [file('x.pdf', ago(30 * D))],
+        },
+      });
+      await runFormsSweep(w.db, NOW, fresh());
+      expect(w.removed).toEqual([]);
+    }
+  });
+
+  it('o teto é por conta e o cursor cobre as pastas restantes (pasta esvaziada some do Storage)', async () => {
+    const total = FOLDERS_PRUNED_PER_ACCOUNT + 5;
+    const ids = Array.from({ length: total }, (_, i) => uuid(1000 + i));
+    const rows = ids.map((id) => ({
+      id,
+      status: 'completed',
+      updated_at: ago(40 * D),
+      answers: {},
+    }));
+    const tree: Record<string, TreeEntry[]> = {
+      '': [folder(ACC)],
+      [ACC]: [folder(FORM)],
+      [`${ACC}/${FORM}`]: ids.map(folder),
+    };
+    for (const id of ids) {
+      tree[`${ACC}/${FORM}/${id}`] = [file('velho.pdf', ago(5 * D))];
+    }
+    const w = makeWorld({ rows, tree });
+    const state = fresh();
+
+    const first = await runFormsSweep(w.db, NOW, state);
+    expect(first.removedUnreferenced).toBe(FOLDERS_PRUNED_PER_ACCOUNT);
+
+    const later = new Date(NOW.getTime() + ORPHAN_SCAN_INTERVAL_MS + 1);
+    const second = await runFormsSweep(w.db, later, state);
+    expect(second.removedUnreferenced).toBe(5);
+    expect(w.removed.flat()).toHaveLength(total);
+    expect(new Set(w.removed.flat()).size).toBe(total);
+  });
+  it('uma conta grande não esgota o orçamento das demais da mesma varredura', async () => {
+    const ACC2 = `account-${uuid(7)}`;
+    const FORM2 = uuid(8);
+    const big = Array.from(
+      { length: FOLDERS_PRUNED_PER_ACCOUNT + 20 },
+      (_, i) => uuid(2000 + i)
+    );
+    const small = uuid(3000);
+    const rows = [...big, small].map((id) => ({
+      id,
+      status: 'completed',
+      updated_at: ago(40 * D),
+      answers: {},
+    }));
+    const tree: Record<string, TreeEntry[]> = {
+      '': [folder(ACC), folder(ACC2)],
+      [ACC]: [folder(FORM)],
+      [`${ACC}/${FORM}`]: big.map(folder),
+      [ACC2]: [folder(FORM2)],
+      [`${ACC2}/${FORM2}`]: [folder(small)],
+      [`${ACC2}/${FORM2}/${small}`]: [file('velho.pdf', ago(5 * D))],
+    };
+    for (const id of big) {
+      tree[`${ACC}/${FORM}/${id}`] = [file('velho.pdf', ago(5 * D))];
+    }
+    const w = makeWorld({ rows, tree });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(res.removedUnreferenced).toBe(FOLDERS_PRUNED_PER_ACCOUNT + 1);
+    expect(w.removed.flat()).toContain(`${ACC2}/${FORM2}/${small}/velho.pdf`);
   });
 });

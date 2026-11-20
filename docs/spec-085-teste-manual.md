@@ -108,7 +108,7 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
 ### 1. Modelo "Captação de lead": criar, publicar e concluir no celular
 
-- [ ] **Passos:** como `admin`, `/forms` → **Novo** → modelo "Captação de lead". No construtor: ligar **Turnstile** em Configurações; na aba Classificação, faixa "Quente" com uma etiqueta e um negócio (funil/etapa da conta) e "Notificar" você. Mapear nome → `contact.name` e o bloco de consentimento → `contact.opt_in`. **Publicar.** Abrir `/f/<slug>` no **celular** (rede móvel, não o Wi-Fi do escritório), responder com um telefone seu que **não** é contato.
+- [~] **Parcial (2026-11-20, `parcial`):** rodado pelo navegador do app em emulação de celular (375x812), na conta-piloto, formulário `TESTE SPEC 085 - captacao` (id `d5bf2b9b-a30d-4dcc-90e5-cf507c659a13`), com o telefone de teste do mantenedor, que **já era contato** (`created_via = inbound`), então o "contato criado pelo formulário" **não foi coberto**. ✓ no banco: resposta `completed`, `score = 100`, `band_key = hot`, `identity_mode = phone`, `source = link`, `resume_token_hash` descartado, `ip_hash` gravado; negócio criado em "Novo Lead" (título `<contato> — <formulário>`); notificação `form_response_received` para o admin; evento de consentimento `opted_in` com `source = 'form'`; `form_responses:2026-11` = 1, `contacts` continuou em 83 (nome do contato não mudou: mapeamento "preenche se vazio"). ✗ **Não cobertos:** Turnstile (`TURNSTILE_*` ausente no servidor; o widget exige humano), etiqueta da faixa (a conta não tem etiquetas), celular real em rede móvel e contato novo. Observação de UX: na pergunta 4 apareceu "Este campo é obrigatório" ao chegar, antes de responder. **Passos originais:** como `admin`, `/forms` → **Novo** → modelo "Captação de lead". No construtor: ligar **Turnstile** em Configurações; na aba Classificação, faixa "Quente" com uma etiqueta e um negócio (funil/etapa da conta) e "Notificar" você. Mapear nome → `contact.name` e o bloco de consentimento → `contact.opt_in`. **Publicar.** Abrir `/f/<slug>` no **celular** (rede móvel, não o Wi-Fi do escritório), responder com um telefone seu que **não** é contato.
 - **Esperado:** um bloco por tela, Enter/OK avança, barra de progresso, widget do Turnstile antes de enviar, tela de agradecimento.
 - **Conferir:**
 
@@ -125,7 +125,7 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
 ### 2. Mesmo telefone de novo
 
-- [ ] **Passos:** com `allow_multiple_responses` **desligado**, abrir o link e informar o mesmo telefone. Depois ligar `allow_multiple_responses`, responder de novo mudando o nome.
+- [x] **✓ 2026-11-20** (celular emulado, mesmo formulário e telefone do item 1): com `allow_multiple_responses` desligado, o mesmo telefone mostrou "Você já respondeu a este formulário. Obrigado!" e o banco ficou com **1** resposta (nenhuma linha nova). Com o interruptor ligado e salvo (versão 4, ainda publicado), a segunda resposta entrou no **mesmo** `contact_id` (`e59b5c01…`): 2 respostas `completed` (100/`hot` com negócio e 5/`cold` sem negócio), 1 contato para o número, total de contatos em 83 e nome do contato **inalterado** ("Bruno Pelatieri Goulart"; digitei "Nome Alterado Item2"). **Passos originais:** com `allow_multiple_responses` **desligado**, abrir o link e informar o mesmo telefone. Depois ligar `allow_multiple_responses`, responder de novo mudando o nome.
 - **Esperado:** desligado → tela "já respondeu" e **nenhuma** linha nova. Ligado → segunda resposta no **mesmo** contato; o nome **não** muda (mapeamento "preenche se vazio" por padrão).
 - **Conferir:** `select count(*) from contacts where account_id = :'ACC' and phone_normalized = '<seu número>'` = 1; duas respostas `completed` para o `contact_id`.
 
@@ -143,9 +143,10 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
 ### 5. Upload: PDF aceito, `.exe` disfarçado recusado
 
-- [ ] **Passos:** formulário com bloco "Arquivo" (aceitar PDF). Enviar um PDF de ~1 MB. Depois tentar um `.exe` renomeado para `.pdf` e um arquivo de 20 MB.
+- [x] **✓ 2026-11-20 (parcial no que depende do navegador real).** Bloco "Envio de arquivo" (só PDF, opcional) adicionado ao formulário de teste (versão 5). O envio foi feito **por HTTP direto nas rotas públicas** (`start` → `upload-url` → `PUT` na `signed_url` → `submit`), o mesmo caminho do cliente, e não pelo seletor de arquivos do navegador. Resultados: PDF de ~1 MB aceito e resposta `completed` com `upload_bytes = 1048623` (= tamanho real; contador `form_upload_bytes` = 1048623); arquivo de 20 MB recusado **antes** de assinar com `413 file_too_large` (`max_bytes` = 16777216, ou seja, o teto é 16 MB); `.exe` de verdade com MIME de executável → `400 file_type_not_allowed`; `.exe` renomeado como `fake.pdf` com `type = application/pdf` → `upload-url` **200 e PUT 200** (**L-3 confirmado**, objeto gravado, nunca inspecionado). Painel da resposta mostra "ok.pdf — Baixar"; o link `/files/0` devolve 302 para URL assinada com `download=ok.pdf` e `token` (a leitura direta de `Content-Disposition` não é visível por `fetch` entre origens, então o cabeçalho final ficou **indireto**). Não conferidos: tabela de respostas, aba da ficha e cartão do inbox mostrando o arquivo. **Achado novo (LOW, ✓ resolvido em 2026-11-20 — a varredura passou a remover objeto sem referência em resposta `completed` com mais de 24 h; ver o Status da SPEC):** os dois objetos extras gravados na pasta da resposta (o `.exe` disfarçado e o de `image/png`) **não estão referenciados** em `answers`; como a resposta é `completed`, o `sweep.ts` nunca remove arquivo dela (linha 17), então objetos sem referência numa resposta concluída ficam para sempre e não contam na quota `form_upload_mb` (só o referenciado conta). O teto por conta (`formUploadAccount`, 600 URLs/h) limita o ritmo, mas não o acúmulo. **Passos originais:** formulário com bloco "Arquivo" (aceitar PDF). Enviar um PDF de ~1 MB. Depois tentar um `.exe` renomeado para `.pdf` e um arquivo de 20 MB.
 - **Esperado:** PDF aparece na resposta (tabela, painel lateral, aba da ficha e cartão do inbox) e baixa como **anexo** (`Content-Disposition: attachment`), nunca abre inline. Arquivo de 20 MB recusado **antes** da URL assinada (`413 file_too_large`).
 - **Sobre o `.exe` renomeado:** a allowlist confere o **MIME declarado** e a **extensão**; o conteúdo não é inspecionado. Um `.exe` renomeado com `type = application/pdf` passa da rota e é gravado (achado **L-3**, aceito: bucket privado, download só como anexo, `X-Content-Type-Options: nosniff`). Registre o que o navegador declarou (`type` do `File`) e se o upload passou.
+- **Depois de 24 h + uma varredura do cron:** os objetos extras (sem referência em `answers`) somem; o PDF referenciado fica; log `[automations-cron] forms sweep` com `removedUnreferenced > 0`.
 - **Conferir:**
 
   ```sql
@@ -157,7 +158,7 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
 ### 6. Página neutra idêntica nos quatro casos
 
-- [ ] **Passos:** guardar o HTML de `/f/<slug>` de um slug **inexistente** (`curl -s "$BASE_URL/f/nao-existe-123" > neutra.html`). Para cada caso abaixo, salvar o HTML e comparar o corpo visível e o status:
+- [x] **✓ 2026-11-20, os 4 casos passaram.** **Caso 3 (conta desligada, rollback do §1):** 200, mesmo hash, API `404 unavailable`; `form_public_availability` = `feature_not_in_plan`; conta religada com 3 / 200 / 100. **Caso 4 (`form_responses_month = 0`):** 200, mesmo hash, API `404 unavailable`; `responses_quota`; valor voltou a 200. DML com "pode rodar" do mantenedor; estado final conferido (`forms_on` só na conta-piloto, 3 / 200 / 100, formulário de teste publicado e disponível). Detalhes dos casos 1 e 2 abaixo. Método: texto visível da página (sem `script`/`style`/`title`/`meta`) comparado por hash com o de um slug inexistente (`nao-existe-123`) e `POST /api/forms/public/<slug>/start` com `elapsed_ms` alto, só nos estados indisponíveis. Linha de base: HTTP 200, hash `b34bb389…`, texto "Este formulário não está disponível…", API `404 {"code":"unavailable"}`. **Caso 1 (despublicado):** 200, mesmo hash, API `404 unavailable`; `form_public_availability` = `not_published`. **Caso 2 (republicado e arquivado):** 200, mesmo hash, API `404 unavailable`; `form_public_availability` = `not_published`. O HTML bruto difere em 18 bytes do da linha de base (o slug aparece no payload da página), sem efeito no que o visitante vê. Observação: "Arquivar" no construtor usa `window.confirm`, que o painel descarta sem mostrar; precisei responder `true` por script. **Passos originais:** guardar o HTML de `/f/<slug>` de um slug **inexistente** (`curl -s "$BASE_URL/f/nao-existe-123" > neutra.html`). Para cada caso abaixo, salvar o HTML e comparar o corpo visível e o status:
   1. Despublicar o formulário.
   2. Republicar e **arquivar**.
   3. Restaurar/publicar e **desligar a conta** (rollback do §1) — religar depois.
@@ -199,8 +200,8 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
 ### 10. Banco: advisors e privilégios
 
-- [ ] MCP `get_advisors` (security): **16 INFO e 27 WARN** (o 27º é `form_responses_delete`, esperado — §5.4 da SPEC). Qualquer número diferente: comparar com a lista da F5 antes de seguir.
-- [ ] Só leitura:
+- [x] MCP `get_advisors` (security): **16 INFO e 27 WARN** (o 27º é `form_responses_delete`, esperado — §5.4 da SPEC). Qualquer número diferente: comparar com a lista da F5 antes de seguir. ✓ 2026-11-20 (depois da migração 100): **17 INFO** (16 + `form_phone_proofs`, RLS sem policy por desenho) e **26 WARN** somados (1 `function_search_path_mutable`, 2 `extension_in_public`, 1 `anon_security_definer_function_executable`, 21 `authenticated_security_definer_function_executable` — o item de `form_responses_delete` entra nos 21, igual ao `status.md` — e 1 `auth_leaked_password_protection`). Nada novo além do esperado; o "27" original era contagem errada.
+- [x] Só leitura (✓ 2026-11-20: as 4 colunas `false`; `form_phone_proofs` sem `SELECT` para `anon` nem `authenticated`, com RLS ligada):
 
   ```sql
   select has_table_privilege('anon','public.forms','SELECT'),
@@ -212,8 +213,8 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
 ### 11. Storage real: PUT na `signed_url`, `x-upsert` e `mimetype` (pendência da F5, desvio **as**)
 
-- [ ] **PUT do navegador:** no item 5, DevTools → Network: `POST …/upload-url` devolve `signed_url`; em seguida um `PUT` para essa URL com `content-type: application/pdf` responde **200**. O objeto aparece na consulta do item 5 com `mimetype = application/pdf` e `size` igual ao do arquivo.
-- [ ] **`x-upsert` não sobrescreve:** copiar do DevTools a `signed_url` de um upload **já feito** e repetir com outro arquivo:
+- [x] **PUT (✓ 2026-11-20, por HTTP e não pelo navegador):** `PUT` na `signed_url` com `content-type: application/pdf` → **200**; objeto com `mimetype = application/pdf` e `size = 1048623`, igual ao arquivo. **Passos originais:** no item 5, DevTools → Network: `POST …/upload-url` devolve `signed_url`; em seguida um `PUT` para essa URL com `content-type: application/pdf` responde **200**. O objeto aparece na consulta do item 5 com `mimetype = application/pdf` e `size` igual ao do arquivo.
+- [x] **`x-upsert` não sobrescreve (✓ 2026-11-20):** repetir o `PUT` na mesma `signed_url` com `x-upsert: true` e outro arquivo → **400 `409 Duplicate` / `KeyAlreadyExists`**; o objeto original ficou com o mesmo tamanho (1048623). **Passos originais:** copiar do DevTools a `signed_url` de um upload **já feito** e repetir com outro arquivo:
 
   ```bash
   curl -i -X PUT "<signed_url>" -H "content-type: application/pdf" -H "x-upsert: true" --data-binary @outro.pdf
@@ -222,7 +223,7 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 
   Se o Storage **aceitar** (2xx e `size` mudou), é achado: o objeto conferido no envio pode ser trocado depois. Registrar no Status e não sair do piloto sem correção.
 
-- [ ] **`mimetype` declarado × gravado:** obter `signed_url` **ainda não usadas** pedindo a URL direto à rota com o `response_id` e o `resume_token` de uma resposta parcial (DevTools → Network → corpo do `POST …/start`):
+- [x] **`mimetype` declarado × gravado (✓ 2026-11-20):** `PUT` com `text/html` → **415 `invalid_mime_type`** (fora da allowlist do bucket). `PUT` com `image/png` numa URL pedida como `application/pdf` → **200 e `mimetype = image/png` gravado** num objeto cujo nome e resposta dizem PDF (`size = 204832`): é o risco **baixo** esperado (o envio só confere existência e tamanho; download só como anexo). Registrar no Status da SPEC. **Passos originais:** obter `signed_url` **ainda não usadas** pedindo a URL direto à rota com o `response_id` e o `resume_token` de uma resposta parcial (DevTools → Network → corpo do `POST …/start`):
 
   ```bash
   curl -s -X POST "$BASE_URL/api/forms/public/$SLUG/upload-url" \
