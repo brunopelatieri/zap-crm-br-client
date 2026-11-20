@@ -2,7 +2,7 @@
 
 |                   |                                                                                                                                                                                                    |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**        | **090 e 091 aplicadas no `vn` em 2026-11-19** (SQL Editor, como `postgres`). Achado confirmado antes e fechado depois, conferido por script e advisor (§6). **Fumaça no app parcial (§6): leituras e acesso `anon` passaram; faltam cadastro, criar/apagar contato, ingestão, envio de disparo e aceitar convite** |
+| **Status**        | **090 e 091 aplicadas no `vn` em 2026-11-19** (SQL Editor, como `postgres`). Achado confirmado antes e fechado depois, conferido por script e advisor (§6). **Passo 7 fechado em 2026-11-19 (§6): leituras no app e caminhos de privilégio no banco, com papéis reais e transação revertida, passaram. Ressalva: envio real de disparo e rotas HTTP de ingestão e convite não exercitados** |
 | **Data**          | 2026-11-05                                                                                                                                                                                         |
 | **Origem**        | Porte da SPEC 080 do Valen Ranch (migrações 090, 091 e 092 de lá).                                                                                                                                 |
 | **Código do app** | Nenhum em `src/`                                                                                                                                                                                   |
@@ -188,16 +188,25 @@ Feita por uma sessão do Claude no navegador do app, já logada em `zap.local.ia
 
 Logs do `vn` depois da aplicação: os únicos `permission denied` foram às 14:50, em `portal_public_account` e `plan_feature_strict`, chamadas como `anon` em sondagem de isolamento; ambas são só `service_role` por desenho (093–096). Os 409 em `system_notifications` (índice de dedupe) já ocorriam em 17 e 18/11.
 
-### Pendente
+### Fumaça no banco com papéis reais, revertida, 2026-11-19
 
-Não cobertos pela sessão, a cargo do mantenedor:
+O app não cobre cadastro, convite, ingestão e disparo sem senha, chave de API ou cota (a conta de produção está em 1437/1437 e o plano `vn_personal` desliga API e disparo). Esses caminhos foram exercitados no `vn` pelos scripts `scripts/smoke-081-passo7-rollback.sql` e `scripts/smoke-081-passo7b-convite-rollback.sql`, rodados pelo mantenedor no SQL Editor como `postgres`. Cada um cria dois usuários descartáveis, troca para o papel real com `SET LOCAL ROLE` e `request.jwt.claims`, e termina com `RAISE EXCEPTION`, que desfaz tudo. Conferência depois, por leitura: 0 usuários, contas, contatos, funis e convites de teste.
 
-- **Cadastro** de conta nova e **aceitar o convite** (exigem criar conta e digitar senha).
-- **Criar e apagar contato.** A conta de produção está na cota; usar uma conta de teste ou aumentar o limite temporariamente.
-- **Ingestão** por `/api/v1/ingest/contact` (o plano `vn_personal` tem `api_v1_enabled: false`; o caminho usa `supabaseAdmin`, e o `service_role` manteve o `EXECUTE`).
-- **Envio de disparo** (o plano tem `broadcasts_enabled: false`).
+| Caminho do §5 passo 7                   | Papel            | Resultado                                                                                                                              |
+| --------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Cadastro (`handle_new_user`, grupo A)   | `postgres`       | **Passou.** Conta e perfil criados para os dois usuários                                                                               |
+| Criar e apagar contato                  | `authenticated`  | **Passou.** Inseriu, a RLS mostrou 1, ficou 0 após apagar. Cota e `recount_account_usage` (por gatilho) sem `42501`                    |
+| `touch_presence`                        | `authenticated`  | **Passou** (`ok`)                                                                                                                      |
+| `peek_invitation` antes e depois        | `anon`           | **Passou.** `ok: true` com conta e papel; depois do resgate, `reason: used`                                                            |
+| `redeem_invitation`                     | `authenticated`  | **Passou** com a cota ampliada na transação: devolveu a conta A e o perfil B passou para ela. Sem a ampliação, o gatilho de cota barrou o 2º administrador do plano padrão (`22023 QUOTA_EXCEEDED:members_admin:2:1`), que é a cota funcionando, não permissão |
+| Ingestão (`upsert_webhook_funnel`, `increment_broadcast_total_recipients`) | `service_role` | **Passou.** `ingested_count` = 2 e `total_recipients` = 1                                                  |
+| Grupo A negado                          | `authenticated` (`upsert_webhook_funnel`) e `anon` (`increment_broadcast_total_recipients`) | **42501** nos dois                                  |
 
-Só depois disso a F5-01 da SPEC 083 §15 pode ser dada como fechada e a D-8 do PRD 082 satisfeita. Se algo quebrar: devolver o `GRANT` só da função afetada, só ao papel do caminho quebrado (§5, fim).
+`purge_webhook_ingest_logs` não foi chamada (apagaria o log de todas as contas); o fechamento dela já está provado por `has_function_privilege` no §6, passo 6.
+
+### Conclusão do passo 7
+
+**Fechado, com uma ressalva.** Todos os caminhos de privilégio que a 090/091 tocam passaram com o papel real: nenhum quebrou, e os negativos continuam negados. **Não foram exercitados** o envio real de um disparo (WhatsApp), as rotas HTTP (`/api/v1/ingest/contact`, a tela de cadastro com senha e o botão de aceitar convite) e o que depende de chave de API. Os dois primeiros usam as mesmas funções já testadas aqui, mas ainda valem uma rodada manual quando houver uma conta de teste com plano que ligue API e disparo. Se algo quebrar: devolver o `GRANT` só da função afetada, só ao papel do caminho quebrado (§5, fim).
 
 ---
 
