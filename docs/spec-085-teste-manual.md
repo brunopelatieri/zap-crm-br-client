@@ -146,7 +146,23 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 - [x] **✓ 2026-11-20 (parcial no que depende do navegador real).** Bloco "Envio de arquivo" (só PDF, opcional) adicionado ao formulário de teste (versão 5). O envio foi feito **por HTTP direto nas rotas públicas** (`start` → `upload-url` → `PUT` na `signed_url` → `submit`), o mesmo caminho do cliente, e não pelo seletor de arquivos do navegador. Resultados: PDF de ~1 MB aceito e resposta `completed` com `upload_bytes = 1048623` (= tamanho real; contador `form_upload_bytes` = 1048623); arquivo de 20 MB recusado **antes** de assinar com `413 file_too_large` (`max_bytes` = 16777216, ou seja, o teto é 16 MB); `.exe` de verdade com MIME de executável → `400 file_type_not_allowed`; `.exe` renomeado como `fake.pdf` com `type = application/pdf` → `upload-url` **200 e PUT 200** (**L-3 confirmado**, objeto gravado, nunca inspecionado). Painel da resposta mostra "ok.pdf — Baixar"; o link `/files/0` devolve 302 para URL assinada com `download=ok.pdf` e `token` (a leitura direta de `Content-Disposition` não é visível por `fetch` entre origens, então o cabeçalho final ficou **indireto**). Não conferidos: tabela de respostas, aba da ficha e cartão do inbox mostrando o arquivo. **Achado novo (LOW, ✓ resolvido em 2026-11-20 — a varredura passou a remover objeto sem referência em resposta `completed` com mais de 24 h; ver o Status da SPEC):** os dois objetos extras gravados na pasta da resposta (o `.exe` disfarçado e o de `image/png`) **não estão referenciados** em `answers`; como a resposta é `completed`, o `sweep.ts` nunca remove arquivo dela (linha 17), então objetos sem referência numa resposta concluída ficam para sempre e não contam na quota `form_upload_mb` (só o referenciado conta). O teto por conta (`formUploadAccount`, 600 URLs/h) limita o ritmo, mas não o acúmulo. **Passos originais:** formulário com bloco "Arquivo" (aceitar PDF). Enviar um PDF de ~1 MB. Depois tentar um `.exe` renomeado para `.pdf` e um arquivo de 20 MB.
 - **Esperado:** PDF aparece na resposta (tabela, painel lateral, aba da ficha e cartão do inbox) e baixa como **anexo** (`Content-Disposition: attachment`), nunca abre inline. Arquivo de 20 MB recusado **antes** da URL assinada (`413 file_too_large`).
 - **Sobre o `.exe` renomeado:** a allowlist confere o **MIME declarado** e a **extensão**; o conteúdo não é inspecionado. Um `.exe` renomeado com `type = application/pdf` passa da rota e é gravado (achado **L-3**, aceito: bucket privado, download só como anexo, `X-Content-Type-Options: nosniff`). Registre o que o navegador declarou (`type` do `File`) e se o upload passou.
-- **Depois de 24 h + uma varredura do cron:** os objetos extras (sem referência em `answers`) somem; o PDF referenciado fica; log `[automations-cron] forms sweep` com `removedUnreferenced > 0`.
+- **Primeira semana em produção — dry-run (o `vn` não tem backup):** com `FORMS_SWEEP_PRUNE_DRY_RUN=1` na stack, depois de 24 h + uma varredura do cron os objetos extras NÃO somem: o log `[automations-cron] forms sweep dry-run would remove: <caminho>` lista cada caminho e o resultado traz `wouldRemoveUnreferenced > 0` e `removedUnreferenced = 0`. Confira os caminhos listados à mão (nenhum pode ser o PDF referenciado nem de resposta que não é a do teste) e rode o pré-check abaixo; só então tire a variável da stack.
+- **Depois de 24 h + uma varredura do cron (sem dry-run):** os objetos extras (sem referência em `answers`) somem; o PDF referenciado fica; log `[automations-cron] forms sweep` com `removedUnreferenced > 0`. **Conferência pós-deploy no log:** `skippedNoDate > 0` e `removedUnreferenced` sempre 0 = o `list` do Storage não devolveu `created_at`/`updated_at` (a poda está inerte por segurança: reporte, não force); `truncatedLists > 0` = pasta ou lista com mais de 20.000 entradas (cobertura parcial); `errors > 0` = leia as linhas anteriores do log.
+- **Pré-check só de leitura (conferir `get_project_url` = `vn`), antes do deploy ou do dry-run:** lista o que a poda removeria hoje (mesmo critério do código: padrão de caminho da própria pasta, `<objectId>` ausente do texto de `answers`, idade > 24 h). Todo item é candidato à remoção; se parecer legítimo, pare.
+
+  ```sql
+  select o.name, o.created_at, o.updated_at
+    from storage.objects o
+    join form_responses r on r.id::text = split_part(o.name, '/', 3)
+   where o.bucket_id = 'form-uploads'
+     and r.status = 'completed'
+     and o.name ~ '^account-[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}\.[a-z0-9]{1,8}$'
+     and split_part(o.name, '/', 1) = 'account-' || r.account_id::text
+     and split_part(o.name, '/', 2) = r.form_id::text
+     and greatest(o.created_at, o.updated_at) < now() - interval '24 hours'
+     and position(lower(split_part(split_part(o.name, '/', 4), '.', 1)) in lower(r.answers::text)) = 0;
+  ```
+
 - **Conferir:**
 
   ```sql

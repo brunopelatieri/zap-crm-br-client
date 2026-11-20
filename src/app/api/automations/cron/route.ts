@@ -222,6 +222,9 @@ export async function GET(request: Request) {
     if (
       formsResult.abandoned > 0 ||
       formsResult.removedObjects > 0 ||
+      formsResult.wouldRemoveUnreferenced > 0 ||
+      formsResult.skippedNoDate > 0 ||
+      formsResult.truncatedLists > 0 ||
       formsResult.errors > 0
     ) {
       console.log(
