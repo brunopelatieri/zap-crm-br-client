@@ -44,6 +44,8 @@ export interface ApiFailure {
   errors?: { key: string; code: string }[];
   /** Teto em bytes que a rota informa ao recusar um arquivo grande demais. */
   maxBytes?: number;
+  /** `retry_after_seconds` do 429 de pedir código de confirmação (F7). */
+  retryAfterSeconds?: number;
   /** Vale tentar de novo (rede, 429, 5xx); o resto é definitivo. */
   retryable: boolean;
 }
@@ -56,7 +58,30 @@ export interface ThankYouData {
 }
 
 export type BlockOutcome =
-  { ok: true; alreadyAnswered?: boolean } | { ok: false; code: string };
+  | {
+      ok: true;
+      alreadyAnswered?: boolean;
+      /**
+       * F7: o formulário confirma o telefone pelo WhatsApp e ainda não
+       * foi confirmado: a tela mostra o código (`requestProof`/`checkProof`)
+       * e repete `blockDone` depois de `confirmed`.
+       */
+      needsProof?: boolean;
+    }
+  | { ok: false; code: string };
+
+export type ProofRequestOutcome =
+  | {
+      ok: true;
+      /** `ABCD-EFGH`. */
+      code: string;
+      /** Dígitos do número da conta, para montar o `wa.me`. */
+      whatsappNumber: string;
+      expiresInSeconds: number;
+    }
+  | { ok: false; code: string; retryAfterSeconds?: number };
+
+export type ProofCheckOutcome = 'pending' | 'confirmed' | 'expired' | 'error';
 
 export type SubmitOutcome =
   | { ok: true; thankYou: ThankYouData }
@@ -68,6 +93,14 @@ export type UploadOutcome =
 /** O que o componente usa da sessão. */
 export interface LiveHandlers {
   blockDone(field: PublicField, answers: Answers): Promise<BlockOutcome>;
+  /** F7: pede o código de confirmação do telefone do bloco de identidade. */
+  requestProof(
+    answers: Answers,
+    turnstile: string | null,
+    opts?: { fresh?: boolean }
+  ): Promise<ProofRequestOutcome>;
+  /** F7: a mensagem com o código já chegou? */
+  checkProof(): Promise<ProofCheckOutcome>;
   upload(field: PublicField, file: UploadableFile): Promise<UploadOutcome>;
   submit(answers: Answers, turnstile: string | null): Promise<SubmitOutcome>;
   setHoneypot(value: string): void;
@@ -87,6 +120,8 @@ export interface UploadableFile {
 export interface FormSessionOptions {
   slug: string;
   identityMode: 'phone' | 'token';
+  /** F7: `payload.settings.phone_proof` (só vale em `identityMode: 'phone'`). */
+  phoneProof?: boolean;
   fields: readonly Pick<PublicField, 'key' | 'type' | 'is_identity'>[];
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -128,6 +163,7 @@ function browserStorage(): FormSessionOptions['storage'] {
 export class FormSession implements LiveHandlers {
   private readonly slug: string;
   private readonly identityMode: 'phone' | 'token';
+  private readonly phoneProof: boolean;
   private readonly fields: FormSessionOptions['fields'];
   private readonly doFetch: typeof fetch;
   private readonly now: () => number;
@@ -141,6 +177,15 @@ export class FormSession implements LiveHandlers {
   private responseId: string | null = null;
   private resumeToken: string | null = null;
   private starting: Promise<BlockOutcome> | null = null;
+  private proofId: string | null = null;
+  private proofSecret: string | null = null;
+  private proofConfirmed = false;
+  /** Último código pedido: voltar e avançar com o mesmo telefone o reaproveita. */
+  private proofIssued: {
+    phone: string;
+    expiresAt: number;
+    outcome: Extract<ProofRequestOutcome, { ok: true }>;
+  } | null = null;
   private honeypot = '';
   /** Um envio falhou por rede/5xx: pode ter concluído sem a resposta chegar. */
   private submitUncertain = false;
@@ -152,6 +197,7 @@ export class FormSession implements LiveHandlers {
   constructor(opts: FormSessionOptions) {
     this.slug = opts.slug;
     this.identityMode = opts.identityMode;
+    this.phoneProof = opts.phoneProof === true && opts.identityMode === 'phone';
     this.fields = opts.fields;
     this.doFetch = opts.fetchImpl ?? ((...a) => fetch(...a));
     this.now = opts.now ?? (() => Date.now());
@@ -226,6 +272,10 @@ export class FormSession implements LiveHandlers {
         ? (json.errors as { key: string; code: string }[])
         : undefined,
       maxBytes: typeof json.max_bytes === 'number' ? json.max_bytes : undefined,
+      retryAfterSeconds:
+        typeof json.retry_after_seconds === 'number'
+          ? json.retry_after_seconds
+          : undefined,
       retryable: res.status === 429 || res.status >= 500,
     };
   }
@@ -249,17 +299,34 @@ export class FormSession implements LiveHandlers {
       response_id?: string;
       resume_token?: string;
     }>('/start', 'POST', {
+      // Com a confirmação, o servidor só aceita a prova (o telefone digitado
+      // não é lido); sem ela, o telefone do bloco de identidade.
       phone:
-        this.identityMode === 'phone' && typeof phoneAnswer === 'string'
+        this.identityMode === 'phone' &&
+        !this.proofConfirmed &&
+        typeof phoneAnswer === 'string'
           ? phoneAnswer
           : undefined,
+      proof_id: this.proofConfirmed ? this.proofId : undefined,
+      proof_secret: this.proofConfirmed ? this.proofSecret : undefined,
       link_token: this.getLinkToken() ?? undefined,
       utm: this.getUtm(),
       embedded: this.isEmbedded(),
       honeypot: this.honeypot,
       elapsed_ms: this.now() - this.loadedAt,
     });
-    if (!r.ok) return { ok: false, code: r.code };
+    if (!r.ok) {
+      // A prova venceu ou foi usada entre a confirmação e o `start`: pede
+      // outro código em vez de mostrar um erro seco.
+      if (r.code === 'phone_proof_required' && this.phoneProof) {
+        this.proofConfirmed = false;
+        this.proofId = null;
+        this.proofSecret = null;
+        this.proofIssued = null;
+        return { ok: true, needsProof: true };
+      }
+      return { ok: false, code: r.code };
+    }
     if (r.data.already_answered) return { ok: true, alreadyAnswered: true };
     if (!r.data.response_id || !r.data.resume_token) {
       return { ok: false, code: 'unexpected' };
@@ -285,10 +352,109 @@ export class FormSession implements LiveHandlers {
     if (!this.responseId) {
       const shouldStart = this.identityMode === 'token' || field.is_identity;
       if (!shouldStart) return { ok: true };
+      if (this.phoneProof && !this.proofConfirmed) {
+        return { ok: true, needsProof: true };
+      }
       return this.ensureStarted(answers);
     }
     this.enqueue({ [field.key]: answers[field.key] ?? null });
     return { ok: true };
+  }
+
+  // ---------- Confirmação do telefone (F7) ----------
+
+  async requestProof(
+    answers: Answers,
+    turnstile: string | null,
+    opts: { fresh?: boolean } = {}
+  ): Promise<ProofRequestOutcome> {
+    const key = this.identityKey();
+    const phone = key ? answers[key] : undefined;
+
+    // Mesmo telefone e código ainda válido (o visitante voltou e avançou, ou o
+    // efeito rodou duas vezes): sem novo pedido, que cairia no intervalo
+    // mínimo entre códigos e trocaria um código que ele pode já ter enviado.
+    const cached = this.proofIssued;
+    if (
+      !opts.fresh &&
+      cached &&
+      typeof phone === 'string' &&
+      cached.phone === phone &&
+      this.proofId &&
+      cached.expiresAt - this.now() > 15_000
+    ) {
+      return cached.outcome;
+    }
+
+    const wait = MIN_FILL_MS - (this.now() - this.loadedAt);
+    if (wait > 0) await this.sleep(wait + 100);
+
+    const r = await this.call<{
+      proof_id?: string;
+      proof_secret?: string;
+      code?: string;
+      whatsapp_number?: string;
+      expires_in_seconds?: number;
+    }>('/phone-proof', 'POST', {
+      phone: typeof phone === 'string' ? phone : undefined,
+      honeypot: this.honeypot,
+      elapsed_ms: this.now() - this.loadedAt,
+      turnstile: turnstile ?? undefined,
+    });
+    if (!r.ok) {
+      return {
+        ok: false,
+        code: r.code,
+        retryAfterSeconds: r.retryAfterSeconds,
+      };
+    }
+    const d = r.data;
+    if (
+      !d.proof_id ||
+      !d.proof_secret ||
+      !d.code ||
+      !d.whatsapp_number ||
+      typeof d.expires_in_seconds !== 'number'
+    ) {
+      return { ok: false, code: 'unexpected' };
+    }
+    this.proofId = d.proof_id;
+    this.proofSecret = d.proof_secret;
+    this.proofConfirmed = false;
+    const outcome = {
+      ok: true as const,
+      code: d.code,
+      whatsappNumber: d.whatsapp_number,
+      expiresInSeconds: d.expires_in_seconds,
+    };
+    this.proofIssued = {
+      phone: typeof phone === 'string' ? phone : '',
+      expiresAt: this.now() + d.expires_in_seconds * 1000,
+      outcome,
+    };
+    return outcome;
+  }
+
+  async checkProof(): Promise<ProofCheckOutcome> {
+    if (this.proofConfirmed) return 'confirmed';
+    if (!this.proofId || !this.proofSecret) return 'expired';
+    const r = await this.call<{ status?: string }>(
+      '/phone-proof/status',
+      'POST',
+      { proof_id: this.proofId, proof_secret: this.proofSecret }
+    );
+    if (!r.ok) return 'error';
+    switch (r.data.status) {
+      case 'confirmed':
+        this.proofConfirmed = true;
+        return 'confirmed';
+      case 'pending':
+        return 'pending';
+      default:
+        // `expired` e `not_found`: pede-se outro código.
+        this.proofIssued = null;
+        return 'expired';
+    }
   }
 
   // ---------- Autosave (fila de reenvio) ----------
@@ -519,6 +685,7 @@ export function createFormSession(payload: PublicFormPayload): FormSession {
   return new FormSession({
     slug: payload.slug,
     identityMode: payload.identity.mode === 'token' ? 'token' : 'phone',
+    phoneProof: payload.settings.phone_proof,
     fields: payload.fields,
   });
 }

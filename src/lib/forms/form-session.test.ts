@@ -520,3 +520,218 @@ describe('rascunho local', () => {
     expect(store.size).toBe(0);
   });
 });
+
+describe('confirmação do telefone pelo WhatsApp (F7)', () => {
+  const PROOF = {
+    json: {
+      proof_id: 'p1',
+      proof_secret: 'sec',
+      code: 'ABCD-2345',
+      whatsapp_number: '5511988887777',
+      expires_in_seconds: 600,
+    },
+  };
+  const responder =
+    (status: () => string) =>
+    (c: Call): { status?: number; json?: unknown } => {
+      switch (route(c)) {
+        case 'POST /phone-proof':
+          return PROOF;
+        case 'POST /phone-proof/status':
+          return { json: { status: status() } };
+        case 'POST /start':
+          return STARTED;
+        default:
+          return { json: { saved: [], rejected: [] } };
+      }
+    };
+
+  it('o bloco de identidade NÃO chama o `start`: pede a confirmação', async () => {
+    const { session, calls } = setup(
+      responder(() => 'pending'),
+      {
+        phoneProof: true,
+      }
+    );
+    const r = await session.blockDone(field('phone'), { phone: '11999998888' });
+    expect(r).toEqual({ ok: true, needsProof: true });
+    expect(calls).toEqual([]);
+  });
+
+  it('modo token ignora a confirmação (o link já prova o contato)', async () => {
+    const { session, calls } = setup(
+      responder(() => 'pending'),
+      {
+        phoneProof: true,
+        identityMode: 'token',
+      }
+    );
+    expect(await session.blockDone(field('name'), { name: 'Ana' })).toEqual({
+      ok: true,
+    });
+    expect(route(calls[0])).toBe('POST /start');
+  });
+
+  it('pede o código com o telefone, honeypot e tempo; guarda a prova e devolve o código', async () => {
+    const { session, calls, sleeps } = setup(
+      responder(() => 'pending'),
+      {
+        phoneProof: true,
+      }
+    );
+    const r = await session.requestProof({ phone: '11999998888' }, 'cf-tok');
+    expect(r).toEqual({
+      ok: true,
+      code: 'ABCD-2345',
+      whatsappNumber: '5511988887777',
+      expiresInSeconds: 600,
+    });
+    expect(sleeps[0]).toBeGreaterThanOrEqual(MIN_FILL_MS);
+    expect(route(calls[0])).toBe('POST /phone-proof');
+    expect(calls[0].body).toMatchObject({
+      phone: '11999998888',
+      honeypot: '',
+      turnstile: 'cf-tok',
+    });
+  });
+
+  it('só depois de `confirmed` o `start` leva proof_id/proof_secret e NÃO o telefone', async () => {
+    let status = 'pending';
+    const { session, calls } = setup(
+      responder(() => status),
+      {
+        phoneProof: true,
+      }
+    );
+    await session.requestProof({ phone: '11999998888' }, null);
+    expect(await session.checkProof()).toBe('pending');
+    // Ainda pendente: o bloco continua pedindo a confirmação.
+    expect(
+      await session.blockDone(field('phone'), { phone: '11999998888' })
+    ).toEqual({ ok: true, needsProof: true });
+
+    status = 'confirmed';
+    expect(await session.checkProof()).toBe('confirmed');
+    expect(
+      await session.blockDone(field('phone'), { phone: '11999998888' })
+    ).toEqual({ ok: true });
+    const startCall = calls.find((c) => route(c) === 'POST /start');
+    expect(startCall?.body).toMatchObject({
+      proof_id: 'p1',
+      proof_secret: 'sec',
+    });
+    expect(startCall?.body.phone).toBeUndefined();
+  });
+
+  it('prova vencida ou desconhecida: expired, e o `start` recusado volta a pedir confirmação', async () => {
+    const { session } = setup(
+      (c) =>
+        route(c) === 'POST /start'
+          ? { status: 400, json: { code: 'phone_proof_required' } }
+          : responder(() => 'not_found')(c),
+      { phoneProof: true }
+    );
+    await session.requestProof({ phone: '11999998888' }, null);
+    expect(await session.checkProof()).toBe('expired');
+  });
+
+  it('start recusado com phone_proof_required (venceu entre a confirmação e o envio) limpa a prova', async () => {
+    let status = 'confirmed';
+    const { session } = setup(
+      (c) =>
+        route(c) === 'POST /start'
+          ? { status: 400, json: { code: 'phone_proof_required' } }
+          : responder(() => status)(c),
+      { phoneProof: true }
+    );
+    await session.requestProof({ phone: '11999998888' }, null);
+    await session.checkProof();
+    expect(
+      await session.blockDone(field('phone'), { phone: '11999998888' })
+    ).toEqual({ ok: true, needsProof: true });
+    // A prova foi esquecida: sem novo código, nada a consultar.
+    status = 'confirmed';
+    expect(await session.checkProof()).toBe('expired');
+  });
+
+  it('429 do código devolve o tempo de espera; rede caída é erro retentável', async () => {
+    const a = setup(
+      () => ({
+        status: 429,
+        json: { code: 'rate_limited', retry_after_seconds: 120 },
+      }),
+      { phoneProof: true }
+    );
+    expect(await a.session.requestProof({ phone: '1' }, null)).toEqual({
+      ok: false,
+      code: 'rate_limited',
+      retryAfterSeconds: 120,
+    });
+    const b = setup(() => new Error('rede'), { phoneProof: true });
+    expect(await b.session.requestProof({ phone: '1' }, null)).toMatchObject({
+      ok: false,
+      code: 'network',
+    });
+    expect(await b.session.checkProof()).toBe('expired');
+  });
+
+  it('sem a confirmação ligada, o telefone digitado segue no `start` (modo atual)', async () => {
+    const { session, calls } = setup(() => STARTED);
+    await session.blockDone(field('phone'), { phone: '11999998888' });
+    expect(calls[0].body.phone).toBe('11999998888');
+    expect(calls[0].body.proof_id).toBeUndefined();
+  });
+});
+
+describe('código de confirmação reaproveitado (F7)', () => {
+  it('mesmo telefone com o código ainda válido: sem novo pedido; "novo código" (fresh) ou outro telefone pedem de novo', async () => {
+    let n = 0;
+    const { session, calls } = setup(
+      () => ({
+        json: {
+          proof_id: `p${++n}`,
+          proof_secret: 'sec',
+          code: `ABCD-234${n}`,
+          whatsapp_number: '5511988887777',
+          expires_in_seconds: 600,
+        },
+      }),
+      { phoneProof: true }
+    );
+    const first = await session.requestProof({ phone: '11999998888' }, null);
+    const again = await session.requestProof({ phone: '11999998888' }, null);
+    expect(again).toEqual(first);
+    expect(calls).toHaveLength(1);
+
+    const fresh = await session.requestProof({ phone: '11999998888' }, null, {
+      fresh: true,
+    });
+    expect(fresh).toMatchObject({ ok: true, code: 'ABCD-2342' });
+    const other = await session.requestProof({ phone: '11977776666' }, null);
+    expect(other).toMatchObject({ ok: true, code: 'ABCD-2343' });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('prova vencida no servidor (expired) descarta o código guardado', async () => {
+    let n = 0;
+    const { session, calls } = setup(
+      (c) =>
+        c.url.endsWith('/phone-proof/status')
+          ? { json: { status: 'expired' } }
+          : {
+              json: {
+                proof_id: `p${++n}`,
+                proof_secret: 'sec',
+                code: 'ABCD-2345',
+                whatsapp_number: '5511988887777',
+                expires_in_seconds: 600,
+              },
+            },
+      { phoneProof: true }
+    );
+    await session.requestProof({ phone: '11999998888' }, null);
+    expect(await session.checkProof()).toBe('expired');
+    await session.requestProof({ phone: '11999998888' }, null);
+    expect(calls.filter((c) => c.url.endsWith('/phone-proof'))).toHaveLength(2);
+  });
+});

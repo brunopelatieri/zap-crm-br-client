@@ -31,6 +31,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createTranslator } from 'next-intl';
 
+import { isUuid } from '@/lib/api/uuid';
 import { resolveAuditUserId } from '@/lib/api/v1/contacts';
 import { resolveDefaultChannelId } from '@/lib/channels/default-channel';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
@@ -48,6 +49,14 @@ import {
 } from './availability';
 import { resolveIdentity } from './identity';
 import { verifyFormLink, type FormLinkClaims } from './link-token';
+import {
+  consumePhoneProof,
+  formatProofCode,
+  getProofStatus,
+  issuePhoneProof,
+  restorePhoneProof,
+  type ProofStatus,
+} from './phone-proof';
 import { toPublicPayload } from './project-public';
 import {
   loadPublicFormMessages,
@@ -277,6 +286,16 @@ export async function loadPublicFormPage(
     if (mode === 'phone' && form.settings?.accept_generic_link === false) {
       return { kind: 'unavailable' };
     }
+    // F7: com a confirmação do telefone ligada e sem canal WhatsApp para
+    // recebê-la, o formulário não aceita ninguém (fail-closed, mesma página
+    // neutra): cair no telefone sem prova reabriria M-2/M-3.
+    if (
+      mode === 'phone' &&
+      form.settings?.require_phone_proof === true &&
+      !(await resolveAccountWhatsappDigits(db, availability.accountId))
+    ) {
+      return { kind: 'unavailable' };
+    }
 
     // O JSON de `theme`/`media` pode ter sido gravado direto pela RLS do
     // admin (PostgREST), sem passar pela validação das rotas: o service-role
@@ -324,6 +343,9 @@ export async function loadPublicFormPage(
 export interface StartInput {
   slug: string;
   phone: string | null;
+  /** F7: prova de posse do telefone (`phone-proof.ts`). */
+  proofId?: string | null;
+  proofSecret?: string | null;
   linkToken: string | null;
   utm: unknown;
   /** `embed` só vale sem token (o token traz a origem dele). */
@@ -387,13 +409,62 @@ export async function startResponse(input: StartInput): Promise<StartResult> {
     );
   }
 
+  // F7: com a confirmação ligada o telefone DIGITADO nunca chega a
+  // `resolveIdentity` (que cria contato): só o telefone de uma prova
+  // confirmada pelo WhatsApp e consumida agora (uso único). O token do link
+  // continua valendo sozinho (foi enviado àquele contato).
+  const proofRequired = form.settings?.require_phone_proof === true;
+  let phoneForIdentity = input.phone;
+  let consumedProofId: string | null = null;
+  if (proofRequired) {
+    phoneForIdentity = null;
+    if (!claims) {
+      if (!input.proofId || !isUuid(input.proofId)) {
+        throw new PublicApiError(
+          400,
+          'phone_proof_required',
+          'Confirm your phone number on WhatsApp first.'
+        );
+      }
+      const proof = await consumePhoneProof(db, {
+        accountId: availability.accountId,
+        formId: form.id,
+        proofId: input.proofId,
+        secret: input.proofSecret,
+      });
+      if (!proof.ok) {
+        if (proof.reason === 'error') {
+          throw new PublicApiError(
+            500,
+            'unexpected',
+            'Something went wrong. Try again.'
+          );
+        }
+        throw new PublicApiError(
+          400,
+          'phone_proof_required',
+          'Confirm your phone number on WhatsApp first.'
+        );
+      }
+      phoneForIdentity = proof.phone;
+      consumedProofId = proof.proofId;
+    }
+  }
+
   const identity = await resolveIdentity(db, {
     formId: form.id,
     accountId: availability.accountId,
     token: input.linkToken,
-    phone: input.phone,
+    phone: phoneForIdentity,
     auditUserId,
   });
+  if (!identity.ok && consumedProofId) {
+    // A prova era boa e o `start` falhou por motivo que não é do visitante.
+    await restorePhoneProof(db, {
+      accountId: availability.accountId,
+      proofId: consumedProofId,
+    });
+  }
   if (!identity.ok) {
     switch (identity.reason) {
       case 'invalid_phone':
@@ -481,6 +552,154 @@ export async function startResponse(input: StartInput): Promise<StartResult> {
     resumeToken,
     identityMode: identity.mode,
   };
+}
+
+// ------------------------------------------------------------
+// Prova de posse do telefone (F7)
+// ------------------------------------------------------------
+
+/** Formulário publicado, no modo telefone, que exige a confirmação. */
+async function loadProofForm(db: Db, slug: string) {
+  const availability = await checkAvailability(db, slug, true);
+  if (!isFormAvailable(availability)) throw unavailableError();
+  const loaded = await loadFormAndFields(
+    db,
+    availability.formId,
+    availability.accountId
+  );
+  if (!loaded) throw unavailableError();
+  const { form } = loaded;
+  if (form.settings?.accept_generic_link === false) {
+    throw new PublicApiError(
+      403,
+      'token_required',
+      'This form only accepts personal links.'
+    );
+  }
+  if (form.settings?.require_phone_proof !== true) {
+    throw new PublicApiError(
+      400,
+      'phone_proof_not_required',
+      'This form does not require phone confirmation.'
+    );
+  }
+  return { form, accountId: availability.accountId };
+}
+
+export interface PhoneProofRequestInput {
+  slug: string;
+  phone: string | null;
+  turnstile: unknown;
+  ip: string | null;
+  ipHash: string | null;
+}
+
+export interface PhoneProofRequestResult {
+  proofId: string;
+  proofSecret: string;
+  /** `ABCD-EFGH`. */
+  code: string;
+  /** Dígitos do número da conta: a página monta o `wa.me` no idioma do formulário. */
+  whatsappNumber: string;
+  expiresInSeconds: number;
+}
+
+/**
+ * `POST …/phone-proof`: gera o código. Nada toca `contacts`. Sem canal
+ * WhatsApp na conta não há onde receber a mensagem: 409 (a página já nem
+ * abre nesse caso, `loadPublicFormPage`).
+ */
+export async function requestPhoneProof(
+  input: PhoneProofRequestInput
+): Promise<PhoneProofRequestResult> {
+  const db = supabaseAdmin();
+  const { form, accountId } = await loadProofForm(db, input.slug);
+
+  if (!input.phone) {
+    throw new PublicApiError(422, 'invalid_phone', 'Invalid phone number.');
+  }
+  const digits = await resolveAccountWhatsappDigits(db, accountId);
+  if (!digits) {
+    throw new PublicApiError(
+      409,
+      'proof_unavailable',
+      'Phone confirmation is not available right now.'
+    );
+  }
+  // O Turnstile protege a tabela de provas e os tetos do banco contra robô;
+  // o token é de uso único e este é um desafio à parte do envio final.
+  if (form.settings?.turnstile === true && turnstileSiteKey()) {
+    if (!(await verifyTurnstile(input.turnstile, input.ip))) {
+      throw new PublicApiError(
+        400,
+        'turnstile_failed',
+        'Human verification failed.'
+      );
+    }
+  }
+
+  const issued = await issuePhoneProof(db, {
+    accountId,
+    formId: form.id,
+    phone: input.phone,
+    ipHash: input.ipHash,
+  });
+  if (!issued.ok) {
+    if (issued.reason === 'invalid_phone') {
+      throw new PublicApiError(422, 'invalid_phone', 'Invalid phone number.');
+    }
+    if (issued.reason === 'rate_limited') {
+      throw new PublicApiError(
+        429,
+        'rate_limited',
+        'Too many codes requested. Try again later.',
+        { retry_after_seconds: issued.retryAfterSeconds ?? 60 }
+      );
+    }
+    throw new PublicApiError(
+      500,
+      'unexpected',
+      'Something went wrong. Try again.'
+    );
+  }
+  return {
+    proofId: issued.proofId,
+    proofSecret: issued.secret,
+    code: formatProofCode(issued.code),
+    whatsappNumber: digits,
+    expiresInSeconds: Math.max(
+      1,
+      Math.round((issued.expiresAt.getTime() - Date.now()) / 1000)
+    ),
+  };
+}
+
+/** `POST …/phone-proof/status`: a mensagem já chegou? */
+export async function phoneProofStatus(input: {
+  slug: string;
+  proofId: string;
+  proofSecret: unknown;
+}): Promise<ProofStatus> {
+  const db = supabaseAdmin();
+  // Só o RPC de disponibilidade (ids escopados): a página consulta isto a
+  // cada 3 s por visitante em espera, então não relê formulário nem blocos.
+  // O `UPDATE`/`SELECT` da prova já é escopado por conta e formulário.
+  const availability = await checkAvailability(db, input.slug, true);
+  if (!isFormAvailable(availability)) throw unavailableError();
+  const status = await getProofStatus(db, {
+    accountId: availability.accountId,
+    formId: availability.formId,
+    proofId: input.proofId,
+    secret: input.proofSecret,
+  });
+  if (status === 'error') {
+    throw new PublicApiError(
+      500,
+      'unexpected',
+      'Something went wrong. Try again.'
+    );
+  }
+  return status;
 }
 
 // ------------------------------------------------------------
@@ -839,6 +1058,29 @@ export interface ThankYou {
   redirect_url: string | null;
 }
 
+/**
+ * Número do WhatsApp da conta (dígitos), do canal padrão. `null` sem canal
+ * ativo ou sem identificador que pareça um número.
+ */
+export async function resolveAccountWhatsappDigits(
+  db: Db,
+  accountId: string
+): Promise<string | null> {
+  try {
+    const channelId = await resolveDefaultChannelId(db, accountId);
+    const { data } = await db
+      .from('channels')
+      .select('identifier')
+      .eq('id', channelId)
+      .eq('account_id', accountId)
+      .maybeSingle();
+    const digits = String(data?.identifier ?? '').replace(/\D/g, '');
+    return digits.length >= 8 && digits.length <= 15 ? digits : null;
+  } catch {
+    return null;
+  }
+}
+
 async function buildThankYou(db: Db, form: Form): Promise<ThankYou> {
   const cfg = form.theme?.thank_you ?? {};
   const redirect =
@@ -847,23 +1089,12 @@ async function buildThankYou(db: Db, form: Form): Promise<ThankYou> {
       : null;
   let whatsapp: string | null = null;
   if (cfg.whatsapp_cta === true) {
-    try {
-      const channelId = await resolveDefaultChannelId(db, form.account_id);
-      const { data } = await db
-        .from('channels')
-        .select('identifier')
-        .eq('id', channelId)
-        .eq('account_id', form.account_id)
-        .maybeSingle();
-      const digits = String(data?.identifier ?? '').replace(/\D/g, '');
-      if (digits.length >= 8 && digits.length <= 15) {
-        const text = cfg.whatsapp_text?.trim();
-        whatsapp = `https://wa.me/${digits}${
-          text ? `?text=${encodeURIComponent(text.slice(0, 500))}` : ''
-        }`;
-      }
-    } catch {
-      whatsapp = null;
+    const digits = await resolveAccountWhatsappDigits(db, form.account_id);
+    if (digits) {
+      const text = cfg.whatsapp_text?.trim();
+      whatsapp = `https://wa.me/${digits}${
+        text ? `?text=${encodeURIComponent(text.slice(0, 500))}` : ''
+      }`;
     }
   }
   return { whatsapp_url: whatsapp, redirect_url: redirect };

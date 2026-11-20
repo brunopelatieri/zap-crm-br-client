@@ -209,6 +209,7 @@ export function parseSettings(raw: unknown): ParseResult<FormSettings> {
   const flags = [
     'accept_generic_link',
     'confirm_phone_with_token',
+    'require_phone_proof',
     'allow_multiple_responses',
     'turnstile',
     'robots_noindex',

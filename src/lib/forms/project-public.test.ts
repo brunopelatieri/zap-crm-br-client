@@ -201,3 +201,26 @@ describe('cores do tema (achado da revisão)', () => {
     ).toEqual({ primary: '#16a34a', button: '#ABCDEF80' });
   });
 });
+
+describe('phone_proof (F7)', () => {
+  const { fields } = loadedForm();
+  const on = makeForm({ settings: { require_phone_proof: true } });
+
+  it('só no modo telefone: com token o link já prova o contato', () => {
+    const phone = toPublicPayload(on, fields, { identity: 'phone' });
+    expect(phone.settings.phone_proof).toBe(true);
+    const token = toPublicPayload(on, fields, { identity: 'token' });
+    expect(token.settings.phone_proof).toBe(false);
+  });
+
+  it('desligado (padrão) não liga, e a chave interna não vaza no JSON', () => {
+    const off = toPublicPayload(makeForm({ settings: {} }), fields, {
+      identity: 'phone',
+    });
+    expect(off.settings.phone_proof).toBe(false);
+    const json = JSON.stringify(
+      toPublicPayload(on, fields, { identity: 'phone' })
+    );
+    expect(json).not.toContain('require_phone_proof');
+  });
+});

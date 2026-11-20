@@ -56,7 +56,7 @@ Checklist executável do [§12.3 da SPEC 085](./spec-085-formularios-nucleo.md#1
 
 **Critérios para escolher a conta:** conta interna do mantenedor (não de cliente pagante), com plano que não seja o Grátis (o teto de contatos do Grátis é 150 e o item 6 precisa de folga), `blocked_at` nulo, pelo menos dois membros (`admin` e `viewer`) para os itens de papel.
 
-1. [ ] **Ler o estado atual** da conta escolhida:
+1. [x] **Ler o estado atual** da conta escolhida (✓ 2026-11-19: conta `941045d6-4d94-4184-b7a0-5f5ef41fee23`, plano Valen Ranch Personal, `limit_overrides` vazio, `forms_on = false`, 83 de 85 contatos):
 
    ```sql
    select a.id, a.name, a.blocked_at, p.name plano, ap.limit_overrides,
@@ -67,7 +67,7 @@ Checklist executável do [§12.3 da SPEC 085](./spec-085-formularios-nucleo.md#1
     where a.id = :'ACC';
    ```
 
-2. [ ] **Ligar (DML — pedir confirmação).** Preferência: console `/admin` → conta → plano → overrides (fica no histórico `overrides_after` com ator e motivo). Equivalente em SQL, se o console não aceitar alguma chave:
+2. [x] **Ligar (DML — pedir confirmação)** (✓ 2026-11-19 por SQL, com "pode ligar" do mantenedor; `limit_overrides` = `forms_enabled: true, forms: 3, form_responses_month: 200, form_upload_mb: 100`). Preferência: console `/admin` → conta → plano → overrides (fica no histórico `overrides_after` com ator e motivo). Equivalente em SQL, se o console não aceitar alguma chave:
 
    ```sql
    -- (DML) só a conta-piloto; preserva os overrides que já existem
@@ -78,7 +78,7 @@ Checklist executável do [§12.3 da SPEC 085](./spec-085-formularios-nucleo.md#1
     where account_id = :'ACC';
    ```
 
-3. [ ] **Conferir que só ela passou:**
+3. [x] **Conferir que só ela passou** (✓ 2026-11-19: `forms_on = true` só na conta-piloto, com 3 / 200 / 100; as outras 4 contas `false` e sem limites):
 
    ```sql
    select a.name, plan_feature_strict(a.id, 'forms_enabled') forms_on,
@@ -98,7 +98,7 @@ update account_plans
  where account_id = :'ACC';
 ```
 
-**Critério para sair do piloto** (decisão do mantenedor): todos os itens do §2 marcados, nenhum achado novo HIGH/MEDIUM, e decisão tomada sobre os riscos aceitos **M-2** e **M-3** do Status da SPEC (contato criado no `start` sem prova de posse; modo telefone agindo sobre contato conhecido). Só então pôr as três quotas nos `plans.limits` e `forms_enabled` nos planos pagos.
+**Critério para sair do piloto** (decisão do mantenedor): todos os itens do §2 marcados, nenhum achado novo HIGH/MEDIUM, e os riscos **M-2** e **M-3** do Status da SPEC tratados: o formulário público do piloto usa a **confirmação do telefone pelo WhatsApp** (F7, cenário 14) — sem ela os dois riscos continuam valendo. Só então pôr as três quotas nos `plans.limits` e `forms_enabled` nos planos pagos.
 
 ---
 
@@ -260,6 +260,30 @@ Cada item: **Passos** → **Esperado** → **Conferir**. Anote o resultado ao la
 ### 13. Teto de URLs de upload por conta (correção F6, M-1)
 
 - [ ] Só leitura de comportamento: não é prático gerar 600 uploads à mão. Conferir no log do servidor que nenhum `rate_limited` aparece no uso normal do piloto; o teste automatizado (`routes.test.ts`, "teto por conta") prova o 601º → 429.
+
+### 14. F7 — confirmação do telefone pelo WhatsApp (fecha M-2 e M-3)
+
+> **Pré-requisitos:** a migração `100_form_phone_proofs.sql` (aplicada no `vn` em 2026-11-19; conferir `to_regclass('public.form_phone_proofs')` e `has_table_privilege('anon'|'authenticated', 'public.form_phone_proofs', 'SELECT')` = `false`) e a conta-piloto com um **canal WhatsApp conectado** (Cloud ou QRCode). Use um segundo telefone seu, que **não** seja contato, para ser o visitante.
+
+- [ ] **Ligar:** no construtor → Configurações → **Confirmar o telefone pelo WhatsApp** (aparece só com o link genérico aceito) → salvar. Abrir `/f/<slug>` no celular, informar o telefone do visitante.
+- **Esperado:** depois do telefone aparece a tela "Confirme seu telefone" com um código `XXXX-XXXX` e o botão **Abrir o WhatsApp e enviar**. **Nenhuma** linha nova em `contacts` e nenhuma em `form_responses` ainda.
+- **Conferir (antes de enviar a mensagem):**
+
+  ```sql
+  select count(*) from contacts where account_id = :'ACC' and phone_normalized = '<telefone do visitante>';  -- 0
+  select count(*) from form_responses where account_id = :'ACC' and started_at > now() - interval '10 minutes';  -- 0 (do visitante)
+  select status, expires_at, left(code,2) || '******' code from form_phone_proofs where account_id = :'ACC' order by created_at desc limit 1;  -- pending, ~10 min
+  ```
+
+- [ ] **Enviar do telefone certo:** tocar no botão, enviar a mensagem pré-escrita **sem editar**. **Esperado:** em poucos segundos (polling de 3 s) a página avança sozinha para a pergunta seguinte; no inbox a mensagem do código aparece na conversa (contato criado pelo recebimento normal) e **nenhuma** automação/flow/IA respondeu a ela.
+- **Conferir:** a prova virou `consumed`; a resposta `partial` tem o `contact_id` do contato do telefone; `select status from form_phone_proofs …` → `consumed`.
+- [ ] **Código de outro telefone (M-3):** num novo ciclo, informar o telefone **A** (de um contato existente, que não é o seu) e enviar o código do WhatsApp do telefone **B**. **Esperado:** a página fica em "Aguardando…"; a prova segue `pending`; nada muda no contato de A; ao vencer (10 min) oferece "Gerar um novo código".
+- [ ] **Uso único e vencimento:** depois de concluir um ciclo, repetir o `start` com o mesmo `proof_id` (DevTools → reenviar o `POST …/start`) → `400 phone_proof_required`. Deixar uma prova `pending` vencer e mandar o código depois: a página não avança e a prova não vira `confirmed`.
+- [ ] **Limites:** pedir "Gerar um novo código" duas vezes em menos de 30 s → mensagem de espera (429, `Retry-After`); 6 pedidos para o mesmo telefone na hora → recusado.
+- [ ] **Sem canal conectado:** com o formulário no modo confirmação, desconectar/desabilitar o canal da conta-piloto (reconectar depois). **Esperado:** `/f/<slug>` mostra a **mesma página neutra** (HTTP 200) e `POST …/phone-proof` → `409 proof_unavailable`; nada é criado.
+- [ ] **Link pessoal não muda:** com a confirmação ligada, o link com token (item 3) continua pulando o telefone e abre direto.
+- [ ] **Desligar:** voltar a chave para desligada: o link genérico volta ao modo antigo (telefone digitado cria o contato, item 1). Registre que **este** modo mantém M-2/M-3.
+- [ ] **Limpeza:** a varredura (cron, fase 7) apaga as provas vencidas há mais de 1 dia; conferir `select count(*) from form_phone_proofs where expires_at < now() - interval '1 day'` = 0 depois de um tick.
 
 ---
 

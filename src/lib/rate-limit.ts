@@ -233,6 +233,12 @@ export const RATE_LIMITS = {
   formAutosave: { limit: 120, windowMs: 60_000 },
   formUpload: { limit: 20, windowMs: 60_000 },
   formSubmit: { limit: 10, windowMs: 60_000 },
+  /** F7: pedir o código de confirmação do telefone (cria linha em
+   *  `form_phone_proofs`) e consultar se a mensagem já chegou (polling a
+   *  cada 3 s por quem espera, ~20/min). Além disto, limites no banco por
+   *  telefone/formulário/conta (`PROOF_LIMITS`). */
+  formPhoneProof: { limit: 10, windowMs: 60_000 },
+  formPhoneProofStatus: { limit: 60, windowMs: 60_000 },
   /** URLs de upload assinadas por CONTA (todas as rotas e formulários), por
    *  hora (SPEC 085 F6, achado M-1). O arquivo pendente só entra na quota de
    *  bytes no envio; sem este teto, um visitante anônimo girando de IP

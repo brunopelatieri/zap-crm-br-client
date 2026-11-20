@@ -71,6 +71,20 @@ export const PUBLIC_FORM_MESSAGE_KEYS = [
   'turnstileRequired',
   'submitFailed',
   'thankYou.redirecting',
+  'phoneProof.title',
+  'phoneProof.body',
+  'phoneProof.codeLabel',
+  'phoneProof.open',
+  'phoneProof.whatsappText',
+  'phoneProof.waiting',
+  'phoneProof.confirmed',
+  'phoneProof.requesting',
+  'phoneProof.expired',
+  'phoneProof.newCode',
+  'phoneProof.changeNumber',
+  'phoneProof.rateLimited',
+  'phoneProof.unavailable',
+  'phoneProof.failed',
 ] as const;
 
 export type PublicFormMessageKey = (typeof PUBLIC_FORM_MESSAGE_KEYS)[number];

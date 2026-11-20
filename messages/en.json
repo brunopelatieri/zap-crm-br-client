@@ -4552,7 +4552,23 @@
     "tooFast": "Please wait a moment and try again.",
     "turnstileFailed": "We could not confirm you are not a robot. Try again.",
     "turnstileRequired": "Confirm you are not a robot to continue",
-    "submitFailed": "We could not send your answers. Try again."
+    "submitFailed": "We could not send your answers. Try again.",
+    "phoneProof": {
+      "title": "Confirm your phone number",
+      "body": "To protect your data, send the code below from your own WhatsApp to our number. Tap the button and just send the message that appears.",
+      "codeLabel": "Confirmation code",
+      "open": "Open WhatsApp and send",
+      "whatsappText": "I want to confirm my phone number for the form. Code: {code}",
+      "waiting": "Waiting for your message… this page continues on its own.",
+      "confirmed": "Phone confirmed! Continuing…",
+      "requesting": "Generating your code…",
+      "expired": "The code expired. Generate a new one to continue.",
+      "newCode": "Generate a new code",
+      "changeNumber": "Use another number",
+      "rateLimited": "Too many codes requested for this number. Try again in {minutes, plural, =1 {# minute} other {# minutes}}.",
+      "unavailable": "Phone confirmation is not available right now. Try again later.",
+      "failed": "We could not generate the code. Try again."
+    }
   },
   "Forms": {
     "status": {
@@ -5008,6 +5024,8 @@
         "acceptGenericHint": "On: anyone with the link can answer, and the form asks for the phone first. Off: only personal links work.",
         "confirmPhone": "Confirm the phone even with a personal link",
         "confirmPhoneHint": "Off: a personal link skips the phone question.",
+        "phoneProof": "Confirm the phone on WhatsApp",
+        "phoneProofHint": "On: with the generic link, the visitor sends a code from their own WhatsApp to your number before any contact is created or changed. Needs a connected WhatsApp channel; without one the form shows the unavailable page. Personal links are not affected. Off: the typed phone is trusted (anyone who knows a number can act on that contact).",
         "tokenTtl": "Personal link validity (days)",
         "tokenTtlHint": "After this period the link asks for the phone again.",
         "tokenMissing": "Personal links are not configured on this server (FORM_LINK_SECRET). The generic link works normally.",

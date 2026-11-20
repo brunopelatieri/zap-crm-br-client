@@ -86,6 +86,113 @@ export function defaultForm(over: Partial<Form> = {}): Form {
   });
 }
 
+export interface StoredProof {
+  id: string;
+  account_id: string;
+  form_id: string;
+  phone: string;
+  code: string;
+  secret_hash: string;
+  status: string;
+  ip_hash: string | null;
+  expires_at: string;
+  confirmed_at: string | null;
+  consumed_at: string | null;
+  created_at: string;
+}
+
+/**
+ * `form_phone_proofs` (F7) em memória: eq/gt/gte/lt/in, order, limit,
+ * select/insert/update/delete, `count` com `head` e o índice único parcial
+ * `(account_id, code) WHERE status = 'pending'` (23505).
+ */
+function resolveProofs(
+  rows: StoredProof[],
+  ops: Op[],
+  clock: () => number
+): Record<string, unknown> {
+  const filters = ops.filter((o) =>
+    ['eq', 'gt', 'gte', 'lt', 'lte', 'in'].includes(o.method)
+  );
+  const match = (r: StoredProof) =>
+    filters.every((f) => {
+      const x = (r as unknown as Record<string, unknown>)[String(f.args[0])];
+      const v = f.args[1];
+      switch (f.method) {
+        case 'eq':
+          return x === v;
+        case 'gt':
+          return String(x) > String(v);
+        case 'gte':
+          return String(x) >= String(v);
+        case 'lt':
+          return String(x) < String(v);
+        case 'lte':
+          return String(x) <= String(v);
+        default:
+          return (v as unknown[]).includes(x);
+      }
+    });
+  const insertOp = ops.find((o) => o.method === 'insert');
+  if (insertOp) {
+    const row = insertOp.args[0] as Record<string, unknown>;
+    if (
+      rows.some(
+        (r) =>
+          r.status === 'pending' &&
+          r.account_id === row.account_id &&
+          r.code === row.code
+      )
+    ) {
+      return { data: null, error: { code: '23505', message: 'duplicate' } };
+    }
+    const stored = {
+      status: 'pending',
+      ip_hash: null,
+      confirmed_at: null,
+      consumed_at: null,
+      ...row,
+      id: crypto.randomUUID(),
+      created_at: new Date(clock()).toISOString(),
+    } as StoredProof;
+    rows.push(stored);
+    return { data: { id: stored.id } };
+  }
+  const updateOp = ops.find((o) => o.method === 'update');
+  if (updateOp) {
+    const hit = rows.filter(match);
+    for (const r of hit) Object.assign(r, updateOp.args[0]);
+    return { data: hit.map((r) => ({ id: r.id })) };
+  }
+  if (ops.some((o) => o.method === 'delete')) {
+    const hit = rows.filter(match);
+    for (const r of hit) rows.splice(rows.indexOf(r), 1);
+    return { data: hit.map((r) => ({ id: r.id })) };
+  }
+  let hit = rows.filter(match);
+  const order = ops.find((o) => o.method === 'order');
+  if (order) {
+    const col = String(order.args[0]);
+    const asc = (order.args[1] as { ascending?: boolean } | undefined)
+      ?.ascending;
+    hit = [...hit].sort((a, b) => {
+      const x = String((a as unknown as Record<string, unknown>)[col]);
+      const y = String((b as unknown as Record<string, unknown>)[col]);
+      return asc === false ? y.localeCompare(x) : x.localeCompare(y);
+    });
+  }
+  const limit = ops.find((o) => o.method === 'limit');
+  if (limit) hit = hit.slice(0, Number(limit.args[0]));
+  const select = ops.find((o) => o.method === 'select');
+  if ((select?.args[1] as { head?: boolean } | undefined)?.head) {
+    return { data: null, count: hit.length };
+  }
+  if (ops.some((o) => o.method === 'maybeSingle' || o.method === 'single')) {
+    return { data: hit[0] ?? null };
+  }
+  return { data: hit };
+}
+
 export function createWorld(
   initial: { form?: Form; fields?: FormField[] } = {}
 ) {
@@ -94,6 +201,10 @@ export function createWorld(
     form: initial.form ?? defaultForm(),
     fields: initial.fields ?? defaultFields(),
     contacts: [] as StoredContact[],
+    /** F7: `form_phone_proofs`. */
+    proofs: [] as StoredProof[],
+    /** Relógio do banco falso (carimbo de `created_at` das provas). */
+    clock: () => Date.now(),
     responses: new Map<string, StoredResponse>(),
     /** Respostas `completed` do contato (para `allow_multiple_responses`). */
     completed: [] as { id: string }[],
@@ -180,6 +291,8 @@ export function createWorld(
           row.account_id === where.get('account_id');
         return { data: ok ? row : null };
       }
+      case 'form_phone_proofs':
+        return resolveProofs(state.proofs, ops, state.clock);
       case 'channels':
         return { data: { identifier: '+55 (11) 98888-7777' } };
       default:

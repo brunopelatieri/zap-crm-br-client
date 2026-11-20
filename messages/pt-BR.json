@@ -4552,7 +4552,23 @@
     "tooFast": "Aguarde um instante e tente de novo.",
     "turnstileFailed": "Não conseguimos confirmar que você não é um robô. Tente de novo.",
     "turnstileRequired": "Confirme que você não é um robô para continuar",
-    "submitFailed": "Não foi possível enviar suas respostas. Tente de novo."
+    "submitFailed": "Não foi possível enviar suas respostas. Tente de novo.",
+    "phoneProof": {
+      "title": "Confirme seu telefone",
+      "body": "Para proteger seus dados, envie o código abaixo pelo seu próprio WhatsApp para o nosso número. Toque no botão e só envie a mensagem que aparecer.",
+      "codeLabel": "Código de confirmação",
+      "open": "Abrir o WhatsApp e enviar",
+      "whatsappText": "Quero confirmar meu telefone no formulário. Código: {code}",
+      "waiting": "Aguardando a sua mensagem… esta página continua sozinha.",
+      "confirmed": "Telefone confirmado! Continuando…",
+      "requesting": "Gerando o seu código…",
+      "expired": "O código venceu. Gere um novo para continuar.",
+      "newCode": "Gerar um novo código",
+      "changeNumber": "Usar outro número",
+      "rateLimited": "Muitos códigos pedidos para este número. Tente de novo em {minutes, plural, =1 {# minuto} other {# minutos}}.",
+      "unavailable": "A confirmação do telefone não está disponível agora. Tente de novo mais tarde.",
+      "failed": "Não foi possível gerar o código. Tente de novo."
+    }
   },
   "Forms": {
     "status": {
@@ -5008,6 +5024,8 @@
         "acceptGenericHint": "Ligado: qualquer pessoa com o link pode responder, e o formulário pede o telefone primeiro. Desligado: só funcionam links pessoais.",
         "confirmPhone": "Confirmar o telefone mesmo com link pessoal",
         "confirmPhoneHint": "Desligado: o link pessoal pula a pergunta do telefone.",
+        "phoneProof": "Confirmar o telefone pelo WhatsApp",
+        "phoneProofHint": "Ligado: no link genérico, o visitante envia um código do próprio WhatsApp para o número da conta antes de qualquer contato ser criado ou alterado. Exige um canal de WhatsApp conectado; sem ele o formulário mostra a página indisponível. Links pessoais não mudam. Desligado: o telefone digitado é aceito (quem conhece um número age sobre aquele contato).",
         "tokenTtl": "Validade do link pessoal (dias)",
         "tokenTtlHint": "Depois desse prazo o link volta a pedir o telefone.",
         "tokenMissing": "Os links pessoais não estão configurados neste servidor (FORM_LINK_SECRET). O link genérico funciona normalmente.",

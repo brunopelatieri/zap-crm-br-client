@@ -165,6 +165,8 @@ export function toPublicPayload(
     settings: {
       allow_multiple_responses: settings.allow_multiple_responses === true,
       confirm_phone_with_token: settings.confirm_phone_with_token === true,
+      phone_proof:
+        opts.identity === 'phone' && settings.require_phone_proof === true,
       turnstile_site_key:
         settings.turnstile === true && opts.turnstileSiteKey
           ? opts.turnstileSiteKey

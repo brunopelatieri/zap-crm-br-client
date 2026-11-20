@@ -127,6 +127,16 @@ export function SettingsEditor({
             onCheckedChange={onAcceptGenericLink}
           />
         </ToggleRow>
+        {s.accept_generic_link !== false && (
+          <ToggleRow label={t('phoneProof')} hint={t('phoneProofHint')}>
+            <Switch
+              checked={s.require_phone_proof === true}
+              onCheckedChange={(checked) =>
+                onSettings({ require_phone_proof: checked })
+              }
+            />
+          </ToggleRow>
+        )}
         <ToggleRow label={t('confirmPhone')} hint={t('confirmPhoneHint')}>
           <Switch
             checked={s.confirm_phone_with_token === true}

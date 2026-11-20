@@ -25,6 +25,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isUuid } from '@/lib/api/uuid';
 
+import { sweepPhoneProofs } from './phone-proof';
 import { FORM_UPLOADS_BUCKET } from './uploads';
 
 export const ABANDON_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -56,6 +57,8 @@ export interface FormsSweepResult {
   scannedFolders: number;
   removedFolders: number;
   removedObjects: number;
+  /** Provas de telefone (F7) apagadas. */
+  phoneProofsRemoved: number;
   errors: number;
 }
 
@@ -66,6 +69,7 @@ export function emptySweepResult(): FormsSweepResult {
     scannedFolders: 0,
     removedFolders: 0,
     removedObjects: 0,
+    phoneProofsRemoved: 0,
     errors: 0,
   };
 }
@@ -277,6 +281,13 @@ export async function runFormsSweep(
     const abandoned = await abandonStalePartials(db, now);
     result.abandoned = abandoned.count;
     if (abandoned.error) result.errors++;
+  } catch {
+    result.errors++;
+  }
+
+  // F7: provas de telefone vencidas há mais de um dia (barato, todo tick).
+  try {
+    result.phoneProofsRemoved = await sweepPhoneProofs(db, now);
   } catch {
     result.errors++;
   }

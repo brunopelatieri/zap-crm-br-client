@@ -42,6 +42,7 @@ import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
 import { looksLikePortalCodeMessage } from '@/lib/contact-portal/delivery';
 import { handlePortalKeyword } from '@/lib/contact-portal/keyword';
+import { handleInboundPhoneProof } from '@/lib/forms/phone-proof';
 import { shouldTrackSessionWindow } from './session-window';
 import type {
   ChannelType,
@@ -464,7 +465,7 @@ export async function ingestInbound(
   // como no consumo por flow. `handlePortalKeyword` nunca lança e só
   // consulta o banco quando o texto tem tamanho de palavra-chave.
   // ============================================================
-  const portalConsumed =
+  const portalKeywordConsumed =
     !event.interactiveReplyId && !optOutKeyword
       ? await handlePortalKeyword({
           db,
@@ -475,6 +476,27 @@ export async function ingestInbound(
           text: inboundText,
         })
       : false;
+
+  // ============================================================
+  // Código de confirmação de telefone de formulário (SPEC 085 F7).
+  //
+  // O visitante de um formulário com `require_phone_proof` manda, do próprio
+  // WhatsApp, o código mostrado na página ao número da conta; o remetente
+  // (autenticado pelo provedor) é a prova de posse. Mesma postura da
+  // palavra-chave acima: consome a mensagem (nenhum gatilho de conteúdo
+  // nem IA responde "ABCD-EFGH"); ela continua no inbox. Só consulta o banco
+  // quando o texto tem a forma de um código; nunca lança.
+  // ============================================================
+  const formProofConsumed =
+    !portalKeywordConsumed && !event.interactiveReplyId && !optOutKeyword
+      ? await handleInboundPhoneProof({
+          db,
+          accountId,
+          senderPhone: contactRecord.phone,
+          text: inboundText,
+        })
+      : false;
+  const portalConsumed = portalKeywordConsumed || formProofConsumed;
 
   // ============================================================
   // Flow runner dispatch.

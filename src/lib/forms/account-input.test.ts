@@ -9,6 +9,7 @@ import {
   parseFormPatch,
   parseLinkBody,
   parseScoring,
+  parseSettings,
   parseTheme,
 } from './account-input';
 import {
@@ -368,6 +369,23 @@ describe('parseLinkBody / parseDuplicateBody', () => {
     expect(parseDuplicateBody({ name: ' Cópia ' })).toEqual({
       ok: true,
       value: { name: 'Cópia' },
+    });
+  });
+});
+
+describe('parseSettings: require_phone_proof (F7)', () => {
+  it('aceita o booleano e descarta o que não é booleano', () => {
+    expect(parseSettings({ require_phone_proof: true })).toEqual({
+      ok: true,
+      value: { require_phone_proof: true },
+    });
+    expect(parseSettings({ require_phone_proof: false })).toEqual({
+      ok: true,
+      value: { require_phone_proof: false },
+    });
+    expect(parseSettings({ require_phone_proof: 'yes' })).toEqual({
+      ok: true,
+      value: {},
     });
   });
 });

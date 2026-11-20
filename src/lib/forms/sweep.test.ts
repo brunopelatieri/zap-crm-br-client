@@ -110,7 +110,9 @@ function makeWorld(opts: {
   /** caminho (sem barra final) → entradas */
   tree: Record<string, { name: string; id: string | null }[]>;
   dbError?: boolean;
+  proofsDeleted?: number;
 }) {
+  const proofCuts: { column: string; value: string }[] = [];
   const removed: string[][] = [];
   const updates: { ids: string[]; patch: unknown }[] = [];
   const rows = opts.rows;
@@ -129,6 +131,26 @@ function makeWorld(opts: {
       }),
     },
     from: (table: string) => {
+      if (table === 'form_phone_proofs') {
+        // F7: a varredura também apaga provas de telefone vencidas.
+        const proofs: Record<string, unknown> = {};
+        proofs.delete = () => proofs;
+        proofs.lt = (c: string, v: string) => {
+          proofCuts.push({ column: c, value: v });
+          return proofs;
+        };
+        proofs.select = () => proofs;
+        proofs.then = (res: (v: unknown) => unknown) =>
+          Promise.resolve({
+            data: opts.dbError
+              ? null
+              : Array.from({ length: opts.proofsDeleted ?? 0 }, (_, i) => ({
+                  id: i,
+                })),
+            error: opts.dbError ? { message: 'boom' } : null,
+          }).then(res);
+        return proofs;
+      }
       expect(table).toBe('form_responses');
       const ctx: {
         mode: 'select' | 'update';
@@ -169,7 +191,7 @@ function makeWorld(opts: {
       return chain;
     },
   };
-  return { db: db as never, removed, updates, rows };
+  return { db: db as never, removed, updates, rows, proofCuts };
 }
 
 describe('abandonStalePartials', () => {
@@ -243,6 +265,18 @@ describe('runFormsSweep', () => {
         `${ACC}/${FORM}/${uuid(99)}/c.pdf`,
       ].sort()
     );
+  });
+
+  it('apaga provas de telefone vencidas há mais de 1 dia, em todo tick (F7)', async () => {
+    const w = makeWorld({ rows: [], tree: tree(), proofsDeleted: 4 });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(res.phoneProofsRemoved).toBe(4);
+    expect(w.proofCuts).toEqual([
+      {
+        column: 'expires_at',
+        value: new Date(NOW.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+      },
+    ]);
   });
 
   it('a varredura de Storage roda no máximo 1 vez por hora; o abandono, sempre', async () => {

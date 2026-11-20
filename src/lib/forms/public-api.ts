@@ -26,7 +26,12 @@ import {
 export { getClientIp };
 
 export type PublicRateBucket =
-  'formStart' | 'formAutosave' | 'formUpload' | 'formSubmit';
+  | 'formStart'
+  | 'formAutosave'
+  | 'formUpload'
+  | 'formSubmit'
+  | 'formPhoneProof'
+  | 'formPhoneProofStatus';
 
 /** Teto do corpo das rotas públicas (as respostas de um formulário cabem folgadas). */
 export const PUBLIC_BODY_MAX_CHARS = 256 * 1024;

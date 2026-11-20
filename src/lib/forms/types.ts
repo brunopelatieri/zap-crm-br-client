@@ -217,6 +217,12 @@ export interface FormSettings {
   /** `true` (padrão): `/f/<slug>` sem token pede o telefone (PRD D-2). */
   accept_generic_link?: boolean;
   confirm_phone_with_token?: boolean;
+  /**
+   * F7: `/f/<slug>` sem token só aceita o telefone depois de o visitante
+   * enviá-lo, do próprio WhatsApp, ao número da conta (prova de posse).
+   * Padrão falso (modo antigo, com os riscos M-2/M-3 da SPEC 085).
+   */
+  require_phone_proof?: boolean;
   allow_multiple_responses?: boolean;
   /** Padrão 30 (PRD R-4). */
   token_ttl_days?: number;
@@ -380,6 +386,8 @@ export interface PublicFormPayload {
   settings: {
     allow_multiple_responses: boolean;
     confirm_phone_with_token: boolean;
+    /** F7: o telefone precisa ser confirmado pelo WhatsApp antes do `start`. */
+    phone_proof: boolean;
     turnstile_site_key: string | null;
     /**
      * `false` quando a quota de bytes de upload da conta acabou (PRD D-10):

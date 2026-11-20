@@ -57,6 +57,12 @@ vi.mock('@/lib/contact-portal/keyword', () => ({
   handlePortalKeyword: (...args: unknown[]) => handlePortalKeyword(...args),
 }));
 
+const handleInboundPhoneProof = vi.fn();
+vi.mock('@/lib/forms/phone-proof', () => ({
+  handleInboundPhoneProof: (...args: unknown[]) =>
+    handleInboundPhoneProof(...args),
+}));
+
 // ------------------------------------------------------------
 // Supabase de mentira: registra cada operação na ordem em que
 // aconteceu. É a ordem que este PR precisa provar.
@@ -196,6 +202,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   dispatchInboundToFlows.mockResolvedValue({ consumed: false });
   handlePortalKeyword.mockResolvedValue(false);
+  handleInboundPhoneProof.mockResolvedValue(false);
   runAutomationsForTrigger.mockResolvedValue(undefined);
   dispatchWebhookEvent.mockResolvedValue(undefined);
   dispatchInboundToAiReply.mockResolvedValue(undefined);
@@ -640,6 +647,66 @@ describe('ingestInbound — idempotência de reentrega', () => {
       'id',
       { count: 'exact', head: true },
     ]);
+  });
+});
+
+describe('ingestInbound — confirmação de telefone de formulário (SPEC 085 F7)', () => {
+  it('código consumido: sem flows, sem gatilhos de conteúdo, sem IA — e a mensagem fica no inbox', async () => {
+    const db = existingThread();
+    handleInboundPhoneProof.mockResolvedValue(true);
+
+    await ingestInbound(ctxFor(db), textMessage({ text: 'Código: ABCD-2345' }));
+
+    expect(handleInboundPhoneProof).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'acct-1',
+        senderPhone: CONTACT.phone,
+        text: 'Código: ABCD-2345',
+      })
+    );
+    expect(dispatchInboundToFlows).not.toHaveBeenCalled();
+    const triggers = runAutomationsForTrigger.mock.calls.map(
+      (c) => (c[0] as { triggerType: string }).triggerType
+    );
+    expect(triggers).not.toContain('new_message_received');
+    expect(triggers).not.toContain('keyword_match');
+    expect(dispatchInboundToAiReply).not.toHaveBeenCalled();
+    expect(opsFor(db, 'messages', 'insert')[0].payload).toMatchObject({
+      sender_type: 'customer',
+      content_text: 'Código: ABCD-2345',
+    });
+  });
+
+  it('texto que não é código segue o caminho normal (flows e IA)', async () => {
+    await ingestInbound(ctxFor(existingThread()), textMessage({ text: 'oi' }));
+    expect(dispatchInboundToFlows).toHaveBeenCalled();
+  });
+
+  it('não roda quando a palavra-chave da área já consumiu, em opt-out nem em toque de botão', async () => {
+    handlePortalKeyword.mockResolvedValue(true);
+    await ingestInbound(
+      ctxFor(existingThread()),
+      textMessage({ text: 'SENHA' })
+    );
+    await ingestInbound(
+      ctxFor(existingThread()),
+      textMessage({ text: 'SAIR' })
+    );
+    await ingestInbound(
+      ctxFor(existingThread()),
+      textMessage({ contentType: 'interactive', interactiveReplyId: 'opt-1' })
+    );
+    expect(handleInboundPhoneProof).not.toHaveBeenCalled();
+  });
+
+  it('roda depois do opt-out e antes dos flows', async () => {
+    await ingestInbound(
+      ctxFor(existingThread()),
+      textMessage({ text: 'ABCD2345' })
+    );
+    expect(handleInboundPhoneProof.mock.invocationCallOrder[0]).toBeLessThan(
+      dispatchInboundToFlows.mock.invocationCallOrder[0]
+    );
   });
 });
 

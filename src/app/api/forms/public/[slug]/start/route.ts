@@ -50,6 +50,8 @@ export async function POST(
     const result = await startResponse({
       slug,
       phone: bodyString(body, 'phone', 40),
+      proofId: bodyString(body, 'proof_id', 64),
+      proofSecret: bodyString(body, 'proof_secret', 256),
       linkToken: bodyString(body, 'link_token', 1024),
       utm: body.utm,
       embedded: body.embedded === true,

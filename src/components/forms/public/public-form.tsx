@@ -56,6 +56,7 @@ import type {
 
 import { FieldInput, OPTION_LETTERS } from './field-input';
 import { FormMedia } from './form-media';
+import { PhoneProofStep } from './phone-proof-step';
 import { TurnstileWidget } from './turnstile-widget';
 import {
   usePublicTranslator,
@@ -86,6 +87,7 @@ type Screen =
   | { kind: 'field'; key: string }
   | { kind: 'thanks' }
   | { kind: 'already' }
+  | { kind: 'proof' }
   | { kind: 'unavailable' };
 
 export interface PublicFormProps {
@@ -141,6 +143,13 @@ export function PublicForm({
   const [userDriven, setUserDriven] = useState(false);
   const focusInside = mode === 'live' || userDriven;
   const [submitting, setSubmitting] = useState(false);
+  // F7: o bloco de identidade que espera a confirmação do telefone.
+  const [proofFrom, setProofFrom] = useState<{
+    field: PublicField;
+    answers: Answers;
+    /** Remonta a tela quando o `start` pede uma nova confirmação. */
+    nonce: number;
+  } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const submitted = useRef(false);
@@ -351,6 +360,17 @@ export function PublicForm({
           }
           if (r.alreadyAnswered) {
             setScreen({ kind: 'already' });
+            return;
+          }
+          if (r.needsProof) {
+            // F7: o telefone só vale depois de confirmado pelo WhatsApp; o
+            // `start` roda de novo (este mesmo `advance`) quando confirmar.
+            setProofFrom((prev) => ({
+              field: from,
+              answers: answersNow,
+              nonce: (prev?.nonce ?? 0) + 1,
+            }));
+            setScreen({ kind: 'proof' });
             return;
           }
         }
@@ -722,6 +742,26 @@ export function PublicForm({
               ) : null}
             </div>
           )}
+
+          {screen.kind === 'proof' && proofFrom && live ? (
+            <PhoneProofStep
+              key={proofFrom.nonce}
+              t={t}
+              live={live}
+              answers={proofFrom.answers}
+              turnstileKey={turnstileKey}
+              onConfirmed={() =>
+                void advance(proofFrom.field, proofFrom.answers)
+              }
+              startError={serverError ? serverMessage(t, serverError) : ''}
+              onBack={() => {
+                setScreen({ kind: 'field', key: proofFrom.field.key });
+                setProofFrom(null);
+              }}
+              buttonClass={buttonClass}
+              buttonStyle={buttonStyle}
+            />
+          ) : null}
 
           {screen.kind === 'already' && (
             <div className="flex flex-col items-start gap-4">
