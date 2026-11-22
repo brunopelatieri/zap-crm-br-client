@@ -49,9 +49,17 @@
 //      primeiras pastas de cada formulário (sem memória de "pasta já
 //      limpa", elas são relistadas). Chaves de conta/formulário que não
 //      existem mais são descartadas a cada varredura.
-//      `FORMS_SWEEP_PRUNE_DRY_RUN=1`: só LOGA os caminhos que seriam
-//      removidos neste passo 3 (o `vn` não tem backup; use na primeira
-//      semana), sem chamar `remove`.
+//      Se um formulário falha ao ler `answers` 3 varreduras seguidas (ex.:
+//      linha enorme que estoura o tempo), o cursor avança além da fatia
+//      (nada foi removido) para não travar o formulário na mesma fatia.
+//      Formulário sem orçamento restante da conta é PULADO inteiro na
+//      varredura (nem o passo 2 roda nele) e o formulário inicial gira por
+//      conta a cada varredura, começando pelo primeiro que ficou sem vez.
+//      DRY-RUN POR PADRÃO: o passo 3 só remove de verdade com
+//      `FORMS_SWEEP_PRUNE_DRY_RUN=0` (ou `false`/`no`/`off`, explícito); ausente,
+//      vazio ou valor desconhecido = só LOGA os caminhos que seriam removidos
+//      (o `vn` não tem backup), sem chamar `remove`. Toda varredura de
+//      Storage escreve UMA linha de resumo com `dryRun`, mesmo sem achados.
 //
 // A lógica de decisão é pura (`selectResponseFoldersToRemove`,
 // `selectUnreferencedObjects`); o percurso recebe o client e roda com dublê
@@ -83,12 +91,9 @@ export const ACCOUNTS_PER_RUN = 10;
  */
 export const FOLDERS_PRUNED_PER_ACCOUNT = 100;
 const LIST_PAGE = 1000;
-/**
- * Padrão documentado do `limit` do Storage: servidor que ignorasse o nosso
- * `limit` e devolvesse exatamente isto não teria acabado a listagem.
- */
-const SERVER_DEFAULT_LIMIT = 100;
 const MAX_LIST_PAGES = 20;
+/** Falhas seguidas ao ler `answers` de um formulário antes de o cursor pular a fatia. */
+const MAX_ANSWERS_FAILURES = 3;
 const IN_CHUNK = 150;
 const REMOVE_CHUNK = 100;
 /** Profundidade máxima da varredura de `answers`; acima disso, nada é removido. */
@@ -112,6 +117,17 @@ export interface SweepState {
    * formulário não pode deixar as últimas pastas sem vez).
    */
   pruneCursors?: Record<string, string>;
+  /**
+   * Por prefixo `account-…/<form>`: falhas seguidas ao ler `answers` da
+   * fatia. Ao chegar a `MAX_ANSWERS_FAILURES` o cursor avança (nada foi
+   * removido) e o contador zera; qualquer leitura bem-sucedida também zera.
+   */
+  pruneFailures?: Record<string, number>;
+  /**
+   * Por `account-…`: índice (na lista ordenada de formulários) por onde a
+   * próxima varredura começa: o primeiro que ficou sem orçamento nesta.
+   */
+  formStarts?: Record<string, number>;
 }
 
 /** Estado do processo (o teste passa o seu). */
@@ -144,9 +160,17 @@ export interface FormsSweepResult {
   truncatedLists: number;
   /** O passo 3 rodou em dry-run. */
   dryRun: boolean;
+  /**
+   * Pastas de resposta cuja linha pertence a OUTRA conta/formulário (fora
+   * da convenção): preservadas. Deve ser sempre 0; se crescer, algo gravou
+   * fora da convenção de caminho.
+   */
+  foreignFolders: number;
   /** Provas de telefone (F7) apagadas. */
   phoneProofsRemoved: number;
   errors: number;
+  /** Duração da execução inteira (ms), inclusive das fases baratas. */
+  durationMs: number;
 }
 
 export function emptySweepResult(): FormsSweepResult {
@@ -162,8 +186,10 @@ export function emptySweepResult(): FormsSweepResult {
     skippedNoDate: 0,
     truncatedLists: 0,
     dryRun: false,
+    foreignFolders: 0,
     phoneProofsRemoved: 0,
     errors: 0,
+    durationMs: 0,
   };
 }
 
@@ -224,6 +250,14 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * seu `<objectId>` aparece nele (`isReferenced`). `null` = o instantâneo não
  * tem a forma esperada (ou é fundo demais): sem saber o que é referenciado
  * nada pode ser removido (a remoção não tem volta e o `vn` não tem backup).
+ *
+ * Falso positivo aceito de propósito: quem conhece o UUID de um objeto que
+ * ele mesmo enviou pode digitá-lo num campo de texto livre e "fixá-lo" (a
+ * busca olha qualquer string); o objeto nunca sai e fica fora da quota
+ * (`upload_bytes` soma só o referenciado). Antes da poda ele também nunca
+ * era removido, então não é regressão; a alternativa (olhar só `file_upload`)
+ * apagaria arquivo de bloco de tipo novo que guarde o caminho em outro lugar,
+ * perda permanente num banco sem backup. Na dúvida, não remove.
  *
  * Forma esperada: objeto de entradas objeto; numa entrada `file_upload`, o
  * `value` é nulo ou uma lista de `{ path: string }`. O resto do JSON só
@@ -389,7 +423,7 @@ export function nextAccountSlice(
  * mexidas além da existência da conta).
  */
 export function pruneStaleCursors(
-  cursors: Record<string, string>,
+  cursors: Record<string, unknown>,
   accountFolders: ReadonlySet<string>,
   formsByAccount: ReadonlyMap<string, ReadonlySet<string>>
 ): void {
@@ -413,7 +447,7 @@ interface ListedEntry extends StoredObject {
 interface Listing {
   entries: ListedEntry[];
   error: boolean;
-  /** Bateu em `MAX_LIST_PAGES` com a última página cheia: há mais que isto. */
+  /** Bateu em `MAX_LIST_PAGES` sem achar página vazia: pode haver mais que isto. */
   truncated: boolean;
 }
 
@@ -430,14 +464,11 @@ async function listAll(db: Db, prefix: string): Promise<Listing> {
     });
     if (error) return { entries, error: true, truncated: false };
     const batch = (data ?? []) as ListedEntry[];
+    // Só a página VAZIA encerra a lista: o servidor pode limitar a página a
+    // qualquer valor abaixo do pedido (50, 100, 500…), e "página curta" não
+    // prova o fim. Custa uma chamada a mais por lista.
+    if (batch.length === 0) return { entries, error: false, truncated: false };
     entries.push(...batch);
-    // Página curta = fim, exceto a de tamanho do padrão do servidor, que
-    // pode ser um teto que ignorou o nosso `limit`: nesse caso, confirma.
-    const short =
-      batch.length < LIST_PAGE && batch.length !== SERVER_DEFAULT_LIMIT;
-    if (batch.length === 0 || short) {
-      return { entries, error: false, truncated: false };
-    }
   }
   return { entries, error: false, truncated: true };
 }
@@ -447,8 +478,9 @@ const isFolder = (e: ListedEntry) => e.id === null || e.id === undefined;
 
 /**
  * Remove em lotes de `REMOVE_CHUNK`; cada lote é isolado (erro ou exceção
- * num não impede os outros). Devolve só o que um lote SEM erro pediu para
- * remover; lote com erro conta `errors` e nada em `removed` (pode ter
+ * num não impede os outros). Devolve só o que um lote SEM erro removeu (o
+ * que o Storage devolveu, ou o lote pedido se ele não devolver a lista);
+ * lote com erro conta `errors` e nada em `removed` (pode ter
  * removido parte, mas não há como saber sem outra listagem — a próxima
  * varredura reavalia a pasta).
  */
@@ -462,14 +494,16 @@ async function removePaths(
   for (let i = 0; i < paths.length; i += REMOVE_CHUNK) {
     const chunk = paths.slice(i, i + REMOVE_CHUNK);
     try {
-      const { error } = await db.storage
+      const { data, error } = await db.storage
         .from(FORM_UPLOADS_BUCKET)
         .remove(chunk);
       if (error) {
         result.errors++;
         failed = true;
       } else {
-        removed += chunk.length;
+        // Conta o que o Storage devolveu (objeto que já não existia não
+        // volta na lista); sem array na resposta, o tamanho do lote.
+        removed += Array.isArray(data) ? data.length : chunk.length;
       }
     } catch {
       result.errors++;
@@ -624,26 +658,46 @@ async function pruneUnreferenced(
 ): Promise<void> {
   const formPrefix = `${accountFolder}/${formId}`;
   const cursors = (ctx.state.pruneCursors ??= {});
+  const failures = (ctx.state.pruneFailures ??= {});
   if (completedIds.length === 0) {
     delete cursors[formPrefix];
+    delete failures[formPrefix];
     return;
   }
   const slice = nextFolderSlice(completedIds, cursors[formPrefix], share);
   if (slice.length === 0) return;
   ctx.pruneBudget.left = Math.max(0, ctx.pruneBudget.left - slice.length);
 
-  const answers = await loadAnswers(
-    db,
-    accountFolder.slice('account-'.length),
-    formId,
-    slice
-  );
-  // Sem ler `answers` NADA é removido; o cursor não anda (a fatia volta na
-  // próxima varredura em vez de ser pulada).
+  let answers: Map<string, unknown> | null = null;
+  try {
+    answers = await loadAnswers(
+      db,
+      accountFolder.slice('account-'.length),
+      formId,
+      slice
+    );
+  } catch {
+    answers = null;
+  }
+  // Sem ler `answers` NADA é removido. O cursor não anda (a fatia volta na
+  // próxima varredura em vez de ser pulada), salvo se a falha se repetir
+  // `MAX_ANSWERS_FAILURES` vezes seguidas: aí a fatia é deixada para a
+  // próxima volta completa, para o formulário não travar nela para sempre.
   if (!answers) {
     result.errors++;
+    const count = (failures[formPrefix] ?? 0) + 1;
+    if (count >= MAX_ANSWERS_FAILURES) {
+      cursors[formPrefix] = slice[slice.length - 1];
+      delete failures[formPrefix];
+      ctx.log(
+        `[automations-cron] forms sweep: skipped ${slice.length} folder(s) of ${formPrefix} after ${count} consecutive failures reading answers (nothing removed)`
+      );
+    } else {
+      failures[formPrefix] = count;
+    }
     return;
   }
+  delete failures[formPrefix];
   for (const id of slice) {
     const snapshot = answers.get(id.toLowerCase());
     if (snapshot === undefined) continue;
@@ -696,6 +750,7 @@ async function scanForm(
       ? r
       : { id: r.id, status: 'foreign', updated_at: r.updated_at }
   );
+  result.foreignFolders += known.filter((r) => r.status === 'foreign').length;
   const toRemove = selectResponseFoldersToRemove(folderIds, known, now);
   for (const id of toRemove) {
     try {
@@ -741,23 +796,42 @@ async function scanAccount(
   if (forms.truncated) result.truncatedLists++;
   const formIds = forms.entries
     .filter((e) => isFolder(e) && isUuid(e.name))
-    .map((e) => e.name);
+    .map((e) => e.name)
+    .sort();
   // Só uma lista COMPLETA autoriza descartar cursores de formulário sumido.
   if (!forms.truncated) formsSeen.set(accountFolder, new Set(formIds));
+  const total = formIds.length;
+  if (total === 0) return;
 
-  for (let i = 0; i < formIds.length; i++) {
+  const starts = (ctx.state.formStarts ??= {});
+  const start = (starts[accountFolder] ?? 0) % total;
+  let firstSkipped: number | null = null;
+  for (let k = 0; k < total; k++) {
+    const index = (start + k) % total;
+    // Teto da conta esgotado: o formulário é PULADO nesta varredura (sem
+    // `list` nem consulta) e será o primeiro da próxima.
+    if (ctx.pruneBudget.left <= 0) {
+      firstSkipped ??= index;
+      continue;
+    }
     // Fatia justa do que resta do teto da conta: o 1º formulário não come
-    // tudo (mínimo 1 pasta por formulário, mesmo com o teto esgotado).
-    const share = Math.max(
-      1,
-      Math.ceil(ctx.pruneBudget.left / (formIds.length - i))
-    );
+    // tudo (e, com orçamento, cada um recebe pelo menos 1 pasta).
+    const share = Math.max(1, Math.ceil(ctx.pruneBudget.left / (total - k)));
     try {
-      await scanForm(db, accountFolder, formIds[i], share, now, result, ctx);
+      await scanForm(
+        db,
+        accountFolder,
+        formIds[index],
+        share,
+        now,
+        result,
+        ctx
+      );
     } catch {
       result.errors++;
     }
   }
+  starts[accountFolder] = firstSkipped ?? start;
 }
 
 /** Fase 1 — marca as paradas há mais de 24 h. */
@@ -787,18 +861,51 @@ export async function abandonStalePartials(
 }
 
 export interface SweepOptions {
-  /** Só loga o que o passo 3 removeria. Padrão: `FORMS_SWEEP_PRUNE_DRY_RUN=1`. */
+  /**
+   * Só loga o que o passo 3 removeria. Padrão: `pruneDryRunFromEnv()`, que é
+   * dry-run salvo `FORMS_SWEEP_PRUNE_DRY_RUN` explicitamente em `0|false|no|off`.
+   */
   pruneDryRun?: boolean;
-  /** Destino do log do dry-run (padrão `console.log`). */
+  /** Destino do log do dry-run e dos avisos (padrão `console.log`). */
   log?: (message: string) => void;
+  /** Relógio em ms para `durationMs` (padrão `Date.now`; o teste injeta o seu). */
+  clock?: () => number;
 }
 
-/** `FORMS_SWEEP_PRUNE_DRY_RUN` ligada (`1` ou `true`). */
+const PRUNE_REMOVAL_ON = new Set(['0', 'false', 'no', 'off']);
+
+/**
+ * O passo 3 roda em dry-run? CONSERVADOR: só `0|false|no|off` (explícito,
+ * sem diferenciar maiúsculas, com aspas/espaços ao redor ignorados — o
+ * `--env-file` do Docker mantém as aspas) liga a remoção real. Variável
+ * ausente (ex.: não repassada no `environment:` do compose), vazia ou com
+ * valor desconhecido = dry-run: o erro de configuração nunca apaga arquivo.
+ */
 export function pruneDryRunFromEnv(
   env: Record<string, string | undefined> = process.env
 ): boolean {
-  const v = env.FORMS_SWEEP_PRUNE_DRY_RUN?.trim().toLowerCase();
-  return v === '1' || v === 'true';
+  const v = (env.FORMS_SWEEP_PRUNE_DRY_RUN ?? '')
+    .replace(/^["'\s]+|["'\s]+$/g, '')
+    .toLowerCase();
+  return !PRUNE_REMOVAL_ON.has(v);
+}
+
+/**
+ * Escreve a linha de resumo `[automations-cron] forms sweep`? Toda varredura
+ * de Storage (1×/h por processo) escreve, mesmo sem achados: é o que deixa o
+ * operador ver `dryRun` e distinguir "ativo e limpo" de "não roda".
+ */
+export function shouldLogFormsSweep(result: FormsSweepResult): boolean {
+  return (
+    result.storageScanned ||
+    result.abandoned > 0 ||
+    result.removedObjects > 0 ||
+    result.wouldRemoveUnreferenced > 0 ||
+    result.skippedNoDate > 0 ||
+    result.truncatedLists > 0 ||
+    result.foreignFolders > 0 ||
+    result.errors > 0
+  );
 }
 
 export async function runFormsSweep(
@@ -806,6 +913,19 @@ export async function runFormsSweep(
   now: Date,
   state: SweepState = processSweepState,
   options: SweepOptions = {}
+): Promise<FormsSweepResult> {
+  const clock = options.clock ?? Date.now;
+  const startedAt = clock();
+  const result = await runFormsSweepSteps(db, now, state, options);
+  result.durationMs = Math.max(0, clock() - startedAt);
+  return result;
+}
+
+async function runFormsSweepSteps(
+  db: Db,
+  now: Date,
+  state: SweepState,
+  options: SweepOptions
 ): Promise<FormsSweepResult> {
   const result = emptySweepResult();
   const dryRun = options.pruneDryRun ?? pruneDryRunFromEnv();
@@ -868,8 +988,19 @@ export async function runFormsSweep(
 
     // Cursores de conta/formulário que sumiram não ficam para sempre no
     // mapa. Lista de contas truncada: não descarta nada.
-    if (!root.truncated && state.pruneCursors) {
-      pruneStaleCursors(state.pruneCursors, new Set(accounts), formsSeen);
+    if (!root.truncated) {
+      const accountSet = new Set(accounts);
+      if (state.pruneCursors) {
+        pruneStaleCursors(state.pruneCursors, accountSet, formsSeen);
+      }
+      if (state.pruneFailures) {
+        pruneStaleCursors(state.pruneFailures, accountSet, formsSeen);
+      }
+      if (state.formStarts) {
+        for (const key of Object.keys(state.formStarts)) {
+          if (!accountSet.has(key)) delete state.formStarts[key];
+        }
+      }
     }
   } catch {
     result.errors++;

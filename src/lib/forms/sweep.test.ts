@@ -9,6 +9,7 @@ import {
   ORPHAN_SCAN_INTERVAL_MS,
   abandonStalePartials,
   answersReferenceText,
+  emptySweepResult,
   expiredCutoffIso,
   isReferenced,
   nextAccountSlice,
@@ -19,7 +20,9 @@ import {
   runFormsSweep,
   selectResponseFoldersToRemove,
   selectUnreferencedObjects,
+  shouldLogFormsSweep,
   staleCutoffIso,
+  type FormsSweepResult,
   type SweepState,
 } from './sweep';
 
@@ -373,17 +376,89 @@ describe('pruneStaleCursors (L-3)', () => {
   });
 });
 
-describe('pruneDryRunFromEnv', () => {
-  it('só 1 ou true ligam', () => {
-    expect(pruneDryRunFromEnv({ FORMS_SWEEP_PRUNE_DRY_RUN: '1' })).toBe(true);
-    expect(pruneDryRunFromEnv({ FORMS_SWEEP_PRUNE_DRY_RUN: ' TRUE ' })).toBe(
-      true
-    );
-    expect(pruneDryRunFromEnv({ FORMS_SWEEP_PRUNE_DRY_RUN: '0' })).toBe(false);
-    expect(pruneDryRunFromEnv({ FORMS_SWEEP_PRUNE_DRY_RUN: 'sim' })).toBe(
-      false
-    );
-    expect(pruneDryRunFromEnv({})).toBe(false);
+describe('pruneDryRunFromEnv (M-1: padrão conservador)', () => {
+  const dry = (v: string | undefined) =>
+    pruneDryRunFromEnv({ FORMS_SWEEP_PRUNE_DRY_RUN: v });
+
+  it('1|true|yes|on ligam o dry-run, com aspas, espaços e maiúsculas', () => {
+    for (const v of [
+      '1',
+      '"1"',
+      "'1'",
+      ' "1" ',
+      'yes',
+      'on',
+      'true',
+      ' TRUE ',
+      '"true"',
+      'Yes',
+      'ON',
+    ]) {
+      expect(dry(v), JSON.stringify(v)).toBe(true);
+    }
+  });
+
+  it('só 0|false|no|off explícitos ligam a remoção real (aspas e espaços ignorados)', () => {
+    for (const v of [
+      '0',
+      '"0"',
+      "'0'",
+      ' 0 ',
+      'false',
+      'FALSE',
+      'no',
+      'No',
+      'off',
+      ' "off" ',
+    ]) {
+      expect(dry(v), JSON.stringify(v)).toBe(false);
+    }
+  });
+
+  it('ausente, vazio, só aspas ou valor desconhecido = dry-run (nunca remove por engano)', () => {
+    for (const v of [
+      undefined,
+      '',
+      '  ',
+      '""',
+      "''",
+      'sim',
+      'lixo',
+      '2',
+      'nao',
+    ]) {
+      expect(dry(v), JSON.stringify(v)).toBe(true);
+    }
+    expect(pruneDryRunFromEnv({})).toBe(true);
+  });
+});
+
+describe('shouldLogFormsSweep (M-1: observabilidade)', () => {
+  const base = (): FormsSweepResult => emptySweepResult();
+
+  it('varredura de Storage sem nenhum achado AINDA loga (dry-run ativo e limpo)', () => {
+    expect(shouldLogFormsSweep({ ...base(), storageScanned: true })).toBe(true);
+  });
+
+  it('tick barato sem achados não loga', () => {
+    expect(shouldLogFormsSweep(base())).toBe(false);
+  });
+
+  it('cada achado isolado loga', () => {
+    const flags: Partial<FormsSweepResult>[] = [
+      { abandoned: 1 },
+      { removedObjects: 1 },
+      { wouldRemoveUnreferenced: 1 },
+      { skippedNoDate: 1 },
+      { truncatedLists: 1 },
+      { foreignFolders: 1 },
+      { errors: 1 },
+    ];
+    for (const f of flags) {
+      expect(shouldLogFormsSweep({ ...base(), ...f }), JSON.stringify(f)).toBe(
+        true
+      );
+    }
   });
 });
 
@@ -419,6 +494,12 @@ function makeWorld(opts: {
   dbError?: boolean;
   /** Só a leitura de `answers` falha (o resto do banco responde). */
   answersError?: boolean;
+  /** A leitura de `answers` falha só para estes formulários (id), o resto responde. */
+  answersErrorForms?: string[];
+  /** Só a consulta `loadKnown` (com `account_id`) falha. */
+  knownError?: boolean;
+  /** `remove` devolve só os `n` primeiros caminhos em `data` (o resto "já não existia"). */
+  removeDataLimit?: number;
   /** `list` falha nestes prefixos. */
   listErrorPrefixes?: string[];
   /** `remove` falha (erro devolvido). */
@@ -497,7 +578,15 @@ function makeWorld(opts: {
               );
             }
           }
-          return { data: null, error: null };
+          return {
+            data:
+              opts.removeDataLimit === undefined
+                ? null
+                : paths
+                    .slice(0, opts.removeDataLimit)
+                    .map((name) => ({ name })),
+            error: null,
+          };
         },
       }),
     },
@@ -535,6 +624,15 @@ function makeWorld(opts: {
         if (opts.dbError) return { data: null, error: { message: 'boom' } };
         if (opts.answersError && ctx.cols?.includes('answers')) {
           return { data: null, error: { message: 'boom' } };
+        }
+        if (opts.knownError && ctx.cols?.includes('account_id')) {
+          return { data: null, error: { message: 'boom' } };
+        }
+        if (ctx.cols?.includes('answers')) {
+          const formEq = ctx.eqs.find(([c]) => c === 'form_id')?.[1];
+          if (formEq && opts.answersErrorForms?.includes(formEq)) {
+            return { data: null, error: { message: 'boom' } };
+          }
         }
         if (ctx.cols?.includes('answers')) answerFilters.push(ctx.eqs);
         const hit = rows.filter((r) => ctx.filters.every((f) => f(r)));
@@ -741,6 +839,65 @@ describe('runFormsSweep', () => {
     // só a pasta sem linha nenhuma (99) sai
     expect(w.removed.flat()).toEqual([`${ACC}/${FORM}/${uuid(99)}/c.pdf`]);
     expect(res.removedUnreferenced).toBe(0);
+    // L-5: as duas pastas preservadas aparecem no contador.
+    expect(res.foreignFolders).toBe(2);
+  });
+
+  it('sem pasta estrangeira, foreignFolders é 0 (L-5)', async () => {
+    const w = makeWorld({
+      rows: [{ id: uuid(10), status: 'completed', updated_at: ago(40 * D) }],
+      tree: tree(),
+    });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(res.foreignFolders).toBe(0);
+  });
+
+  it('durationMs mede a execução inteira com o relógio injetado (L-4)', async () => {
+    const w = makeWorld({ rows: [], tree: tree() });
+    const ticks = [1000, 1750];
+    const res = await runFormsSweep(w.db, NOW, fresh(), {
+      clock: () => ticks.shift() ?? 9999,
+    });
+    expect(res.durationMs).toBe(750);
+  });
+
+  it('durationMs é um número >= 0 com o relógio real (L-4)', async () => {
+    const w = makeWorld({ rows: [], tree: tree() });
+    const res = await runFormsSweep(w.db, NOW, fresh());
+    expect(typeof res.durationMs).toBe('number');
+    expect(res.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('varredura de Storage limpa gera linha de log; o tick seguinte (< 1 h) não (M-1)', async () => {
+    const w = makeWorld({ rows: [], tree: { '': [] } });
+    const state = fresh();
+    const first = await runFormsSweep(w.db, NOW, state);
+    expect(first.storageScanned).toBe(true);
+    expect(shouldLogFormsSweep(first)).toBe(true);
+    const second = await runFormsSweep(
+      w.db,
+      new Date(NOW.getTime() + 5 * MIN),
+      state
+    );
+    expect(shouldLogFormsSweep(second)).toBe(false);
+  });
+
+  it('falha de loadKnown (consulta de respostas) não remove NADA, nem na poda (L-7 do plano de testes)', async () => {
+    const RID = uuid(10);
+    const w = makeWorld({
+      rows: [
+        { id: RID, status: 'completed', updated_at: ago(40 * D), answers: {} },
+      ],
+      tree: {
+        ...tree(),
+        [`${ACC}/${FORM}/${RID}`]: [file(oname(2), ago(5 * D))],
+      },
+      knownError: true,
+    });
+    const res = await runFormsSweep(w.db, NOW, fresh(), { pruneDryRun: false });
+    expect(w.removed).toEqual([]);
+    expect(res.removedObjects).toBe(0);
+    expect(res.errors).toBeGreaterThan(0);
   });
 
   it('falha ao remover uma pasta órfã não impede as outras (L-5)', async () => {
@@ -901,6 +1058,22 @@ describe('runFormsSweep — poda de objetos sem referência em resposta concluí
     expect(res.errors).toBeGreaterThan(0);
   });
 
+  it('remove que devolve MENOS que o pedido: conta o que o Storage devolveu (L-6)', async () => {
+    const w = world({ removeDataLimit: 1 });
+    const res = await runFormsSweep(w.db, NOW, fresh(), { pruneDryRun: false });
+    // 2 caminhos pedidos (oname(2) e oname(3,'exe')), 1 devolvido.
+    expect(w.removed.flat()).toHaveLength(2);
+    expect(res.removedUnreferenced).toBe(1);
+    expect(res.removedObjects).toBe(1);
+  });
+
+  it('remove que devolve lista vazia conta 0 (L-6)', async () => {
+    const w = world({ removeDataLimit: 0 });
+    const res = await runFormsSweep(w.db, NOW, fresh(), { pruneDryRun: false });
+    expect(res.removedUnreferenced).toBe(0);
+    expect(res.removedObjects).toBe(0);
+  });
+
   it('erro no remove conta o erro e não conta objeto removido', async () => {
     const w = world({ removeError: true });
     const res = await runFormsSweep(w.db, NOW, fresh(), { pruneDryRun: false });
@@ -1025,19 +1198,38 @@ describe('runFormsSweep — poda de objetos sem referência em resposta concluí
       expect(logs.length).toBe(201); // 200 caminhos + aviso de omissão
     });
 
-    it('padrão vem da variável de ambiente', async () => {
+    /** Roda a varredura com a variável de ambiente no valor dado (ou ausente). */
+    const sweepWithEnv = async (value: string | undefined) => {
       const prev = process.env.FORMS_SWEEP_PRUNE_DRY_RUN;
-      process.env.FORMS_SWEEP_PRUNE_DRY_RUN = '1';
+      if (value === undefined) delete process.env.FORMS_SWEEP_PRUNE_DRY_RUN;
+      else process.env.FORMS_SWEEP_PRUNE_DRY_RUN = value;
       try {
         const w = world();
         const res = await runFormsSweep(w.db, NOW, fresh(), {
           log: () => {},
         });
-        expect(res.dryRun).toBe(true);
-        expect(w.removed).toEqual([]);
+        return { w, res };
       } finally {
         if (prev === undefined) delete process.env.FORMS_SWEEP_PRUNE_DRY_RUN;
         else process.env.FORMS_SWEEP_PRUNE_DRY_RUN = prev;
+      }
+    };
+
+    it('padrão vem da variável de ambiente: AUSENTE, vazia ou desconhecida = dry-run (M-1)', async () => {
+      for (const v of [undefined, '', 'sim', '"1"', 'yes', 'on', '1']) {
+        const { w, res } = await sweepWithEnv(v);
+        expect(res.dryRun, JSON.stringify(v)).toBe(true);
+        expect(w.removed, JSON.stringify(v)).toEqual([]);
+        expect(res.wouldRemoveUnreferenced).toBe(2);
+      }
+    });
+
+    it('só 0|false|no|off explícitos removem de verdade (M-1)', async () => {
+      for (const v of ['0', '"0"', 'false', ' NO ', 'off']) {
+        const { w, res } = await sweepWithEnv(v);
+        expect(res.dryRun, JSON.stringify(v)).toBe(false);
+        expect(w.removed.flat(), JSON.stringify(v)).toHaveLength(2);
+        expect(res.removedUnreferenced).toBe(2);
       }
     });
 
@@ -1185,6 +1377,128 @@ describe('runFormsSweep — poda de objetos sem referência em resposta concluí
       );
     });
 
+    it('leitura de answers falhando sempre: o cursor avança após 3 falhas e o outro formulário segue (L-1)', async () => {
+      const FORM_B = uuid(3);
+      const bad = Array.from({ length: 120 }, (_, i) => uuid(6000 + i));
+      const good = [uuid(9000)];
+      const tree: Record<string, TreeEntry[]> = {
+        '': [folder(ACC)],
+        [ACC]: [folder(FORM), folder(FORM_B)],
+        [`${ACC}/${FORM}`]: bad.map(folder),
+        [`${ACC}/${FORM_B}`]: good.map(folder),
+      };
+      const rows = [
+        ...survivingFolders(ACC, FORM, bad, tree),
+        ...survivingFolders(ACC, FORM_B, good, tree),
+      ];
+      const failing = [FORM];
+      const w = makeWorld({ rows, tree, answersErrorForms: failing });
+      const state = fresh();
+      const logs: string[] = [];
+      const opts = { pruneDryRun: false, log: (m: string) => logs.push(m) };
+      const at = (n: number) =>
+        new Date(NOW.getTime() + n * (ORPHAN_SCAN_INTERVAL_MS + 1));
+      const key = `${ACC}/${FORM}`;
+
+      // 1ª e 2ª falhas: nada anda, nada é removido do formulário ruim; o bom
+      // é podado já na 1ª varredura.
+      const r1 = await runFormsSweep(w.db, at(0), state, opts);
+      expect(r1.errors).toBe(1);
+      expect(state.pruneCursors?.[key]).toBeUndefined();
+      expect(state.pruneFailures?.[key]).toBe(1);
+      expect(w.removed.flat()).toEqual([
+        `${ACC}/${FORM_B}/${good[0]}/${oname(2)}`,
+      ]);
+      const r2 = await runFormsSweep(w.db, at(1), state, opts);
+      expect(r2.errors).toBe(1);
+      expect(state.pruneCursors?.[key]).toBeUndefined();
+      expect(state.pruneFailures?.[key]).toBe(2);
+
+      // 3ª falha: o cursor pula a fatia (nada removido) e o contador zera.
+      const r3 = await runFormsSweep(w.db, at(2), state, opts);
+      expect(r3.errors).toBe(1);
+      const skippedTo = state.pruneCursors?.[key];
+      expect(skippedTo).toBe(bad[49]); // fatia de 50 = metade do teto de 100
+      expect(state.pruneFailures?.[key]).toBeUndefined();
+      expect(logs.join('\n')).toContain('consecutive failures reading answers');
+      expect(w.removed.flat().filter((p) => p.includes(`/${FORM}/`))).toEqual(
+        []
+      );
+
+      // Leitura volta a funcionar: continua DEPOIS da fatia pulada.
+      failing.length = 0;
+      const r4 = await runFormsSweep(w.db, at(3), state, opts);
+      expect(r4.errors).toBe(0);
+      expect(w.removed.flat().filter((p) => p.includes(`/${FORM}/`))).toEqual(
+        bad.slice(50, 100).map((id) => `${ACC}/${FORM}/${id}/${oname(2)}`)
+      );
+    });
+
+    it('falha de leitura seguida de sucesso zera o contador de falhas (L-1)', async () => {
+      const ids = [uuid(6100)];
+      const tree: Record<string, TreeEntry[]> = {
+        '': [folder(ACC)],
+        [ACC]: [folder(FORM)],
+        [`${ACC}/${FORM}`]: ids.map(folder),
+      };
+      const failing = [FORM];
+      const w = makeWorld({
+        rows: survivingFolders(ACC, FORM, ids, tree),
+        tree,
+        answersErrorForms: failing,
+      });
+      const state = fresh();
+      const opts = { pruneDryRun: false };
+      const at = (n: number) =>
+        new Date(NOW.getTime() + n * (ORPHAN_SCAN_INTERVAL_MS + 1));
+      await runFormsSweep(w.db, at(0), state, opts);
+      await runFormsSweep(w.db, at(1), state, opts);
+      expect(state.pruneFailures?.[`${ACC}/${FORM}`]).toBe(2);
+      failing.length = 0;
+      await runFormsSweep(w.db, at(2), state, opts);
+      expect(state.pruneFailures?.[`${ACC}/${FORM}`]).toBeUndefined();
+      expect(state.pruneCursors?.[`${ACC}/${FORM}`]).toBe(ids[0]);
+    });
+
+    it('teto da conta esgotado: formulário sem orçamento é pulado (sem list) e o inicial gira (L-3)', async () => {
+      const count = FOLDERS_PRUNED_PER_ACCOUNT + 5; // 105 formulários, 1 pasta cada
+      const forms = Array.from({ length: count }, (_, i) => uuid(3000 + i));
+      const tree: Record<string, TreeEntry[]> = {
+        '': [folder(ACC)],
+        [ACC]: forms.map(folder),
+      };
+      const rows = forms.flatMap((f, i) => {
+        const id = uuid(20000 + i);
+        tree[`${ACC}/${f}`] = [folder(id)];
+        return survivingFolders(ACC, f, [id], tree);
+      });
+      const w = makeWorld({ rows, tree });
+      const state = fresh();
+      const opts = { pruneDryRun: false };
+
+      const first = await runFormsSweep(w.db, NOW, state, opts);
+      // nunca passa do teto da conta
+      expect(first.prunedInspected).toBe(FOLDERS_PRUNED_PER_ACCOUNT);
+      expect(first.removedUnreferenced).toBe(FOLDERS_PRUNED_PER_ACCOUNT);
+      // os 5 últimos não tiveram nenhum list (nem de formulário, nem de pasta)
+      for (const f of forms.slice(FOLDERS_PRUNED_PER_ACCOUNT)) {
+        expect(
+          w.listCalls.filter((c) => c.prefix.startsWith(`${ACC}/${f}`))
+        ).toEqual([]);
+      }
+      expect(state.formStarts?.[ACC]).toBe(FOLDERS_PRUNED_PER_ACCOUNT);
+
+      // A varredura seguinte começa por quem ficou sem vez.
+      const second = await runFormsSweep(w.db, LATER, state, opts);
+      expect(second.removedUnreferenced).toBe(5);
+      const left = forms.slice(FOLDERS_PRUNED_PER_ACCOUNT);
+      for (const f of left) {
+        const id = rows[forms.indexOf(f)].id;
+        expect(w.removed.flat()).toContain(`${ACC}/${f}/${id}/${oname(2)}`);
+      }
+      expect(new Set(w.removed.flat()).size).toBe(count);
+    });
+
     it('descarta cursor de conta e de formulário que sumiram (L-3)', async () => {
       const w = world();
       const state = fresh();
@@ -1228,7 +1542,57 @@ describe('runFormsSweep — poda de objetos sem referência em resposta concluí
       const offsets = w.listCalls
         .filter((c) => c.prefix === PREFIX)
         .map((c) => c.offset);
-      expect(offsets).toEqual([0, 1000]);
+      // só a página VAZIA encerra a lista (L-2): 1000, 150 e uma vazia.
+      expect(offsets).toEqual([0, 1000, 1150]);
+    });
+
+    const offsetsOf = (w: ReturnType<typeof bigFolder>) =>
+      w.listCalls.filter((c) => c.prefix === PREFIX).map((c) => c.offset);
+
+    it('página final com exatamente 100 objetos: lê tudo, sem laço (L-2)', async () => {
+      const w = bigFolder(100);
+      const res = await runFormsSweep(w.db, NOW, fresh(), {
+        pruneDryRun: false,
+      });
+      expect(res.removedUnreferenced).toBe(100);
+      expect(res.truncatedLists).toBe(0);
+      expect(offsetsOf(w)).toEqual([0, 100]);
+    });
+
+    it('página final com exatamente 1000 objetos: lê tudo, sem laço (L-2)', async () => {
+      const w = bigFolder(1000);
+      const res = await runFormsSweep(w.db, NOW, fresh(), {
+        pruneDryRun: false,
+      });
+      expect(res.removedUnreferenced).toBe(1000);
+      expect(res.truncatedLists).toBe(0);
+      expect(offsetsOf(w)).toEqual([0, 1000]);
+    });
+
+    it('servidor que limita a página a 50 (≠ 100): lê tudo até esgotar (L-2)', async () => {
+      const w = bigFolder(130, 50);
+      const res = await runFormsSweep(w.db, NOW, fresh(), {
+        pruneDryRun: false,
+      });
+      expect(res.removedUnreferenced).toBe(130);
+      expect(res.truncatedLists).toBe(0);
+      expect(offsetsOf(w)).toEqual([0, 50, 100, 130]);
+    });
+
+    it('servidor que limita a página a 500 (≠ 100): lê tudo até esgotar (L-2)', async () => {
+      const w = bigFolder(1300, 500);
+      const res = await runFormsSweep(w.db, NOW, fresh(), {
+        pruneDryRun: false,
+      });
+      expect(res.removedUnreferenced).toBe(1300);
+      expect(res.truncatedLists).toBe(0);
+      expect(offsetsOf(w)).toEqual([0, 500, 1000, 1300]);
+    });
+
+    it('pasta vazia custa 1 chamada (a própria página vazia) (L-2)', async () => {
+      const w = bigFolder(0);
+      await runFormsSweep(w.db, NOW, fresh(), { pruneDryRun: false });
+      expect(offsetsOf(w)).toEqual([0]);
     });
 
     it('servidor que limita a página (100) abaixo do pedido: continua até acabar', async () => {

@@ -36,7 +36,7 @@ Todas as **7** (a fase `forms` da SPEC 085 F4 mora DENTRO de `/api/automations/c
 | `/api/contacts/check/cron`     | bloco comentado (opcional)                 |
 | `/api/contacts/harvest/cron`   | bloco comentado (opcional)                 |
 
-A rota `/api/automations/cron` tem **7 fases** desde a F4 (2026-11-19): a 7ª (`runFormsSweep`, `src/lib/forms/sweep.ts`) marca `partial` > 24 h como `abandoned` e remove objetos órfãos de `form-uploads` e os sem referência em `answers` de respostas `completed` com > 24 h (varredura de Storage no máx. 1×/h por processo; `FORMS_SWEEP_PRUNE_DRY_RUN=1` só loga o que removeria); o resultado sai no log `[automations-cron] forms sweep`, pois as fases rodam em `after()`.
+A rota `/api/automations/cron` tem **7 fases** desde a F4 (2026-11-19): a 7ª (`runFormsSweep`, `src/lib/forms/sweep.ts`) marca `partial` > 24 h como `abandoned` e remove objetos órfãos de `form-uploads` e os sem referência em `answers` de respostas `completed` com > 24 h (varredura de Storage no máx. 1×/h por processo; poda em dry-run por padrão: só `FORMS_SWEEP_PRUNE_DRY_RUN=0` explícito remove de verdade, e a variável precisa constar no `environment:` do compose; toda varredura de Storage escreve uma linha de resumo com `dryRun`); o resultado sai no log `[automations-cron] forms sweep`, pois as fases rodam em `after()`.
 
 Medido em 2026-10-30 com: `ls src/app/api/*/cron/route.ts src/app/api/*/*/cron/route.ts` (7) · `grep -c x-cron-secret` e `grep -c 503` em cada (≥ 1) · `grep -l AUTOMATION_CRON_SECRET <as 7> | wc -l` (7) · `grep -n "api/.*cron" supabase/setup/cron-jobs.sql`.
 

@@ -36,7 +36,7 @@
 | ------------------------------------ | ------------------------------------------------------------------- |
 | Build passa em `dev` e falha no host | `dev` é mais tolerante — sempre rodar `npm run build` antes do push |
 
-Variável só de servidor, sem marcador nem rebuild: `FORMS_SWEEP_PRUNE_DRY_RUN=1` (stack do Portainer) faz a poda de objetos sem referência da varredura de formulários só logar o que removeria ([`formularios.md`](./formularios.md), item Cron).
+Variável só de servidor, sem marcador nem rebuild: a poda de objetos sem referência da varredura de formulários é **dry-run por padrão** (só loga o que removeria); só `FORMS_SWEEP_PRUNE_DRY_RUN=0` (ou `false`/`no`/`off`) remove de verdade; ausente, vazia ou valor desconhecido = dry-run ([`formularios.md`](./formularios.md), item Cron). Ela **precisa constar no `environment:` do compose da stack** para chegar ao container (definir só na UI do Portainer não basta); confira `dryRun` na linha `[automations-cron] forms sweep` da primeira varredura.
 
 Outras: container reinicia no boot = variável obrigatória faltando na stack (leia o log do `runtime-env`); build falha por arquivo "inexistente" = faltou `!` no `.dockerignore`; trocar o URL do Supabase na stack "não pega" = marcador fora de sincronia ou variável sem marcador.
 

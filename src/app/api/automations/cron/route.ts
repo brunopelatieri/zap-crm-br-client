@@ -7,7 +7,7 @@ import { scanSchedules } from '@/lib/automations/schedule-scan';
 import { runMessageRetention } from '@/lib/retention/sweep';
 import { runPlanLifecycle } from '@/lib/plans/lifecycle';
 import { deliverPending } from '@/lib/notifications/dispatch';
-import { runFormsSweep } from '@/lib/forms/sweep';
+import { runFormsSweep, shouldLogFormsSweep } from '@/lib/forms/sweep';
 
 /**
  * Sete fases, um único agendamento:
@@ -219,14 +219,9 @@ export async function GET(request: Request) {
     // velha) e a varredura de Storage roda no máximo 1 vez por hora por
     // processo. Não lança (ver `runFormsSweep`).
     const formsResult = await runFormsSweep(admin, new Date());
-    if (
-      formsResult.abandoned > 0 ||
-      formsResult.removedObjects > 0 ||
-      formsResult.wouldRemoveUnreferenced > 0 ||
-      formsResult.skippedNoDate > 0 ||
-      formsResult.truncatedLists > 0 ||
-      formsResult.errors > 0
-    ) {
+    // Toda varredura de Storage escreve a linha (traz `dryRun`), mesmo sem
+    // achados: sem ela o operador não distingue "ativo e limpo" de "não roda".
+    if (shouldLogFormsSweep(formsResult)) {
       console.log(
         '[automations-cron] forms sweep:',
         JSON.stringify(formsResult)
