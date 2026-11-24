@@ -41,6 +41,7 @@ import {
   type ApiScope,
 } from '@/lib/api-keys/scopes';
 import { useTranslations } from 'next-intl';
+import { MetaRelaySettings } from './meta-relay-settings';
 import { SettingsPanelHead } from './settings-panel-head';
 
 interface ApiKey {
@@ -275,6 +276,11 @@ export function ApiKeysSettings() {
         onOpenChange={setCreateOpen}
         onCreated={load}
       />
+
+      {/* SPEC 088 D-8: o repetidor do webhook da Meta é só de admin+. */}
+      <RequireRole min="admin">
+        <MetaRelaySettings />
+      </RequireRole>
     </section>
   );
 }

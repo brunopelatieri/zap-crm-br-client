@@ -933,6 +933,95 @@ resolve to a public address — requests to `localhost`, private/RFC1918
 ranges, link-local (incl. cloud metadata `169.254.169.254`), and similar
 internal targets are refused at delivery time.
 
+### Meta webhook relay (raw WhatsApp events)
+
+The events above are wacrm's own, reinterpreted envelope. If you also need
+the **original JSON that Meta sends** for your WhatsApp Cloud API numbers
+(`pricing`, full `errors`, `context`, `referral`, contact cards — anything
+wacrm does not model), turn on the Meta webhook relay (SPEC 088). Meta
+allows a single webhook URL per number; the relay lets wacrm keep it and
+still forward the same payload to a second system (n8n, BI, another
+helpdesk).
+
+**It is configured only in the dashboard** (Settings → API keys, card
+"Meta webhook relay", admin or above) and is **not part of `/api/v1`**:
+there is no endpoint, scope or `event` value for it, and `openapi.json`
+does not describe it. One relay per account, one target URL (`https://`,
+public address only — same SSRF rules as above).
+
+**When it fires.** For every Meta webhook POST that passes wacrm's
+signature check, if the relay is switched on and the POST carries at least
+one change for an **active Cloud API number of your account**. The match
+is by `value.metadata.phone_number_id` only. Never relayed:
+
+- events with no number (`message_template_*`, `account_update` and other
+  WABA-level events);
+- numbers that are not in the account, or whose channel is disabled or
+  deleted;
+- numbers the POST's signer does not cover: a POST validated by a
+  channel's own Meta App Secret only speaks for the numbers whose channel
+  stores that same App Secret (a number under a non-default Meta App needs
+  its own App Secret saved to be relayed);
+- anything that belongs to another account.
+
+The QR-code (Evolution) channel is not covered; only Cloud API numbers.
+
+**Request.** `POST <your url>` with `Content-Type: application/json` and
+these headers:
+
+| Header                | Value                                                         |
+| --------------------- | ------------------------------------------------------------- |
+| `X-Wacrm-Event`       | `meta.webhook_raw`                                            |
+| `X-Wacrm-Delivery-Id` | a uuid, new on every delivery                                 |
+| `X-Wacrm-Signature`   | `t=<unix_seconds>,v1=<hex>`, computed as in the section below |
+| `X-Wacrm-Test`        | `true`, only on the dashboard's "Test connection" request     |
+
+There is **no `X-Hub-Signature-256`** and no other Meta header: Meta's
+signature is not forwarded. Authenticate the call with
+`X-Wacrm-Signature` and the key shown once when you create the relay.
+
+**Body.** The Meta webhook, with no wacrm envelope:
+
+- Normal case: the whole POST, **byte for byte** as Meta sent it.
+- If one Meta POST mixes events of several accounts (rare), you receive the
+  same object with `entry[]` reduced to your entries and each `changes[]`
+  reduced to your changes (other top-level keys and the content of each
+  change are untouched; an entry left without changes is dropped).
+
+Either way it is a valid Meta webhook that contains only your data. Tell
+your numbers apart by `entry[].changes[].value.metadata.phone_number_id`.
+Media arrives as an `id` only (no URL, no bytes): downloading it needs a
+Graph API token that the relay does not provide.
+
+**Verifying the signature.** Same scheme as
+[Verifying the signature](#verifying-the-signature) above, with the
+relay's key as `secret`: `v1 = HMAC-SHA256(secret, "${t}.${rawBody}")`,
+over the raw request body. Parse the JSON only after the check.
+
+**Delivery semantics.**
+
+- One attempt per Meta POST, **5-second timeout**, redirects are **not**
+  followed (a `3xx` counts as a failure). Any non-`2xx`, timeout or network
+  error is a failure.
+- A success resets the failure counter; after **15 consecutive failures**
+  the relay switches itself off and the dashboard shows when and why.
+  Switching it back on is always manual and resets the counter.
+- No queue, no retry, **no ordering guarantee**: events that arrive while
+  your target is down are lost.
+- Meta resends a webhook when it does not get a `200`, so the same event
+  may reach you more than once. Dedupe on `messages[].id`, and on
+  `statuses[].id` together with `status`.
+- **Volume.** Every Meta POST becomes a delivery. A broadcast to thousands
+  of contacts produces tens of thousands of `statuses` POSTs (`sent`,
+  `delivered`, `read`); size your target for it, or the 15-failure limit
+  can trip within seconds.
+- The payload carries your contacts' phone numbers, names and message
+  text out of wacrm. Treat the target and the key accordingly.
+- "Test connection" sends a sample text-message webhook with fake ids
+  (`phone_number_id: "0"`, `wamid.TEST`) and `X-Wacrm-Test: true`, signed
+  like a real delivery. It works while the relay is off and does not count
+  as a failure.
+
 ## Roadmap
 
 The public API now covers messaging (including interactive buttons/lists),
@@ -981,6 +1070,7 @@ of the contract above actually lives in this repo:
 | Webhook HMAC signing | `src/lib/webhooks/sign.ts` |
 | Webhook delivery + failure counter | `src/lib/webhooks/deliver.ts` |
 | Webhook SSRF guard | `src/lib/webhooks/ssrf.ts` |
+| Dashboard-only Meta webhook relay (not `/api/v1`, SPEC 088)                  | `src/lib/webhooks/meta-relay.ts`, `meta-relay-config.ts`, hook in `src/app/api/whatsapp/webhook/route.ts`, routes `src/app/api/account/meta-relay/**`, UI `src/components/settings/meta-relay-settings.tsx`, schema `supabase/migrations/101_meta_webhook_relay.sql` |
 | `api_keys` schema | `supabase/migrations/026_api_keys.sql` |
 | `webhook_endpoints` schema | `supabase/migrations/028_webhook_endpoints.sql` |
 | Inbound ingest webhook route | `src/app/api/v1/ingest/contact/route.ts` |

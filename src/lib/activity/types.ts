@@ -103,7 +103,17 @@ export const ACTIVITY_CATALOG = {
     'plan.payment_reversed',
   ],
   tag: [],
-  webhook: ['webhook.ingest_failed'],
+  webhook: [
+    'webhook.ingest_failed',
+    // Repetidor do webhook da Meta (SPEC 088 D-10): saída de dado pessoal
+    // para fora do CRM. O rótulo é só o host de destino, nunca a URL
+    // completa nem a chave.
+    'webhook.relay_enabled',
+    'webhook.relay_disabled',
+    'webhook.relay_url_changed',
+    'webhook.relay_secret_rotated',
+    'webhook.relay_removed',
+  ],
   // Formulários de captação (SPEC 085 §9). Visita e resposta parcial NÃO
   // entram no registro (PRD 084 §6.4).
   form: [

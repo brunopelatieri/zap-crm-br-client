@@ -5,12 +5,21 @@ import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api';
 import { normalizePhone } from '@/lib/whatsapp/phone-utils';
 import { detectDeadNumberOnFailure } from '@/lib/contacts/whatsapp-status';
 import {
-  verifyMetaWebhookSignature,
-  resolveWebhookAppSecrets,
+  isMetaSignatureHeader,
+  resolveMetaWebhookSigner,
+  resolveWebhookChannelSecrets,
+  signerCoversPhoneNumber,
+  accountIdsForSigner,
+  type MetaWebhookSigner,
 } from '@/lib/whatsapp/webhook-signature';
+import {
+  META_WEBHOOK_MAX_BODY_BYTES,
+  readTextWithLimit,
+} from '@/lib/whatsapp/webhook-body';
 import { proxyMediaUrl } from '@/lib/storage/media-url';
 import { buildMediaPath, baseMimeType } from '@/lib/storage/upload-media';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
+import { relayMetaWebhook } from '@/lib/webhooks/meta-relay';
 import { ingestInbound, type IngestContext } from '@/lib/channels/ingest';
 import { markRevokedByContact } from '@/lib/messages/revoke-by-contact';
 import { resolveDefaultChannelId } from '@/lib/channels/send';
@@ -235,27 +244,50 @@ export async function GET(request: Request) {
   }
 }
 
+function invalidSignature() {
+  // 401 (not 200) — we want Meta's delivery dashboard to show failures
+  // loudly if a misconfiguration causes signatures to stop matching,
+  // rather than silently eating events.
+  console.warn('[webhook] rejected request with invalid signature');
+  return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+}
+
 // POST - Receive messages
 export async function POST(request: Request) {
-  // Read raw body first so we can HMAC-verify the exact bytes Meta
-  // signed. request.json() would re-encode and break the signature.
-  const rawBody = await request.text();
+  // Da checagem mais barata para a mais cara (achado M-1 da revisão da
+  // SPEC 088): esta rota é anônima até a assinatura validar, então um POST
+  // qualquer não pode custar memória, banco nem decifração. Cabeçalho que
+  // não tem como validar cai aqui, sem ler o corpo.
   const signature = request.headers.get('x-hub-signature-256');
+  if (!isMetaSignatureHeader(signature)) return invalidSignature();
+
+  // Raw body, so we can HMAC-verify the exact bytes Meta signed.
+  // request.json() would re-encode and break the signature. Com teto: a
+  // Meta documenta até 3 MB, então nenhum POST legítimo recebe este 413.
+  const rawBody = await readTextWithLimit(request, META_WEBHOOK_MAX_BODY_BYTES);
+  if (rawBody === null) {
+    console.warn('[webhook] rejected request over the body size limit');
+    return NextResponse.json({ error: 'Payload too large' }, { status: 413 });
+  }
 
   // Um segundo número oficial pode estar sob um App da Meta diferente
   // (WABA/credenciais próprios) — cada App assina com o PRÓPRIO App
   // Secret. Sem isto, só o `META_APP_SECRET` padrão valida, e todo
   // evento do outro App cai aqui como assinatura inválida mesmo com o
   // canal "conectado" e o registro/subscrição OK na Meta (migração 073).
-  const extraSecrets = await resolveWebhookAppSecrets(supabaseAdmin());
+  //
+  // `signer` diz QUAL segredo validou (revisão de segurança da SPEC 088,
+  // achado 1): o `app_secret` de um canal só fala pelos números que o
+  // guardam. O repetidor E o ingest (`processWebhook`) respeitam esse
+  // escopo; o `META_APP_SECRET` vale para todos, como antes.
+  //
+  // O `META_APP_SECRET` é testado antes; os segredos dos canais só são
+  // lidos e decifrados se ele não validar.
+  const signer = await resolveMetaWebhookSigner(rawBody, signature, () =>
+    resolveWebhookChannelSecrets(supabaseAdmin())
+  );
 
-  if (!verifyMetaWebhookSignature(rawBody, signature, extraSecrets)) {
-    // 401 (not 200) — we want Meta's delivery dashboard to show failures
-    // loudly if a misconfiguration causes signatures to stop matching,
-    // rather than silently eating events.
-    console.warn('[webhook] rejected request with invalid signature');
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-  }
+  if (!signer) return invalidSignature();
 
   let body: { entry?: WhatsAppWebhookEntry[] };
   try {
@@ -278,19 +310,35 @@ export async function POST(request: Request) {
   // (see issue #301). `after()` hands the callback to the runtime, which
   // keeps the function alive until it resolves (within the route's
   // maxDuration).
+  //
+  // SPEC 088 §4.4 — o repetidor do webhook da Meta roda AQUI, depois da
+  // assinatura validada, em PARALELO ao ingest: destino lento ou falho não
+  // atrasa nem derruba o processamento (e vice-versa). Continua dentro do
+  // `after()` — nada de promessa solta (#301). `rawBody` é a string lida
+  // acima, sem reserializar. `relayMetaWebhook` nunca lança;
+  // o `allSettled` é a segunda trava.
   after(async () => {
-    try {
-      await processWebhook(body);
-    } catch (error) {
-      console.error('Error processing webhook:', error);
-    }
+    await Promise.allSettled([
+      processWebhook(body, signer).catch((error) =>
+        console.error('Error processing webhook:', error)
+      ),
+      relayMetaWebhook(supabaseAdmin(), { rawBody, body, signer }),
+    ]);
   });
 
   return NextResponse.json({ status: 'received' }, { status: 200 });
 }
 
-async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
+async function processWebhook(
+  body: { entry?: WhatsAppWebhookEntry[] },
+  signer: MetaWebhookSigner
+) {
   if (!body.entry) return;
+
+  // Contas cujos templates este POST pode tocar (eventos de template não
+  // têm `phone_number_id`). Só consultado com segredo de canal, uma vez
+  // por POST e só se vier evento de template; `null` = sem restrição.
+  let templateAccounts: Promise<string[] | null> | null = null;
 
   for (const entry of body.entry) {
     for (const change of entry.changes) {
@@ -300,14 +348,34 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       // dedicated handler. Skip the messaging branches below so we
       // don't try to read message-shaped fields off a template event.
       if (isTemplateWebhookField(change.field)) {
+        templateAccounts ??= accountIdsForSigner(supabaseAdmin(), signer);
+        const accountIds = await templateAccounts;
         await handleTemplateWebhookChange(
           { field: change.field, value: change.value as unknown },
-          supabaseAdmin()
+          supabaseAdmin(),
+          accountIds ? { accountIds } : undefined
         );
         continue;
       }
 
       const value = change.value;
+
+      // Revisão de segurança da SPEC 088 — o `app_secret` de um canal é
+      // gravado pelo admin da conta, sem validação na Meta. Sem esta
+      // guarda, o admin de A assina com o próprio segredo um `change` do
+      // número de B e injeta mensagens/status no inbox de B. Fora do
+      // escopo do segredo (ou sem número, com segredo de canal): ignora
+      // ESTE `change` e segue com os demais; a Meta recebe 200 do mesmo
+      // jeito (nada de reentrega).
+      const changePhoneNumberId = value?.metadata?.phone_number_id;
+      if (!signerCoversPhoneNumber(signer, changePhoneNumberId)) {
+        console.warn(
+          '[webhook] change ignored — phone_number_id outside the scope of the App Secret that signed this POST:',
+          // Valor vem do corpo (de quem assinou): limitado, sem quebra de linha.
+          JSON.stringify(String(changePhoneNumberId ?? '').slice(0, 64))
+        );
+        continue;
+      }
 
       // Handle status updates
       if (value.statuses) {

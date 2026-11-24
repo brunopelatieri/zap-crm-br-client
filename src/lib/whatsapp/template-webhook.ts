@@ -68,6 +68,16 @@ export interface TemplateWebhookChange {
 }
 
 /**
+ * Accounts whose templates this event may update. Template events carry
+ * no `phone_number_id`, so when a channel's own App Secret signed the POST
+ * the route restricts them to the accounts of that secret's numbers
+ * (`accountIdsForSigner`). Omitted = no restriction (`META_APP_SECRET`).
+ */
+export interface TemplateWebhookScope {
+  accountIds: readonly string[];
+}
+
+/**
  * Dispatch a single change record to the matching handler. Returns
  * silently on unrecognised fields — the caller already pre-filtered
  * via isTemplateWebhookField, but treat unknown values as no-ops
@@ -78,19 +88,29 @@ export async function handleTemplateWebhookChange(
   // SupabaseClient typed loosely — the webhook route lazy-initialises
   // the admin client and exposes it as `any`. Type as the generic
   // SupabaseClient here so this module is testable in isolation.
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  scope?: TemplateWebhookScope
 ): Promise<void> {
+  if (scope && scope.accountIds.length === 0) {
+    console.warn(
+      '[template-webhook] event ignored — the App Secret that signed it covers no account:',
+      change.field
+    );
+    return;
+  }
   switch (change.field) {
     case 'message_template_status_update':
       await handleStatusUpdate(
         change.value as TemplateStatusUpdateValue,
-        supabase
+        supabase,
+        scope
       );
       return;
     case 'message_template_quality_update':
       await handleQualityUpdate(
         change.value as TemplateQualityUpdateValue,
-        supabase
+        supabase,
+        scope
       );
       return;
     case 'message_template_components_update':
@@ -101,7 +121,8 @@ export async function handleTemplateWebhookChange(
 
 async function handleStatusUpdate(
   value: TemplateStatusUpdateValue,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  scope?: TemplateWebhookScope
 ): Promise<void> {
   const metaTemplateId =
     value.message_template_id !== undefined
@@ -128,11 +149,12 @@ async function handleStatusUpdate(
     submission_error: null,
   };
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('message_templates')
     .update(update)
-    .eq('meta_template_id', metaTemplateId)
-    .select('id');
+    .eq('meta_template_id', metaTemplateId);
+  if (scope) query = query.in('account_id', [...scope.accountIds]);
+  const { data, error } = await query.select('id');
 
   if (error) {
     console.error(
@@ -159,7 +181,8 @@ async function handleStatusUpdate(
 
 async function handleQualityUpdate(
   value: TemplateQualityUpdateValue,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  scope?: TemplateWebhookScope
 ): Promise<void> {
   const metaTemplateId =
     value.message_template_id !== undefined
@@ -179,10 +202,12 @@ async function handleQualityUpdate(
       ? (raw.toUpperCase() as 'GREEN' | 'YELLOW' | 'RED')
       : null;
 
-  const { error } = await supabase
+  let query = supabase
     .from('message_templates')
     .update({ quality_score: score })
     .eq('meta_template_id', metaTemplateId);
+  if (scope) query = query.in('account_id', [...scope.accountIds]);
+  const { error } = await query;
 
   if (error) {
     console.error(

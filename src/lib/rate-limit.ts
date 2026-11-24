@@ -247,6 +247,11 @@ export const RATE_LIMITS = {
    *  grande (um arquivo por respondente) e limita o pior caso a ~9,6 GB/h
    *  por conta. Em memória, por processo (como os demais). */
   formUploadAccount: { limit: 600, windowMs: 3_600_000 },
+  /** "Testar conexão" do repetidor do webhook da Meta (SPEC 088 §5.3), por
+   *  CONTA. Cada clique faz o servidor requisitar uma URL escolhida pelo
+   *  usuário (até 5 s de timeout); 6/min cobre acertar a URL e repetir, e
+   *  não deixa o botão virar um amplificador de requisições. */
+  metaRelayTest: { limit: 6, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

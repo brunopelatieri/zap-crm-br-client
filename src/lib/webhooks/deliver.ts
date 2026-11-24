@@ -39,6 +39,110 @@ interface EndpointRow {
   secret: string;
 }
 
+/** Outcome of one signed POST. Never carries the response body. */
+export type PostSignedResult =
+  | { ok: true; status: number; durationMs: number }
+  | {
+      ok: false;
+      error: 'timeout' | 'not_public' | 'http_error' | 'network';
+      /** HTTP status when the target answered (`http_error`); else null. */
+      status: number | null;
+      durationMs: number;
+      /** Short diagnostic for logs: never the URL, body or secret. */
+      message: string;
+    };
+
+export interface PostSignedPayloadInput {
+  url: string;
+  /** Plaintext HMAC key (already decrypted by the caller). */
+  secret: string;
+  /** Exact bytes sent AND signed. */
+  body: string;
+  /** Extra headers; `Content-Type` and `X-Wacrm-Signature` always win. */
+  headers?: Record<string, string>;
+  /** Signature clock (seconds). Defaults to now. */
+  tsSeconds?: number;
+}
+
+/**
+ * One signed POST to a user-supplied URL: SSRF guard, short timeout, no
+ * redirect following, `X-Wacrm-Signature` over the exact body. Shared by
+ * the outbound webhooks and the Meta webhook relay (SPEC 088). Never
+ * throws: every failure comes back as a typed result.
+ */
+export async function postSignedPayload(
+  input: PostSignedPayloadInput
+): Promise<PostSignedResult> {
+  const started = Date.now();
+  const elapsed = () => Date.now() - started;
+
+  // SSRF guard: refuse to POST to a host that resolves to a private /
+  // loopback / link-local address.
+  let deliverable = false;
+  try {
+    deliverable = await isDeliverableUrl(input.url);
+  } catch {
+    deliverable = false;
+  }
+  if (!deliverable) {
+    return {
+      ok: false,
+      error: 'not_public',
+      status: null,
+      durationMs: elapsed(),
+      message: 'target is not a public address',
+    };
+  }
+
+  const tsSeconds = input.tsSeconds ?? Math.floor(Date.now() / 1000);
+  try {
+    const res = await fetch(input.url, {
+      method: 'POST',
+      headers: {
+        ...input.headers,
+        'Content-Type': 'application/json',
+        'X-Wacrm-Signature': buildSignatureHeader(
+          input.body,
+          input.secret,
+          tsSeconds
+        ),
+      },
+      body: input.body,
+      // Do NOT follow redirects — a public URL could 3xx-bounce to an
+      // internal address, bypassing the SSRF check above. A 3xx is a
+      // misconfiguration; treat it as a failure.
+      redirect: 'manual',
+      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+    });
+    // Free the connection without reading the target's answer.
+    try {
+      void res.body?.cancel().catch(() => {});
+    } catch {
+      /* best effort */
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: 'http_error',
+        status: res.status,
+        durationMs: elapsed(),
+        message: `endpoint responded ${res.status}`,
+      };
+    }
+    return { ok: true, status: res.status, durationMs: elapsed() };
+  } catch (err) {
+    const name = (err as { name?: string } | null)?.name;
+    const timedOut = name === 'TimeoutError' || name === 'AbortError';
+    return {
+      ok: false,
+      error: timedOut ? 'timeout' : 'network',
+      status: null,
+      durationMs: elapsed(),
+      message: err instanceof Error ? err.message : 'request failed',
+    };
+  }
+}
+
 /**
  * Deliver `event` (+ `data`) to every active endpoint of `accountId`
  * subscribed to it. Never throws.
@@ -90,15 +194,6 @@ async function deliverOne(
   payload: string,
   tsSeconds: number
 ): Promise<void> {
-  // SSRF guard: refuse to POST to a host that resolves to a private /
-  // loopback / link-local address. Counts as a failure so a
-  // misconfigured internal URL surfaces and eventually auto-disables.
-  if (!(await isDeliverableUrl(row.url))) {
-    console.warn('[webhooks] refusing non-public delivery target for', row.id);
-    await recordFailure(db, row);
-    return;
-  }
-
   let secret: string;
   try {
     secret = decrypt(row.secret);
@@ -110,36 +205,34 @@ async function deliverOne(
     return;
   }
 
-  try {
-    const res = await fetch(row.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Wacrm-Event': event,
-        'X-Wacrm-Webhook-Id': row.id,
-        'X-Wacrm-Signature': buildSignatureHeader(payload, secret, tsSeconds),
-      },
-      body: payload,
-      // Do NOT follow redirects — a public URL could 3xx-bounce to an
-      // internal address, bypassing the SSRF check above. A 3xx is a
-      // misconfiguration; treat it as a failure.
-      redirect: 'manual',
-      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`endpoint responded ${res.status}`);
+  const result = await postSignedPayload({
+    url: row.url,
+    secret,
+    body: payload,
+    tsSeconds,
+    headers: {
+      'X-Wacrm-Event': event,
+      'X-Wacrm-Webhook-Id': row.id,
+    },
+  });
 
+  if (result.ok) {
     // Success: clear the failure streak.
     await db
       .from('webhook_endpoints')
       .update({ failure_count: 0, last_delivery_at: new Date().toISOString() })
       .eq('id', row.id);
-  } catch (err) {
-    console.warn(
-      `[webhooks] delivery to ${row.id} failed:`,
-      err instanceof Error ? err.message : err
-    );
-    await recordFailure(db, row);
+    return;
   }
+
+  if (result.error === 'not_public') {
+    // Counts as a failure so a misconfigured internal URL surfaces and
+    // eventually auto-disables.
+    console.warn('[webhooks] refusing non-public delivery target for', row.id);
+  } else {
+    console.warn(`[webhooks] delivery to ${row.id} failed:`, result.message);
+  }
+  await recordFailure(db, row);
 }
 
 async function recordFailure(
