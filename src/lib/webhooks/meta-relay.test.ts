@@ -28,6 +28,8 @@ import {
   envelope,
   envelopeOf,
   messagesChange,
+  realMessagesRawBody,
+  realStatusesRawBody,
   templateStatusChange,
 } from './meta-relay.fixtures';
 
@@ -1119,5 +1121,109 @@ describe('sendRelayTest', () => {
       error: 'network',
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// Corpos REAIS da Meta (capturados na F6 da SPEC 088, anonimizados)
+// ============================================================
+
+describe('corpos reais da Meta (statuses e messages)', () => {
+  const REAL_BODIES = [
+    ['statuses', realStatusesRawBody],
+    ['messages', realMessagesRawBody],
+  ] as const;
+
+  it.each(REAL_BODIES)(
+    '%s: a forma real (value antes de field, compacto) chega ao destino byte a byte, assinada, sem X-Hub-Signature-256',
+    async (_name, build) => {
+      const fetchMock = stubFetch();
+      const rawBody = build({ phoneNumberId: PNID_A });
+      // Pré-condição: a ordem de chaves é a da Meta, não a da documentação.
+      const change = JSON.parse(rawBody).entry[0].changes[0];
+      expect(Object.keys(change)).toEqual(['value', 'field']);
+
+      await relayMetaWebhook(makeDb(stateForA()), {
+        rawBody,
+        body: JSON.parse(rawBody),
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [, opts] = fetchCalls(fetchMock)[0];
+      expect(opts.body === rawBody).toBe(true);
+      expect(headerKeys(fetchCalls(fetchMock)[0])).not.toContain(
+        'x-hub-signature-256'
+      );
+      expect(opts.headers['X-Wacrm-Event']).toBe('meta.webhook_raw');
+      expect(opts.headers['X-Wacrm-Test']).toBeUndefined();
+      expect(
+        verifySignatureHeader(
+          opts.headers['X-Wacrm-Signature'],
+          opts.body as string,
+          SECRET_A,
+          Math.floor(Date.now() / 1000)
+        )
+      ).toBe(true);
+    }
+  );
+
+  it('statuses real: o pricing completo (PMP, free_customer_service, free_tier) e o recipient_user_id seguem intactos', async () => {
+    const fetchMock = stubFetch();
+    const rawBody = realStatusesRawBody({ phoneNumberId: PNID_A });
+
+    await relayMetaWebhook(makeDb(stateForA()), {
+      rawBody,
+      body: JSON.parse(rawBody),
+    });
+
+    const sent = JSON.parse(fetchCalls(fetchMock)[0][1].body as string);
+    const status = sent.entry[0].changes[0].value.statuses[0];
+    expect(status).toMatchObject({
+      status: 'read',
+      recipient_user_id: 'US.13491208655302741918',
+      pricing: {
+        billable: false,
+        pricing_model: 'PMP',
+        category: 'service',
+        type: 'free_customer_service',
+        subtype: 'free_tier',
+      },
+    });
+  });
+
+  it.each(REAL_BODIES)(
+    '%s de número que não é da conta A: nada é enviado',
+    async (_name, build) => {
+      const fetchMock = stubFetch();
+      const rawBody = build({ phoneNumberId: PNID_B });
+
+      await relayMetaWebhook(makeDb(stateForA()), {
+        rawBody,
+        body: JSON.parse(rawBody),
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('POST misto com formas reais (statuses de A + messages de B): A recebe só o seu change, sem rastro do número de B', async () => {
+    const fetchMock = stubFetch();
+    const aChange = JSON.parse(realStatusesRawBody({ phoneNumberId: PNID_A }))
+      .entry[0].changes[0];
+    const bChange = JSON.parse(realMessagesRawBody({ phoneNumberId: PNID_B }))
+      .entry[0].changes[0];
+    const body = envelope('102290129340398', [aChange, bChange]);
+
+    await relayMetaWebhook(makeDb(stateForA()), {
+      rawBody: JSON.stringify(body),
+      body,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const sentRaw = fetchCalls(fetchMock)[0][1].body as string;
+    expect(sentRaw).not.toContain(PNID_B);
+    const sent = JSON.parse(sentRaw);
+    expect(sent.entry[0].changes).toHaveLength(1);
+    expect(sent.entry[0].changes[0].value.statuses[0].status).toBe('read');
   });
 });

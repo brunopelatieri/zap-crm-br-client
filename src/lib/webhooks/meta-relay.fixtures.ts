@@ -7,10 +7,13 @@
 // distinguir (conta A/B) são parametrizados. O envelope é o padrão da
 // Meta, montado aqui por código.
 //
-// Lacuna conhecida: o arquivo de exemplos não traz `statuses`
-// (sent/delivered/read, com `pricing`). Nenhum teste deste módulo
-// depende dessa forma, e ela NÃO deve ser inventada aqui: falta um
-// exemplo real fornecido pelo mantenedor.
+// `realStatusesRawBody` e `realMessagesRawBody` (no fim do arquivo) são
+// os corpos que o webhook da Meta entregou de verdade ao repetidor em
+// 2026-11-25 (F6 da SPEC 088), com os dados pessoais trocados por valores
+// fictícios e a FORMA preservada byte a byte: JSON compacto, na ordem de
+// chaves da Meta (`value` ANTES de `field`, que o exemplo da
+// documentação inverte) e, em `statuses`, o `pricing` completo. Eles
+// fecham a lacuna que o arquivo de exemplos deixava (sem `statuses`).
 // ============================================================
 
 export type Change = Record<string, unknown>;
@@ -123,4 +126,52 @@ export function accountUpdateChange(): Change {
       event: 'VERIFIED_ACCOUNT',
     },
   };
+}
+
+/**
+ * Corpo REAL de `statuses` (status `read`, com `pricing`), anonimizado.
+ * Cru, como a Meta o envia: nada de reserializar. O `wamid` é fictício,
+ * mas tem a mesma forma do real (prefixo `wamid.` + base64).
+ */
+export function realStatusesRawBody(
+  opts: { phoneNumberId?: string; wabaId?: string } = {}
+): string {
+  const { phoneNumberId = '123456123', wabaId = '102290129340398' } = opts;
+  return (
+    `{"object":"whatsapp_business_account","entry":[{"id":"${wabaId}",` +
+    `"changes":[{"value":{"messaging_product":"whatsapp","metadata":` +
+    `{"display_phone_number":"16505551111","phone_number_id":"${phoneNumberId}"},` +
+    `"contacts":[{"wa_id":"16315551181","user_id":"US.13491208655302741918"}],` +
+    `"statuses":[{"id":"wamid.HBgLMTYzMTU1NTExODEVAgARGBI0Njg2Q0U1NjkzQjQ5QTM4MTEA",` +
+    `"status":"read","timestamp":"1795576195","recipient_id":"16315551181",` +
+    `"recipient_user_id":"US.13491208655302741918","pricing":{"billable":false,` +
+    `"pricing_model":"PMP","category":"service","type":"free_customer_service",` +
+    `"subtype":"free_tier"}}]},"field":"messages"}]}]}`
+  );
+}
+
+/**
+ * Corpo REAL de `messages` (texto recebido), anonimizado, na ordem de
+ * chaves da Meta (`from`, `from_user_id`, `id`, `timestamp`, `text`,
+ * `type`). Cru, como a Meta o envia.
+ */
+export function realMessagesRawBody(
+  opts: { phoneNumberId?: string; wabaId?: string; text?: string } = {}
+): string {
+  const {
+    phoneNumberId = '123456123',
+    wabaId = '102290129340398',
+    text = 'test return 3',
+  } = opts;
+  return (
+    `{"object":"whatsapp_business_account","entry":[{"id":"${wabaId}",` +
+    `"changes":[{"value":{"messaging_product":"whatsapp","metadata":` +
+    `{"display_phone_number":"16505551111","phone_number_id":"${phoneNumberId}"},` +
+    `"contacts":[{"profile":{"name":"test user name"},"wa_id":"16315551181",` +
+    `"user_id":"US.13491208655302741918"}],"messages":[{"from":"16315551181",` +
+    `"from_user_id":"US.13491208655302741918",` +
+    `"id":"wamid.HBgLMTYzMTU1NTExODEVAgASGBYzRUIwMTYxMDY5QzQ0MjExNTQyMEE3AA==",` +
+    `"timestamp":"1795576203","text":{"body":"${text}"},"type":"text"}]},` +
+    `"field":"messages"}]}]}`
+  );
 }

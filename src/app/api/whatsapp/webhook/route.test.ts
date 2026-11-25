@@ -388,6 +388,8 @@ import {
   accountUpdateChange,
   envelope,
   messagesChange,
+  realMessagesRawBody,
+  realStatusesRawBody,
   templateStatusChange,
 } from '@/lib/webhooks/meta-relay.fixtures';
 import { __resetBillingSignalStateForTests } from '@/lib/whatsapp/billing-signal';
@@ -1785,5 +1787,82 @@ describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', ()
         status: 'failed',
       })
     );
+  });
+});
+
+describe('POST /api/whatsapp/webhook — corpos reais da Meta (F6 da SPEC 088)', () => {
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  function rawRequest(raw: string): Request {
+    return webhookRequest(raw, { 'x-hub-signature-256': WELL_FORMED_HEADER });
+  }
+
+  it('statuses `read` com pricing: o espelho grava status e pricing, o webhook de saída sai, e o repetidor recebe os bytes originais', async () => {
+    statusMessageRow = {
+      conversation_id: 'conv-1',
+      conversations: {
+        account_id: 'acct-1',
+        channel_id: 'chan-1',
+        channels: { type: 'whatsapp_cloud' },
+      },
+    };
+    const raw = realStatusesRawBody({ phoneNumberId: 'pnid-1' });
+    const wamid = JSON.parse(raw).entry[0].changes[0].value.statuses[0].id;
+
+    const res = await POST(rawRequest(raw));
+    expect(res.status).toBe(200);
+    await afterCallbacks[0]!();
+    await flush();
+
+    // Ingest de status: só o status e o que o espelho sabe ler do pricing
+    // (`billable`, `category`); `pricing_model`, `type` e `subtype` não
+    // viram coluna.
+    expect(tableUpdates).toContainEqual({
+      table: 'messages',
+      payload: {
+        status: 'read',
+        pricing_billable: false,
+        pricing_category: 'SERVICE',
+      },
+      filters: [['message_id', wamid]],
+    });
+    expect(dispatchWebhookEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'acct-1',
+      'message.status_updated',
+      expect.objectContaining({ whatsapp_message_id: wamid, status: 'read' })
+    );
+    expect(ingestInbound).not.toHaveBeenCalled();
+
+    // Repetidor: o corpo cru, sem reserializar.
+    expect(relayMetaWebhook).toHaveBeenCalledTimes(1);
+    const [, input] = relayMetaWebhook.mock.calls[0] as [
+      unknown,
+      { rawBody: string },
+    ];
+    expect(input.rawBody).toBe(raw);
+  });
+
+  it('messages de texto: o ingest recebe o texto, o id e o remetente reais, e o repetidor recebe os bytes originais', async () => {
+    const raw = realMessagesRawBody({ phoneNumberId: 'pnid-1' });
+
+    await POST(rawRequest(raw));
+    await afterCallbacks[0]!();
+    await flush();
+
+    expect(ingestInbound).toHaveBeenCalledTimes(1);
+    const [, event] = ingestInbound.mock.calls[0] as [
+      unknown,
+      { providerMessageId: string; fromPhone: string; occurredAt: Date },
+    ];
+    expect(event.providerMessageId).toMatch(/^wamid\./);
+    expect(event.fromPhone).toBe('16315551181');
+    expect(event.occurredAt.getTime()).toBe(1795576203 * 1000);
+
+    const [, input] = relayMetaWebhook.mock.calls[0] as [
+      unknown,
+      { rawBody: string },
+    ];
+    expect(input.rawBody).toBe(raw);
   });
 });
