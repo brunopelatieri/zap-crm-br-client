@@ -48,7 +48,12 @@ export type PostSignedResult =
       /** HTTP status when the target answered (`http_error`); else null. */
       status: number | null;
       durationMs: number;
-      /** Short diagnostic for logs: never the URL, body or secret. */
+      /**
+       * Short diagnostic for logs. Always a fixed string or a bare error
+       * class/code: never the URL (nor its credentials, path or query),
+       * the body or the secret, and never the raw `fetch` error message
+       * (undici puts the whole URL in it).
+       */
       message: string;
     };
 
@@ -75,6 +80,20 @@ export async function postSignedPayload(
 ): Promise<PostSignedResult> {
   const started = Date.now();
   const elapsed = () => Date.now() - started;
+
+  // Shape guard, before any DNS or network I/O: only https, and no
+  // credentials in the URL (they would travel as Basic auth and leak
+  // into logs). Reuses `not_public` so the relay test button keeps its
+  // `timeout | not_public | http_error | network` contract.
+  if (!isSafeTargetShape(input.url)) {
+    return {
+      ok: false,
+      error: 'not_public',
+      status: null,
+      durationMs: elapsed(),
+      message: 'target must be https without embedded credentials',
+    };
+  }
 
   // SSRF guard: refuse to POST to a host that resolves to a private /
   // loopback / link-local address.
@@ -138,9 +157,34 @@ export async function postSignedPayload(
       error: timedOut ? 'timeout' : 'network',
       status: null,
       durationMs: elapsed(),
-      message: err instanceof Error ? err.message : 'request failed',
+      message: describeFetchError(err, timedOut),
     };
   }
+}
+
+/** True for an absolute `https:` URL with no `user:pass@` part. */
+function isSafeTargetShape(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    return u.protocol === 'https:' && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Loggable summary of a `fetch` failure. undici's `TypeError: fetch
+ * failed` is harmless, but other messages embed the full URL, so only
+ * the error class and a bare system code (`ENOTFOUND`, ...) are kept.
+ */
+function describeFetchError(err: unknown, timedOut: boolean): string {
+  if (timedOut) return 'request timed out';
+  const cause = (err as { cause?: { code?: unknown } } | null)?.cause;
+  const code =
+    typeof cause?.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(cause.code)
+      ? cause.code
+      : null;
+  return code ? `request failed (${code})` : 'request failed';
 }
 
 /**
@@ -228,9 +272,15 @@ async function deliverOne(
   if (result.error === 'not_public') {
     // Counts as a failure so a misconfigured internal URL surfaces and
     // eventually auto-disables.
-    console.warn('[webhooks] refusing non-public delivery target for', row.id);
+    console.warn(
+      `[webhooks] refusing delivery target for ${row.id}: ${result.message}`
+    );
   } else {
-    console.warn(`[webhooks] delivery to ${row.id} failed:`, result.message);
+    // `result.message` is URL-free by contract; log the class and status
+    // only, never `row.url`.
+    console.warn(
+      `[webhooks] delivery to ${row.id} failed: ${result.error} status=${result.status ?? 'none'} (${result.message})`
+    );
   }
   await recordFailure(db, row);
 }

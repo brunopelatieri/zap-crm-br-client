@@ -11,6 +11,7 @@ vi.mock('@/lib/webhooks/ssrf', () => ({
   isDeliverableUrl: vi.fn(async () => true),
 }));
 
+import { RATE_LIMITS, __resetRateLimitForTests } from '@/lib/rate-limit';
 import { MAX_CONSECUTIVE_FAILURES } from './deliver';
 import {
   __resetMetaRelayStateForTests,
@@ -245,6 +246,8 @@ interface FakeState {
   relays: Row[];
   configs: Row[];
   channels: Row[];
+  /** Ids de contas com `accounts.blocked_at` preenchido (B-4). */
+  blocked: string[];
   errors: Partial<Record<string, DbError>>;
   rpcError: DbError;
   reads: string[];
@@ -257,6 +260,7 @@ function newState(partial: Partial<FakeState> = {}): FakeState {
     relays: [],
     configs: [],
     channels: [],
+    blocked: [],
     errors: {},
     rpcError: null,
     reads: [],
@@ -274,7 +278,17 @@ function makeDb(state: FakeState): SupabaseClient {
         ? state.configs
         : table === 'channels'
           ? state.channels
-          : [];
+          : table === 'accounts'
+            ? // Toda conta com repetidor existe; `blocked_at` vem de `state.blocked`.
+              [...new Set(state.relays.map((r) => r.account_id as string))].map(
+                (id) => ({
+                  id,
+                  blocked_at: state.blocked.includes(id)
+                    ? '2026-11-01T00:00:00Z'
+                    : null,
+                })
+              )
+            : [];
 
   const from = (table: string) => {
     const filters: unknown[][] = [];
@@ -392,6 +406,7 @@ const headerKeys = (call: FetchCall) =>
 beforeEach(() => {
   vi.mocked(isDeliverableUrl).mockResolvedValue(true);
   __resetMetaRelayStateForTests();
+  __resetRateLimitForTests();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -930,6 +945,250 @@ describe('relayMetaWebhook', () => {
     ]) {
       expect(logged).not.toContain(forbidden);
     }
+  });
+});
+
+// ============================================================
+// B-4 — conta bloqueada não recebe repasse
+// ============================================================
+
+describe('conta bloqueada (B-4, SPEC 062 §4.3)', () => {
+  const twoAccounts = (extra: Partial<FakeState> = {}): FakeState =>
+    newState({
+      relays: [
+        relayRow('acct-a', 'https://a.test/hook', SECRET_A),
+        relayRow('acct-b', 'https://b.test/hook', SECRET_B),
+      ],
+      configs: [
+        cfg('acct-a', PNID_A, 'chan-a'),
+        cfg('acct-b', PNID_B, 'chan-b'),
+      ],
+      channels: [chan('chan-a', 'acct-a'), chan('chan-b', 'acct-b')],
+      ...extra,
+    });
+  const mixedBody = () =>
+    envelope('waba-shared', [
+      messagesChange({ phoneNumberId: PNID_A, waId: WA_A }),
+      messagesChange({ phoneNumberId: PNID_B, waId: WA_B }),
+    ]);
+
+  it('conta bloqueada com repetidor ligado: nenhum fetch, nenhuma falha registrada', async () => {
+    const fetchMock = stubFetch();
+    const state = stateForA({ blocked: ['acct-a'] });
+
+    await relayMetaWebhook(makeDb(state), {
+      rawBody: JSON.stringify(inboundBody()),
+      body: inboundBody(),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.rpcs).toHaveLength(0);
+    expect(state.updates).toHaveLength(0);
+  });
+
+  it('A bloqueada e B não, no mesmo POST: só B recebe, sem rastro de A', async () => {
+    const fetchMock = stubFetch();
+    const body = mixedBody();
+
+    await relayMetaWebhook(makeDb(twoAccounts({ blocked: ['acct-a'] })), {
+      rawBody: JSON.stringify(body),
+      body,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchCalls(fetchMock)[0];
+    expect(url).toBe('https://b.test/hook');
+    expect(opts.body).not.toContain(PNID_A);
+    expect(opts.body).not.toContain(WA_A);
+  });
+
+  it('conta não bloqueada: entrega como antes (corpo cru, assinada)', async () => {
+    const fetchMock = stubFetch();
+    const rawBody = JSON.stringify(inboundBody());
+
+    await relayMetaWebhook(makeDb(stateForA()), {
+      rawBody,
+      body: inboundBody(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchCalls(fetchMock)[0][1].body === rawBody).toBe(true);
+  });
+
+  it('o bloqueio é lido numa única consulta, só das contas com repetidor e plano', async () => {
+    stubFetch();
+    const state = twoAccounts({
+      // C tem repetidor ligado mas nenhum número no POST.
+      relays: [
+        relayRow('acct-a', 'https://a.test/hook', SECRET_A),
+        relayRow('acct-b', 'https://b.test/hook', SECRET_B),
+        relayRow('acct-c', 'https://c.test/hook', 'whrelay_secret_c'),
+      ],
+    });
+    const body = mixedBody();
+
+    await relayMetaWebhook(makeDb(state), {
+      rawBody: JSON.stringify(body),
+      body,
+    });
+
+    expect(state.reads.filter((t) => t === 'accounts')).toHaveLength(1);
+  });
+
+  it('sem plano para ninguém (número fora do CRM): nem consulta o bloqueio', async () => {
+    stubFetch();
+    const state = stateForA({ configs: [] });
+
+    await relayMetaWebhook(makeDb(state), {
+      rawBody: JSON.stringify(inboundBody()),
+      body: inboundBody(),
+    });
+
+    expect(state.reads).not.toContain('accounts');
+  });
+
+  it('erro ao ler o bloqueio: falha FECHADA — ninguém recebe, sem lançar, log sem corpo/URL/chave', async () => {
+    const fetchMock = stubFetch();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const body = mixedBody();
+    const state = twoAccounts({ errors: { accounts: { message: 'db down' } } });
+
+    await expect(
+      relayMetaWebhook(makeDb(state), { rawBody: JSON.stringify(body), body })
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.rpcs).toHaveLength(0);
+    const logged = JSON.stringify(error.mock.calls);
+    expect(logged).toContain('blocked-account lookup failed');
+    for (const forbidden of [WA_A, SECRET_A, 'a.test', '/hook']) {
+      expect(logged).not.toContain(forbidden);
+    }
+  });
+});
+
+// ============================================================
+// B-2 — teto de entregas por conta
+// ============================================================
+
+describe('teto de entregas por conta (B-2)', () => {
+  const { limit: CEILING, windowMs: WINDOW_MS } = RATE_LIMITS.metaRelayDelivery;
+  const T0 = new Date('2026-11-25T12:00:00.000Z');
+
+  const twoAccounts = (): FakeState =>
+    newState({
+      relays: [
+        relayRow('acct-a', 'https://a.test/hook', SECRET_A),
+        relayRow('acct-b', 'https://b.test/hook', SECRET_B),
+      ],
+      configs: [
+        cfg('acct-a', PNID_A, 'chan-a'),
+        cfg('acct-b', PNID_B, 'chan-b'),
+      ],
+      channels: [chan('chan-a', 'acct-a'), chan('chan-b', 'acct-b')],
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** POST real de `statuses` (forma da Meta) do número dado. */
+  const post = (db: SupabaseClient, phoneNumberId: string) => {
+    const rawBody = realStatusesRawBody({ phoneNumberId });
+    return relayMetaWebhook(db, { rawBody, body: JSON.parse(rawBody) });
+  };
+
+  const urls = (m: ReturnType<typeof stubFetch>) =>
+    fetchCalls(m).map((c) => c[0]);
+
+  it('rajada acima do teto: só o teto é enviado; o excedente é descartado sem contar falha; um aviso por janela', async () => {
+    const fetchMock = stubFetch();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const state = stateForA();
+    const db = makeDb(state);
+    const burst = CEILING + 25;
+
+    for (let i = 0; i < burst; i++) await post(db, PNID_A);
+
+    expect(fetchMock).toHaveBeenCalledTimes(CEILING);
+    // Descarte não é falha: nenhuma RPC de falha. (Os sucessos só zeram o
+    // contador; nenhum update vem do excedente.)
+    expect(state.rpcs).toHaveLength(0);
+    expect(state.updates).toHaveLength(CEILING);
+
+    const ceilingWarns = warn.mock.calls.filter((c) =>
+      String(c[0]).includes('delivery ceiling')
+    );
+    expect(ceilingWarns).toHaveLength(1);
+    const logged = JSON.stringify(ceilingWarns);
+    expect(logged).toContain('acct-a');
+    expect(logged).toContain(String(CEILING));
+    for (const forbidden of [WA_A, SECRET_A, 'a.test', '/hook', PNID_A]) {
+      expect(logged).not.toContain(forbidden);
+    }
+  });
+
+  it('a janela seguinte volta a enviar, e um novo estouro gera novo aviso', async () => {
+    const fetchMock = stubFetch();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const db = makeDb(stateForA());
+
+    for (let i = 0; i < CEILING + 5; i++) await post(db, PNID_A);
+    expect(fetchMock).toHaveBeenCalledTimes(CEILING);
+
+    vi.setSystemTime(new Date(T0.getTime() + WINDOW_MS + 1));
+    for (let i = 0; i < CEILING + 5; i++) await post(db, PNID_A);
+
+    expect(fetchMock).toHaveBeenCalledTimes(CEILING * 2);
+    expect(
+      warn.mock.calls.filter((c) => String(c[0]).includes('delivery ceiling'))
+    ).toHaveLength(2);
+  });
+
+  it('o limite é por conta: a rajada de A não atrasa B', async () => {
+    const fetchMock = stubFetch();
+    const db = makeDb(twoAccounts());
+
+    for (let i = 0; i < CEILING + 10; i++) await post(db, PNID_A);
+    const toA = urls(fetchMock).filter((u) => u === 'https://a.test/hook');
+    expect(toA).toHaveLength(CEILING);
+
+    // A está no teto; B ainda tem o orçamento inteiro.
+    for (let i = 0; i < 5; i++) await post(db, PNID_B);
+    const toB = urls(fetchMock).filter((u) => u === 'https://b.test/hook');
+    expect(toB).toHaveLength(5);
+  });
+
+  it('POST misto com A no teto: B no mesmo POST continua recebendo', async () => {
+    const fetchMock = stubFetch();
+    const db = makeDb(twoAccounts());
+    for (let i = 0; i < CEILING; i++) await post(db, PNID_A);
+    fetchMock.mockClear();
+
+    const body = envelope('waba-shared', [
+      messagesChange({ phoneNumberId: PNID_A, waId: WA_A }),
+      messagesChange({ phoneNumberId: PNID_B, waId: WA_B }),
+    ]);
+    await relayMetaWebhook(db, { rawBody: JSON.stringify(body), body });
+
+    expect(urls(fetchMock)).toEqual(['https://b.test/hook']);
+  });
+
+  it('conta bloqueada não consome o orçamento do teto', async () => {
+    stubFetch();
+    const state = stateForA({ blocked: ['acct-a'] });
+    const db = makeDb(state);
+    for (let i = 0; i < CEILING + 5; i++) await post(db, PNID_A);
+
+    // Desbloqueada na mesma janela: o orçamento está intacto.
+    state.blocked = [];
+    const fetchMock = stubFetch();
+    await post(db, PNID_A);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

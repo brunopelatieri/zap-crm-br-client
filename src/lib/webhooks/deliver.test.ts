@@ -58,6 +58,7 @@ function makeDb(rows: Row[], calls: Calls) {
 const emptyCalls = (): Calls => ({ updates: [], rpcs: [] });
 
 beforeEach(() => {
+  vi.mocked(isDeliverableUrl).mockClear();
   vi.mocked(isDeliverableUrl).mockResolvedValue(true);
   vi.stubGlobal('fetch', vi.fn());
 });
@@ -131,6 +132,61 @@ describe('dispatchWebhookEvent', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(calls.rpcs[0].name).toBe('record_webhook_failure');
+  });
+
+  it('SPEC 088 M-2: endpoint http:// ou com credencial não faz fetch e conta falha', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const calls = emptyCalls();
+
+    await dispatchWebhookEvent(
+      makeDb(
+        [
+          { id: 'h', url: 'http://1.1.1.1/x', secret: 's' },
+          { id: 'u', url: 'https://user:pw@h.test/x?t=1', secret: 's' },
+        ],
+        calls
+      ),
+      'acct-1',
+      'message.received',
+      {}
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(isDeliverableUrl).not.toHaveBeenCalled();
+    expect(calls.rpcs.map((r) => r.args.endpoint_id).sort()).toEqual([
+      'h',
+      'u',
+    ]);
+    const logged = JSON.stringify(warn.mock.calls);
+    for (const leak of ['pw', 't=1', 'h.test', '1.1.1.1', '/x']) {
+      expect(logged).not.toContain(leak);
+    }
+    warn.mockRestore();
+  });
+
+  it('SPEC 088 B-8: o log de falha de rede não traz URL, senha nem query', async () => {
+    const err = new TypeError('fetch failed: https://u:pw@h.test/x?t=1');
+    (err as { cause?: unknown }).cause = { code: 'ECONNREFUSED' };
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const calls = emptyCalls();
+
+    await dispatchWebhookEvent(
+      makeDb([{ id: 'n', url: 'https://h.test/x?t=1', secret: 's' }], calls),
+      'acct-1',
+      'message.received',
+      {}
+    );
+
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain('ECONNREFUSED');
+    for (const leak of ['pw', 't=1', 'h.test', '/x']) {
+      expect(logged).not.toContain(leak);
+    }
+    expect(calls.rpcs[0].name).toBe('record_webhook_failure');
+    warn.mockRestore();
   });
 
   it('does nothing when no endpoints are subscribed', async () => {

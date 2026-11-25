@@ -49,9 +49,12 @@ vi.mock('@/lib/whatsapp/webhook-signature', async (importOriginal) => ({
 
 /** Cada valor que a rota decifrou (achado M-1: quem paga decifração). */
 const decryptCalls: string[] = [];
+/** Cifras que o `decrypt` mockado recusa (token corrompido; B-6). */
+const decryptFailures = new Set<string>();
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (v: string) => {
     decryptCalls.push(v);
+    if (decryptFailures.has(v)) throw new Error('bad decrypt');
     return `decrypted:${v}`;
   },
   encrypt: (v: string) => v,
@@ -97,18 +100,45 @@ let storageUploadResult: { error: { message: string } | null } = {
 };
 
 /**
- * Linha de `messages` que `handleStatusUpdate` (SPEC 049 §5.5) lê para
- * resolver conta + canal do evento `message.status_updated`. `null`
- * por padrão — a maioria dos testes deste arquivo não passa por ali.
+ * Linhas de `messages` (o espelho de status localiza por `message_id` e
+ * confere a conta da conversa). Vazio por padrão.
  */
-let statusMessageRow: {
+interface MessageRow {
+  id: string;
+  message_id: string;
   conversation_id: string;
   conversations: {
     account_id: string;
     channel_id: string | null;
     channels: { type: string } | null;
   };
-} | null = null;
+}
+let messageRows: MessageRow[] = [];
+/** Erro do SELECT de `messages`. `null` = sucesso. */
+let messagesSelectError: { message: string } | null = null;
+/** Quantos SELECTs de `messages` ainda falham (com o erro acima). */
+let messagesSelectFailuresLeft = Infinity;
+/** SELECTs de `messages` feitos. */
+let messagesSelects = 0;
+
+/** Mensagem `wamid` guardada na conta `accountId` (id da linha: `msg-…`). */
+function storedMessage(
+  wamid: string,
+  accountId = 'acct-1',
+  over: Partial<MessageRow> = {}
+): MessageRow {
+  return {
+    id: `msg-${wamid}`,
+    message_id: wamid,
+    conversation_id: `conv-${accountId}`,
+    conversations: {
+      account_id: accountId,
+      channel_id: accountId === 'acct-1' ? 'chan-1' : 'chan-2',
+      channels: { type: 'whatsapp_cloud' },
+    },
+    ...over,
+  };
+}
 
 /**
  * Linha de `channels` do número que recebeu a mensagem (SPEC 064 F3).
@@ -135,11 +165,38 @@ const tableUpdates: Array<{
 const configQueries: unknown[][][] = [];
 /** Toda tabela consultada, na ordem (achado M-1: POST anônimo = nenhuma). */
 const tablesQueried: string[] = [];
-let broadcastRecipient: {
+interface RecipientRow {
   id: string;
+  whatsapp_message_id: string;
   status: string;
   contact_id: string | null;
-} | null = null;
+  broadcasts: { account_id: string };
+  contacts: { account_id: string } | null;
+}
+let recipientRows: RecipientRow[] = [];
+
+/** Destinatário de disparo do `wamid`, num disparo da conta `accountId`. */
+function storedRecipient(
+  wamid: string,
+  accountId = 'acct-1',
+  over: Partial<RecipientRow> = {}
+): RecipientRow {
+  return {
+    id: `rec-${wamid}`,
+    whatsapp_message_id: wamid,
+    status: 'sent',
+    contact_id: `contact-${accountId}`,
+    broadcasts: { account_id: accountId },
+    contacts: { account_id: accountId },
+    ...over,
+  };
+}
+/** Números cujo canal está `disabled` (embed `channels(status)` da config). */
+const disabledNumbers = new Set<string>();
+/** Erro da leitura de `whatsapp_config` por número. `null` = sucesso. */
+let configError: { message: string } | null = null;
+/** Quantas leituras de `whatsapp_config` ainda falham (com o erro acima). */
+let configFailuresLeft = Infinity;
 let billingStatusRow: Record<string, unknown> | null = null;
 let billingMonitorEnabled = true;
 const rpcImpl = vi.fn();
@@ -197,17 +254,29 @@ vi.mock('@supabase/supabase-js', () => ({
     from: (table: string) => {
       tablesQueried.push(table);
       if (table === 'messages') {
-        // Two different call shapes hit `messages` inside
-        // handleStatusUpdate: an `.update(...).eq(...)` mirror (awaited
-        // directly, no `.select()`) and a `.select().eq().limit()
-        // .maybeSingle()` read that resolves the owning conversation —
-        // this fake answers both via `.then()` for the first and
-        // `.maybeSingle()` for the second.
+        // `select().eq('message_id')` (aguardado direto) devolve as
+        // linhas; `update().in('id', …)` é gravado com os filtros.
         let rec: (typeof tableUpdates)[number] | null = null;
+        const selectFilters: Array<[string, unknown]> = [];
+        const selected = () =>
+          messageRows.filter((row) =>
+            selectFilters.every(([col, v]) =>
+              col === 'message_id'
+                ? row.message_id === v
+                : col === 'conversations.account_id'
+                  ? row.conversations.account_id === v
+                  : true
+            )
+          );
         const chain = {
           select: () => chain,
-          eq: (...a: unknown[]) => {
-            rec?.filters.push(a);
+          eq: (...a: [string, unknown]) => {
+            if (rec) rec.filters.push(a);
+            else selectFilters.push(a);
+            return chain;
+          },
+          in: (...a: unknown[]) => {
+            rec?.filters.push(['in', ...a]);
             return chain;
           },
           limit: () => chain,
@@ -217,32 +286,72 @@ vi.mock('@supabase/supabase-js', () => ({
             return chain;
           },
           maybeSingle: () =>
-            Promise.resolve({ data: statusMessageRow, error: null }),
+            Promise.resolve({ data: selected()[0] ?? null, error: null }),
           then: (
-            onF: (v: { error: unknown }) => unknown,
+            onF: (v: { data?: unknown; error: unknown }) => unknown,
             onR?: (e: unknown) => unknown
-          ) =>
-            Promise.resolve({
-              error: rec ? (messagesUpdateError?.(rec.payload) ?? null) : null,
-            }).then(onF, onR),
+          ) => {
+            if (!rec) messagesSelects++;
+            return Promise.resolve(
+              rec
+                ? { error: messagesUpdateError?.(rec.payload) ?? null }
+                : messagesSelectError && messagesSelectFailuresLeft-- > 0
+                  ? { data: null, error: messagesSelectError }
+                  : { data: selected(), error: null }
+            ).then(onF, onR);
+          },
         };
         return chain;
       }
       if (table === 'broadcast_recipients') {
         let rec: (typeof tableUpdates)[number] | null = null;
+        let wamid: unknown;
         const chain = {
           select: () => chain,
           eq: (...a: unknown[]) => {
-            rec?.filters.push(a);
+            if (rec) rec.filters.push(a);
+            else if (a[0] === 'whatsapp_message_id') wamid = a[1];
             return chain;
           },
+          // Heurística das duas últimas falhas (`detectDeadNumberOnFailure`).
+          order: () => chain,
+          limit: () => chain,
           update: (payload: Record<string, unknown>) => {
             rec = { table, payload, filters: [] };
             tableUpdates.push(rec);
             return chain;
           },
           maybeSingle: () =>
-            Promise.resolve({ data: broadcastRecipient, error: null }),
+            Promise.resolve({
+              data:
+                recipientRows.find((r) => r.whatsapp_message_id === wamid) ??
+                null,
+              error: null,
+            }),
+          then: (
+            onF: (v: { error: null }) => unknown,
+            onR?: (e: unknown) => unknown
+          ) => Promise.resolve({ error: null }).then(onF, onR),
+        };
+        return chain;
+      }
+      // `markWhatsappInvalid` — o flag de número morto.
+      if (table === 'contacts') {
+        const rec = {
+          table,
+          payload: {} as Record<string, unknown>,
+          filters: [] as unknown[][],
+        };
+        const chain = {
+          update: (payload: Record<string, unknown>) => {
+            rec.payload = payload;
+            tableUpdates.push(rec);
+            return chain;
+          },
+          eq: (...a: unknown[]) => {
+            rec.filters.push(a);
+            return chain;
+          },
           then: (
             onF: (v: { error: null }) => unknown,
             onR?: (e: unknown) => unknown
@@ -361,7 +470,7 @@ vi.mock('@supabase/supabase-js', () => ({
           return chain;
         },
         then: (
-          onF: (v: { data: unknown; error: null }) => unknown,
+          onF: (v: { data: unknown; error: unknown }) => unknown,
           onR?: (e: unknown) => unknown
         ) => {
           const filtered = allRows || filters.length + inFilters.length > 0;
@@ -374,7 +483,19 @@ vi.mock('@supabase/supabase-js', () => ({
                 vs.some((v) => matches(row, col, v))
               )
             );
-          return Promise.resolve({ data: rows, error: null }).then(onF, onR);
+          const embedded = rows.map((row) => ({
+            ...row,
+            channels: {
+              status: disabledNumbers.has(row.phone_number_id as string)
+                ? 'disabled'
+                : 'connected',
+            },
+          }));
+          return Promise.resolve(
+            configError && configFailuresLeft-- > 0
+              ? { data: null, error: configError }
+              : { data: embedded, error: null }
+          ).then(onF, onR);
         },
       };
       return chain;
@@ -384,15 +505,18 @@ vi.mock('@supabase/supabase-js', () => ({
 
 import { POST } from './route';
 import { META_WEBHOOK_MAX_BODY_BYTES } from '@/lib/whatsapp/webhook-body';
+import { MAX_ITEMS_PER_POST } from '@/lib/whatsapp/webhook-post-guard';
 import {
   accountUpdateChange,
   envelope,
+  envelopeOf,
   messagesChange,
   realMessagesRawBody,
   realStatusesRawBody,
   templateStatusChange,
 } from '@/lib/webhooks/meta-relay.fixtures';
 import { __resetBillingSignalStateForTests } from '@/lib/whatsapp/billing-signal';
+import { __resetNumberOwnerCacheForTests } from '@/lib/whatsapp/number-owner';
 
 const INBOUND = {
   entry: [
@@ -454,14 +578,22 @@ beforeEach(() => {
   dispatchWebhookEvent.mockResolvedValue(undefined);
   relayMetaWebhook.mockResolvedValue(undefined);
   markRevokedByContact.mockResolvedValue(undefined);
-  statusMessageRow = null;
+  messageRows = [];
+  messagesSelectError = null;
+  messagesSelectFailuresLeft = Infinity;
+  messagesSelects = 0;
+  recipientRows = [];
+  disabledNumbers.clear();
+  configError = null;
+  configFailuresLeft = Infinity;
+  __resetNumberOwnerCacheForTests();
   channelRow = { id: 'chan-1', name: 'WhatsApp Oficial', status: 'connected' };
   tableUpdates.length = 0;
   configQueries.length = 0;
   tablesQueried.length = 0;
   decryptCalls.length = 0;
+  decryptFailures.clear();
   messagesUpdateError = null;
-  broadcastRecipient = null;
   billingStatusRow = null;
   billingMonitorEnabled = true;
   rpcImpl.mockResolvedValue({ data: false, error: null });
@@ -735,10 +867,16 @@ describe('POST /api/whatsapp/webhook — repetidor do webhook da Meta (SPEC 088 
 
     await expect(afterCallbacks[0]!()).resolves.not.toThrow();
     expect(relayMetaWebhook).toHaveBeenCalledTimes(1);
-    expect(console.error).toHaveBeenCalledWith(
-      'Error processing webhook:',
-      expect.any(Error)
-    );
+    // B-6: o erro é isolado por `change`/mensagem e logado curto (tipo,
+    // mensagem e posição), sem o objeto do erro nem o corpo.
+    const logged = vi
+      .mocked(console.error)
+      .mock.calls.flat()
+      .map(String)
+      .join(' ');
+    expect(logged).toContain('"unit":"message"');
+    expect(logged).toContain('ingest boom');
+    expect(logged).not.toContain('wamid.1');
   });
 
   it('JSON inválido com assinatura válida: 400 e o repetidor não é chamado', async () => {
@@ -942,15 +1080,8 @@ describe('POST /api/whatsapp/webhook — escopo do segredo no ingest', () => {
 
   it('status do número de B com segredo de A: nenhum espelho nem webhook de saída', async () => {
     mockedSigner = channelSigner('pnid-1');
-    statusMessageRow = {
-      conversation_id: 'conv-b',
-      conversations: {
-        account_id: 'acct-2',
-        channel_id: 'chan-2',
-        channels: { type: 'whatsapp_cloud' },
-      },
-    };
-    broadcastRecipient = { id: 'rec-b', status: 'sent', contact_id: null };
+    messageRows = [storedMessage('wamid.b-1', 'acct-2')];
+    recipientRows = [storedRecipient('wamid.b-1', 'acct-2')];
 
     await run(envelope('200000000004821', [statusChange('pnid-2')]));
 
@@ -960,6 +1091,7 @@ describe('POST /api/whatsapp/webhook — escopo do segredo no ingest', () => {
   });
 
   it('status SEM número com segredo de canal: ignorado (fail-closed); com META_APP_SECRET, como antes', async () => {
+    messageRows = [storedMessage('wamid.b-1', 'acct-2')];
     mockedSigner = channelSigner('pnid-1');
     await run(envelope('100000000004821', [statusChange(null)]));
     expect(updatesOn('messages')).toEqual([]);
@@ -971,6 +1103,7 @@ describe('POST /api/whatsapp/webhook — escopo do segredo no ingest', () => {
 
   it('status do número de A com segredo de A: espelhado normalmente', async () => {
     mockedSigner = channelSigner('pnid-1');
+    messageRows = [storedMessage('wamid.b-1', 'acct-1')];
 
     await run(envelope('100000000004821', [statusChange('pnid-1')]));
 
@@ -1350,14 +1483,16 @@ describe('mídia recebida — download eager no ingest, não mais só na abertur
 
 describe('message.status_updated carrega channel_id/channel_type (SPEC 049 §5.5)', () => {
   it('inclui channel_id e channel_type resolvidos da conversa, ao lado dos campos de sempre', async () => {
-    statusMessageRow = {
-      conversation_id: 'conv-1',
-      conversations: {
-        account_id: 'acct-1',
-        channel_id: 'chan-qr-1',
-        channels: { type: 'whatsapp_qr' },
-      },
-    };
+    messageRows = [
+      storedMessage('wamid.1', 'acct-1', {
+        conversation_id: 'conv-1',
+        conversations: {
+          account_id: 'acct-1',
+          channel_id: 'chan-qr-1',
+          channels: { type: 'whatsapp_qr' },
+        },
+      }),
+    ];
 
     await POST(
       statusRequest({
@@ -1384,7 +1519,7 @@ describe('message.status_updated carrega channel_id/channel_type (SPEC 049 §5.5
   });
 
   it('sem linha de mensagem correspondente, não dispara webhook nenhum', async () => {
-    statusMessageRow = null;
+    messageRows = [];
 
     await POST(
       statusRequest({
@@ -1602,6 +1737,7 @@ describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', ()
 
   it('delivered com pricing grava as colunas no MESMO UPDATE do status (1 escrita); status sem pricing não toca nelas', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    messageRows = [storedMessage('wamid.d'), storedMessage('wamid.r')];
 
     await run(
       statusesRequest([
@@ -1635,13 +1771,13 @@ describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', ()
           pricing_billable: true,
           pricing_category: 'MARKETING',
         },
-        filters: [['message_id', 'wamid.d']],
+        filters: [['in', 'id', ['msg-wamid.d']]],
       },
       // O `read` sem pricing: só o status — nada de pricing_* nulo por cima.
       {
         table: 'messages',
         payload: { status: 'read' },
-        filters: [['message_id', 'wamid.r']],
+        filters: [['in', 'id', ['msg-wamid.r']]],
       },
     ]);
   });
@@ -1652,6 +1788,7 @@ describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', ()
       'pricing_billable' in payload || 'pricing_category' in payload
         ? { code: 'PGRST204', message: 'no column pricing_billable' }
         : null;
+    messageRows = [storedMessage('wamid.1'), storedMessage('wamid.2')];
     const withPricing = (id: string) => ({
       id,
       status: 'delivered',
@@ -1666,20 +1803,20 @@ describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', ()
 
     const payloads = tableUpdates
       .filter((u) => u.table === 'messages')
-      .map((u) => [u.filters[0]![1], u.payload]);
+      .map((u) => [u.filters[0]![2], u.payload]);
     expect(payloads).toEqual([
       // 1º: tenta com pricing, é recusado, repete só com o status.
       [
-        'wamid.1',
+        ['msg-wamid.1'],
         {
           status: 'delivered',
           pricing_billable: false,
           pricing_category: 'SERVICE',
         },
       ],
-      ['wamid.1', { status: 'delivered' }],
+      [['msg-wamid.1'], { status: 'delivered' }],
       // 2º: o pricing já está desligado — uma escrita só, sem tentar à toa.
-      ['wamid.2', { status: 'delivered' }],
+      [['msg-wamid.2'], { status: 'delivered' }],
     ]);
     // Nenhum erro "Error updating message status" para o operador.
     expect(console.error).not.toHaveBeenCalledWith(
@@ -1754,15 +1891,10 @@ describe('SPEC 076 F3 — pricing e sinal de pagamento no webhook de status', ()
 
   it('falha do sinal NÃO impede o espelho em broadcast_recipients nem o fan-out', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    broadcastRecipient = { id: 'rec-1', status: 'sent', contact_id: null };
-    statusMessageRow = {
-      conversation_id: 'conv-1',
-      conversations: {
-        account_id: 'acct-1',
-        channel_id: 'chan-1',
-        channels: { type: 'whatsapp_cloud' },
-      },
-    };
+    recipientRows = [
+      storedRecipient('wamid.f1', 'acct-1', { id: 'rec-1', contact_id: null }),
+    ];
+    messageRows = [storedMessage('wamid.f1')];
     rpcImpl.mockRejectedValue(new Error('db down'));
 
     await run(statusesRequest([FAILED_131042]));
@@ -1798,16 +1930,9 @@ describe('POST /api/whatsapp/webhook — corpos reais da Meta (F6 da SPEC 088)',
   }
 
   it('statuses `read` com pricing: o espelho grava status e pricing, o webhook de saída sai, e o repetidor recebe os bytes originais', async () => {
-    statusMessageRow = {
-      conversation_id: 'conv-1',
-      conversations: {
-        account_id: 'acct-1',
-        channel_id: 'chan-1',
-        channels: { type: 'whatsapp_cloud' },
-      },
-    };
     const raw = realStatusesRawBody({ phoneNumberId: 'pnid-1' });
     const wamid = JSON.parse(raw).entry[0].changes[0].value.statuses[0].id;
+    messageRows = [storedMessage(wamid)];
 
     const res = await POST(rawRequest(raw));
     expect(res.status).toBe(200);
@@ -1824,7 +1949,7 @@ describe('POST /api/whatsapp/webhook — corpos reais da Meta (F6 da SPEC 088)',
         pricing_billable: false,
         pricing_category: 'SERVICE',
       },
-      filters: [['message_id', wamid]],
+      filters: [['in', 'id', [`msg-${wamid}`]]],
     });
     expect(dispatchWebhookEvent).toHaveBeenCalledWith(
       expect.anything(),
@@ -1864,5 +1989,1261 @@ describe('POST /api/whatsapp/webhook — corpos reais da Meta (F6 da SPEC 088)',
       { rawBody: string },
     ];
     expect(input.rawBody).toBe(raw);
+  });
+});
+
+// Achado B-1 da revisão de segurança da SPEC 088 — o escopo do segredo só
+// prova que quem assinou fala pelo NÚMERO; o `statuses[].id` é texto livre.
+// A = `pnid-1` (acct-1), B = `pnid-2` (acct-2). Corpo real da Meta.
+describe('POST /api/whatsapp/webhook — espelho de status só na conta do número (B-1)', () => {
+  const WAMID_B = JSON.parse(realStatusesRawBody()).entry[0].changes[0].value
+    .statuses[0].id as string;
+  const WAMID_A = 'wamid.HBgLMTYzMTU1NTExODEVAgARGBJBQUFBQUFBQUFBQUFBQUFBQUEA';
+  const SIGNER_A = { kind: 'channels', phoneNumberIds: new Set(['pnid-1']) };
+  const FAILED_131026 = {
+    status: 'failed',
+    errors: [{ code: 131026, title: 'Message undeliverable' }],
+  };
+  const FAILED_131042 = {
+    status: 'failed',
+    errors: [{ code: 131042, title: 'Business eligibility payment issue' }],
+  };
+
+  type Status = Record<string, unknown>;
+
+  /** O `change` real, com os `statuses` derivados do status real. */
+  function statusesChange(phoneNumberId: string, overrides: Status[]) {
+    const body = JSON.parse(realStatusesRawBody({ phoneNumberId }));
+    const change = body.entry[0].changes[0];
+    const [real] = change.value.statuses;
+    change.value.statuses = overrides.map((o) => ({ ...real, ...o }));
+    return change;
+  }
+  const bodyOf = (...changes: unknown[]) =>
+    JSON.stringify(
+      envelope('100000000004821', changes as Record<string, unknown>[])
+    );
+
+  async function run(raw: string) {
+    const res = await POST(
+      webhookRequest(raw, { 'x-hub-signature-256': WELL_FORMED_HEADER })
+    );
+    expect(res.status).toBe(200);
+    await afterCallbacks[afterCallbacks.length - 1]!();
+  }
+
+  const updatesOn = (table: string) =>
+    tableUpdates.filter((u) => u.table === table);
+  const signalCalls = () =>
+    rpcImpl.mock.calls.filter((c) => c[0] === 'apply_payment_signal');
+  const warned = () => vi.mocked(console.warn).mock.calls.flat().join(' ');
+  const configReads = () =>
+    configQueries.filter((f) => f.some((a) => a[0] === 'phone_number_id'));
+
+  function expectNoEffect() {
+    expect(tableUpdates).toEqual([]);
+    expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    expect(rpcImpl).not.toHaveBeenCalled();
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    mockedSigner = SIGNER_A;
+    messageRows = [
+      storedMessage(WAMID_A, 'acct-1'),
+      storedMessage(WAMID_B, 'acct-2'),
+    ];
+    recipientRows = [
+      storedRecipient(WAMID_A, 'acct-1'),
+      storedRecipient(WAMID_B, 'acct-2'),
+    ];
+    // Episódio pendente: um cobrável LIMPARIA o estado se o sinal rodasse.
+    billingStatusRow = {
+      payment_blocked_since: '2026-10-01T02:00:00Z',
+      last_payment_error_at: '2026-10-01T02:00:00Z',
+    };
+  });
+
+  it('corpo real: segredo e número de A + wamid de B → nenhum UPDATE nem webhook de saída', async () => {
+    await run(realStatusesRawBody({ phoneNumberId: 'pnid-1' }));
+
+    expectNoEffect();
+    expect(warned()).toContain('belongs to another account');
+    // Sem corpo: nem o wamid nem o telefone saem no log.
+    expect(warned()).not.toContain(WAMID_B);
+    expect(warned()).not.toContain('16315551181');
+  });
+
+  it.each<[string, Status]>([
+    ['failed/131026 (número morto)', FAILED_131026],
+    ['failed/131042 (pagamento)', FAILED_131042],
+    [
+      'delivered cobrável (limparia o episódio)',
+      { status: 'delivered', pricing: { billable: true, category: 'utility' } },
+    ],
+  ])(
+    'número de A + wamid de B, %s: nenhum efeito em B nem sinal em A',
+    async (_label, status) => {
+      await run(bodyOf(statusesChange('pnid-1', [{ id: WAMID_B, ...status }])));
+      expectNoEffect();
+    }
+  );
+
+  it('wamid de B só em broadcast_recipients (disparo sem mensagem): nenhum efeito', async () => {
+    messageRows = [];
+    await run(
+      bodyOf(statusesChange('pnid-1', [{ id: WAMID_B, ...FAILED_131026 }]))
+    );
+    expectNoEffect();
+  });
+
+  it('número de A + wamid de A: espelha status e pricing, e o webhook de saída é de A', async () => {
+    await run(bodyOf(statusesChange('pnid-1', [{ id: WAMID_A }])));
+
+    expect(updatesOn('messages')).toEqual([
+      {
+        table: 'messages',
+        payload: {
+          status: 'read',
+          pricing_billable: false,
+          pricing_category: 'SERVICE',
+        },
+        filters: [['in', 'id', [`msg-${WAMID_A}`]]],
+      },
+    ]);
+    expect(updatesOn('broadcast_recipients')).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({ status: 'read' }),
+        filters: [['id', `rec-${WAMID_A}`]],
+      }),
+    ]);
+    expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+    expect(dispatchWebhookEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'acct-1',
+      'message.status_updated',
+      {
+        whatsapp_message_id: WAMID_A,
+        conversation_id: 'conv-acct-1',
+        status: 'read',
+        channel_id: 'chan-1',
+        channel_type: 'whatsapp_cloud',
+      }
+    );
+    expect(console.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('ignored'),
+      expect.anything()
+    );
+  });
+
+  it('número de A + wamid de A, failed/131026: marca o contato de A', async () => {
+    await run(
+      bodyOf(statusesChange('pnid-1', [{ id: WAMID_A, ...FAILED_131026 }]))
+    );
+
+    expect(updatesOn('contacts')).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({ whatsapp_status: 'invalid' }),
+        filters: [
+          ['id', 'contact-acct-1'],
+          ['whatsapp_status', 'valid'],
+        ],
+      }),
+    ]);
+  });
+
+  // A RLS de `broadcast_recipients` só confere o disparo: um agente de A
+  // consegue gravar um `contact_id` de B num disparo de A.
+  it('disparo de A apontando para contato de B: o destinatário é espelhado, o contato de B não é marcado', async () => {
+    recipientRows = [
+      storedRecipient(WAMID_A, 'acct-1', {
+        contact_id: 'contact-acct-2',
+        contacts: { account_id: 'acct-2' },
+      }),
+    ];
+    await run(
+      bodyOf(statusesChange('pnid-1', [{ id: WAMID_A, ...FAILED_131026 }]))
+    );
+
+    expect(updatesOn('broadcast_recipients')).toHaveLength(1);
+    expect(updatesOn('contacts')).toEqual([]);
+  });
+
+  it('mesmo message_id em A e em B: só a linha de A é atualizada', async () => {
+    messageRows = [
+      storedMessage(WAMID_A, 'acct-2', { id: 'msg-b' }),
+      storedMessage(WAMID_A, 'acct-1', { id: 'msg-a1' }),
+      storedMessage(WAMID_A, 'acct-1', { id: 'msg-a2' }),
+    ];
+    await run(bodyOf(statusesChange('pnid-1', [{ id: WAMID_A }])));
+
+    expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+      [['in', 'id', ['msg-a1', 'msg-a2']]],
+    ]);
+    expect(dispatchWebhookEvent.mock.calls.map((c) => c[1])).toEqual([
+      'acct-1',
+    ]);
+  });
+
+  it('META_APP_SECRET + número de B + wamid de B: espelhado na conta de B, como hoje', async () => {
+    mockedSigner = { kind: 'default' };
+    await run(realStatusesRawBody({ phoneNumberId: 'pnid-2' }));
+
+    expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+      [['in', 'id', [`msg-${WAMID_B}`]]],
+    ]);
+    expect(dispatchWebhookEvent.mock.calls.map((c) => c[1])).toEqual([
+      'acct-2',
+    ]);
+  });
+
+  it('META_APP_SECRET com número de A + wamid de B: também não cruza a conta', async () => {
+    mockedSigner = { kind: 'default' };
+    await run(realStatusesRawBody({ phoneNumberId: 'pnid-1' }));
+    expectNoEffect();
+  });
+
+  it('META_APP_SECRET sem número: sem conta para filtrar, espelha como antes e sem sinal de pagamento', async () => {
+    mockedSigner = { kind: 'default' };
+    const change = statusesChange('x', [{ id: WAMID_B, ...FAILED_131042 }]);
+    delete change.value.metadata;
+    await run(bodyOf(change));
+
+    expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+      [['in', 'id', [`msg-${WAMID_B}`]]],
+    ]);
+    expect(dispatchWebhookEvent.mock.calls.map((c) => c[1])).toEqual([
+      'acct-2',
+    ]);
+    expect(rpcImpl).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, string, () => void]>([
+    ['desconhecido', 'pnid-x', () => {}],
+    [
+      'de canal desativado',
+      'pnid-1',
+      () => {
+        disabledNumbers.add('pnid-1');
+      },
+    ],
+    [
+      'com falha de leitura da config',
+      'pnid-1',
+      () => {
+        configError = { message: 'db down' };
+      },
+    ],
+    ['vazio', '', () => {}],
+  ])(
+    'número %s: status ignorado com aviso curto',
+    async (_label, pnid, arrange) => {
+      arrange();
+      mockedSigner = { kind: 'default' };
+      await run(bodyOf(statusesChange(pnid, [{ id: WAMID_A }])));
+
+      expectNoEffect();
+      expect(warned()).toContain('no active account for the number');
+      expect(warned()).not.toContain(WAMID_A);
+    }
+  );
+
+  it('número desconhecido não derruba os changes seguintes do POST', async () => {
+    mockedSigner = { kind: 'default' };
+    await run(
+      bodyOf(
+        statusesChange('pnid-x', [{ id: WAMID_B }]),
+        statusesChange('pnid-1', [{ id: WAMID_A }]),
+        JSON.parse(realMessagesRawBody({ phoneNumberId: 'pnid-1' })).entry[0]
+          .changes[0]
+      )
+    );
+
+    expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+      [['in', 'id', [`msg-${WAMID_A}`]]],
+    ]);
+    expect(ingestInbound).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST misto, no mesmo change: só o status de A tem efeito, e um aviso só', async () => {
+    await run(
+      bodyOf(
+        statusesChange('pnid-1', [
+          { id: WAMID_B, ...FAILED_131026 },
+          { id: WAMID_A },
+          { id: WAMID_B, ...FAILED_131042 },
+        ])
+      )
+    );
+
+    expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+      [['in', 'id', [`msg-${WAMID_A}`]]],
+    ]);
+    expect(updatesOn('broadcast_recipients').map((u) => u.filters)).toEqual([
+      [['id', `rec-${WAMID_A}`]],
+    ]);
+    expect(updatesOn('contacts')).toEqual([]);
+    expect(signalCalls()).toEqual([]);
+    expect(dispatchWebhookEvent.mock.calls.map((c) => c[1])).toEqual([
+      'acct-1',
+    ]);
+    const notices = vi
+      .mocked(console.warn)
+      .mock.calls.filter((c) => String(c[0]).includes('another account'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]![0]).toContain('2 status(es) ignored');
+  });
+
+  it('vários statuses no mesmo change (com sinal de pagamento): a conta é lida UMA vez', async () => {
+    await run(
+      bodyOf(
+        statusesChange('pnid-1', [
+          { id: WAMID_A },
+          { id: WAMID_A, ...FAILED_131042 },
+          { id: WAMID_B },
+        ])
+      )
+    );
+
+    expect(configReads()).toHaveLength(1);
+    expect(signalCalls()).toHaveLength(1);
+  });
+
+  // O status pode chegar antes do INSERT, e o número pode enviar por fora
+  // do CRM: o 131042 continua valendo para o WABA do número.
+  it('wamid que não existe em conta nenhuma: nada espelhado, o sinal de pagamento continua', async () => {
+    await run(
+      bodyOf(
+        statusesChange('pnid-1', [{ id: 'wamid.unknown', ...FAILED_131042 }])
+      )
+    );
+
+    expect(tableUpdates).toEqual([]);
+    expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    expect(signalCalls()).toHaveLength(1);
+    expect(signalCalls()[0]![1]).toMatchObject({ p_account_id: 'acct-1' });
+  });
+
+  // L-1: o sinal só atinge o WABA do próprio número; a Meta não reenvia.
+  it('leitura da mensagem falhou (duas vezes) e não há disparo: sem espelho nem webhook, mas o 131042 é aplicado na conta do número', async () => {
+    messagesSelectError = { message: 'timeout' };
+    recipientRows = [];
+    await run(
+      bodyOf(statusesChange('pnid-1', [{ id: WAMID_A, ...FAILED_131042 }]))
+    );
+
+    expect(tableUpdates).toEqual([]);
+    expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    expect(messagesSelects).toBe(2);
+    expect(signalCalls()).toHaveLength(1);
+    expect(signalCalls()[0]![1]).toMatchObject({
+      p_account_id: 'acct-1',
+      p_kind: 'payment_error',
+      p_phone_number_id: 'pnid-1',
+    });
+  });
+
+  it('leitura da mensagem falhou, mas o disparo é de OUTRA conta: continua sem efeito nenhum', async () => {
+    messagesSelectError = { message: 'timeout' };
+    await run(
+      bodyOf(statusesChange('pnid-1', [{ id: WAMID_B, ...FAILED_131042 }]))
+    );
+    expectNoEffect();
+  });
+
+  // L-2: o webhook de saída e o espelho usam a MESMA leitura.
+  describe('falha transitória de leitura (L-2)', () => {
+    it('a 1ª leitura falha e a 2ª funciona: espelho E webhook de saída', async () => {
+      messagesSelectError = { message: 'timeout' };
+      messagesSelectFailuresLeft = 1;
+      await run(bodyOf(statusesChange('pnid-1', [{ id: WAMID_A }])));
+
+      expect(messagesSelects).toBe(2);
+      expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+        [['in', 'id', [`msg-${WAMID_A}`]]],
+      ]);
+      expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it('as duas falham (uma 3ª funcionaria): nem espelho, nem webhook de saída', async () => {
+      messagesSelectError = { message: 'timeout' };
+      messagesSelectFailuresLeft = 2;
+      await run(bodyOf(statusesChange('pnid-1', [{ id: WAMID_A }])));
+
+      expect(messagesSelects).toBe(2);
+      expect(updatesOn('messages')).toEqual([]);
+      expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    });
+
+    it('a linha só aparece depois da leitura do espelho: nenhum webhook de um status não gravado', async () => {
+      messageRows = [];
+      recipientRows = [];
+      rpcImpl.mockImplementation(async () => {
+        // O INSERT da mensagem chega no meio do tratamento do status.
+        messageRows = [storedMessage(WAMID_A, 'acct-1')];
+        return { data: false, error: null };
+      });
+      await run(
+        bodyOf(statusesChange('pnid-1', [{ id: WAMID_A, ...FAILED_131042 }]))
+      );
+
+      expect(signalCalls()).toHaveLength(1);
+      expect(messagesSelects).toBe(1);
+      expect(tableUpdates).toEqual([]);
+      expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+    });
+
+    // O mesmo para a ESCRITA do espelho.
+    const DELIVERED = {
+      id: WAMID_A,
+      status: 'delivered',
+      pricing: { billable: true, category: 'utility' },
+    };
+
+    it('o UPDATE falha uma vez: uma nova tentativa com o mesmo patch, espelho E webhook de saída', async () => {
+      let calls = 0;
+      messagesUpdateError = () =>
+        ++calls === 1 ? { code: '57014', message: 'timeout' } : null;
+      await run(bodyOf(statusesChange('pnid-1', [DELIVERED])));
+
+      const patch = {
+        status: 'delivered',
+        pricing_billable: true,
+        pricing_category: 'UTILITY',
+      };
+      expect(updatesOn('messages').map((u) => u.payload)).toEqual([
+        patch,
+        patch,
+      ]);
+      expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+      expect(console.error).not.toHaveBeenCalled();
+    });
+
+    it('o UPDATE falha nas duas: nenhum webhook de saída; disparo e sinal seguem', async () => {
+      messagesUpdateError = () => ({ code: '57014', message: 'timeout' });
+      await run(bodyOf(statusesChange('pnid-1', [DELIVERED])));
+
+      expect(updatesOn('messages')).toHaveLength(2);
+      expect(dispatchWebhookEvent).not.toHaveBeenCalled();
+      expect(updatesOn('broadcast_recipients')).toHaveLength(1);
+      expect(signalCalls()).toHaveLength(1);
+      expect(console.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('um status sem espelho não cala o seguinte do mesmo change', async () => {
+      let calls = 0;
+      messagesUpdateError = () =>
+        ++calls <= 2 ? { code: '57014', message: 'timeout' } : null;
+      await run(
+        bodyOf(
+          statusesChange('pnid-1', [DELIVERED, { id: WAMID_A, status: 'read' }])
+        )
+      );
+
+      expect(
+        dispatchWebhookEvent.mock.calls.map(
+          (c) => (c[3] as { status: string }).status
+        )
+      ).toEqual(['read']);
+    });
+
+    it('status fora do vocabulário do CRM (CHECK, 23514): não repete, e o evento sai como sempre', async () => {
+      messagesUpdateError = () => ({
+        code: '23514',
+        message: 'messages_status_check',
+      });
+      await run(
+        bodyOf(statusesChange('pnid-1', [{ id: WAMID_A, status: 'played' }]))
+      );
+
+      expect(updatesOn('messages')).toHaveLength(1);
+      expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it('086 ausente e depois falha passageira: a repetição leva só o status', async () => {
+      let statusOnly = 0;
+      messagesUpdateError = (payload) =>
+        'pricing_billable' in payload
+          ? { code: 'PGRST204', message: 'no column pricing_billable' }
+          : ++statusOnly === 1
+            ? { code: '57014', message: 'timeout' }
+            : null;
+      await run(bodyOf(statusesChange('pnid-1', [DELIVERED])));
+
+      expect(updatesOn('messages').map((u) => u.payload)).toEqual([
+        {
+          status: 'delivered',
+          pricing_billable: true,
+          pricing_category: 'UTILITY',
+        },
+        { status: 'delivered' },
+        { status: 'delivered' },
+      ]);
+      expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it('leitura da config falha uma vez: uma nova tentativa, e o status é espelhado com o sinal', async () => {
+      configError = { message: 'db down' };
+      configFailuresLeft = 1;
+      await run(
+        bodyOf(statusesChange('pnid-1', [{ id: WAMID_A, ...FAILED_131042 }]))
+      );
+
+      expect(configReads()).toHaveLength(2);
+      expect(updatesOn('messages')).toHaveLength(1);
+      expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+      expect(signalCalls()).toHaveLength(1);
+    });
+  });
+});
+
+// Revisão de segurança da SPEC 088, achado B-6 — o que o POST faz quando UM
+// pedaço do corpo está quebrado. A Meta já recebeu 200 e não reenvia: o que
+// uma exceção derruba, ela derruba para sempre. Cada `change`, `status` e
+// mensagem é isolado dos demais; corpos reais da Meta como base.
+describe('POST /api/whatsapp/webhook — um pedaço quebrado não derruba o resto (B-6)', () => {
+  const WAMID_A = 'wamid.HBgLMTYzMTU1NTExODEVAgARGBJBQUFBQUFBQUFBQUFBQUFBQUEA';
+  const WAMID_A2 = 'wamid.HBgLMTYzMTU1NTExODEVAgARGBJBQkJCQkJCQkJCQkJCQkJCQkIA';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Obj = Record<string, any>;
+
+  /** O `change` real de `messages`, editável antes de entrar no POST. */
+  function msgChange(phoneNumberId: string, mutate?: (change: Obj) => void) {
+    const change = JSON.parse(realMessagesRawBody({ phoneNumberId })).entry[0]
+      .changes[0];
+    mutate?.(change);
+    return change as Obj;
+  }
+  /** O `change` real de `statuses`, com os `statuses` trocados. */
+  function stChange(phoneNumberId: string, statuses: unknown[]) {
+    const change = JSON.parse(realStatusesRawBody({ phoneNumberId })).entry[0]
+      .changes[0];
+    change.value.statuses = statuses;
+    return change as Obj;
+  }
+  const realStatus = () =>
+    JSON.parse(realStatusesRawBody()).entry[0].changes[0].value.statuses[0];
+  const post = (...changes: unknown[]) =>
+    JSON.stringify(envelope('100000000004821', changes as Obj[]));
+  const entriesWith = (change: Obj) => [
+    { id: '100000000004821', changes: [change] },
+  ];
+
+  async function run(raw: string) {
+    const res = await POST(
+      webhookRequest(raw, { 'x-hub-signature-256': WELL_FORMED_HEADER })
+    );
+    // A Meta continua recebendo 200, e o repetidor continua sendo chamado
+    // com os bytes originais — o isolamento não pode mudar nenhum dos dois.
+    expect(res.status).toBe(200);
+    await expect(afterCallbacks[afterCallbacks.length - 1]!()).resolves.toBe(
+      undefined
+    );
+    expect(relayMetaWebhook).toHaveBeenCalledTimes(1);
+    expect(relayMetaWebhook.mock.calls[0]![1]).toMatchObject({ rawBody: raw });
+  }
+
+  const ingestedAccounts = () =>
+    ingestInbound.mock.calls.map(
+      (c) => (c[0] as { accountId: string }).accountId
+    );
+  const logs = () =>
+    [
+      ...vi.mocked(console.error).mock.calls,
+      ...vi.mocked(console.warn).mock.calls,
+    ]
+      .flat()
+      .map(String)
+      .join(' ');
+  const updatesOn = (table: string) =>
+    tableUpdates.filter((u) => u.table === table);
+
+  /** Nada do corpo, do token nem do telefone do contato pode ir ao log. */
+  function expectLogsClean() {
+    const out = logs();
+    for (const secret of [
+      'cipher',
+      'decrypted',
+      'test return 3',
+      '16315551181',
+      'US.13491208655302741918',
+      'test user name',
+    ]) {
+      expect(out).not.toContain(secret);
+    }
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    messageRows = [
+      storedMessage(WAMID_A, 'acct-1'),
+      storedMessage(WAMID_A2, 'acct-1'),
+    ];
+    recipientRows = [storedRecipient(WAMID_A, 'acct-1')];
+  });
+
+  describe('change que lança', () => {
+    it('token do número A ilegível: o change do número B, no mesmo POST, é ingerido', async () => {
+      decryptFailures.add('cipher');
+
+      await run(post(msgChange('pnid-1'), msgChange('pnid-2')));
+
+      expect(ingestedAccounts()).toEqual(['acct-2']);
+      expect(decryptCalls).toEqual(['cipher', 'cipher-b']);
+      const out = logs();
+      expect(out).toContain('"unit":"change"');
+      expect(out).toContain('bad decrypt');
+      expect(out).toContain('"phone_number_id":"pnid-1"');
+      expectLogsClean();
+    });
+
+    it('token do número B ilegível, depois de A: A fica ingerido e o erro de B não vaza', async () => {
+      decryptFailures.add('cipher-b');
+
+      await run(post(msgChange('pnid-1'), msgChange('pnid-2')));
+
+      expect(ingestedAccounts()).toEqual(['acct-1']);
+      expectLogsClean();
+    });
+
+    it('ingest que rejeita no primeiro change: o segundo é ingerido, e o log não vaza o corpo', async () => {
+      ingestInbound.mockRejectedValueOnce(new Error('ingest boom'));
+
+      await run(post(msgChange('pnid-1'), msgChange('pnid-2')));
+
+      expect(ingestedAccounts()).toEqual(['acct-1', 'acct-2']);
+      expect(logs()).toContain('ingest boom');
+      expectLogsClean();
+    });
+
+    it('mensagem que falha não derruba a seguinte do MESMO change', async () => {
+      ingestInbound.mockRejectedValueOnce(new Error('ingest boom'));
+      const change = msgChange('pnid-1', (ch) => {
+        const [m] = ch.value.messages;
+        ch.value.messages = [
+          { ...m, id: 'wamid.first' },
+          { ...m, id: 'wamid.second' },
+        ];
+      });
+
+      await run(post(change));
+
+      expect(
+        ingestInbound.mock.calls.map(
+          (c) => (c[1] as { providerMessageId: string }).providerMessageId
+        )
+      ).toEqual(['wamid.first', 'wamid.second']);
+      expect(logs()).toContain('"unit":"message","index":0');
+      expectLogsClean();
+    });
+
+    it('erro que é objeto simples (PostgREST): o código e a mensagem entram no log, sem o valor citado', async () => {
+      ingestInbound.mockRejectedValueOnce({
+        code: '22P02',
+        message: 'invalid input syntax for type uuid: "16315551181-secret"',
+      });
+
+      await run(post(msgChange('pnid-1'), msgChange('pnid-2')));
+
+      expect(ingestedAccounts()).toEqual(['acct-1', 'acct-2']);
+      const out = logs();
+      expect(out).toContain('"code":"22P02"');
+      expect(out).toContain('invalid input syntax for type uuid');
+      expect(out).not.toContain('secret');
+      expectLogsClean();
+    });
+
+    it('log do erro: posição, número truncado em 64 e mensagem em 200; nunca o corpo', async () => {
+      const longPnid = `pnid-1${'9'.repeat(100)}`;
+      ingestInbound.mockRejectedValue(new Error('x'.repeat(500)));
+      CONFIG_ROWS.push({
+        ...CONFIG_ROWS[0]!,
+        id: 'cfg-long',
+        phone_number_id: longPnid,
+      });
+      try {
+        await run(post(msgChange('pnid-2'), msgChange(longPnid)));
+      } finally {
+        CONFIG_ROWS.pop();
+      }
+
+      const line = vi
+        .mocked(console.error)
+        .mock.calls.map((c) => String(c[1]))
+        .find((l) => l.includes('"change":1'))!;
+      const parsed = JSON.parse(line);
+      expect(parsed).toMatchObject({ entry: 0, change: 1, unit: 'message' });
+      expect(parsed.phone_number_id).toHaveLength(64);
+      expect(parsed.error_message).toHaveLength(200);
+      expectLogsClean();
+    });
+  });
+
+  describe('timestamp ausente ou ilegível (decisão: usa o relógio do servidor)', () => {
+    it.each<[string, (m: Obj) => void]>([
+      ['ausente', (m) => delete m.timestamp],
+      ['não numérico', (m) => (m.timestamp = 'ontem')],
+      ['fora do alcance de Date', (m) => (m.timestamp = '9'.repeat(30))],
+      // L-3: válidos para `Date`, mas o 1º (ano 58868) o Postgres recusa.
+      ['em milissegundos', (m) => (m.timestamp = '1795576195000')],
+      ['no ano 5138', (m) => (m.timestamp = '99999999999')],
+    ])(
+      'mensagem com timestamp %s: ingerida com o instante atual, e o change seguinte também',
+      async (_label, mutate) => {
+        const before = Date.now();
+        await run(
+          post(
+            msgChange('pnid-1', (ch) => mutate(ch.value.messages[0])),
+            msgChange('pnid-2')
+          )
+        );
+
+        expect(ingestedAccounts()).toEqual(['acct-1', 'acct-2']);
+        const at = (ingestInbound.mock.calls[0]![1] as { occurredAt: Date })
+          .occurredAt;
+        expect(Number.isNaN(at.getTime())).toBe(false);
+        expect(at.getTime()).toBeGreaterThanOrEqual(before);
+        expect(at.getTime()).toBeLessThanOrEqual(Date.now());
+        // O segundo, com timestamp real da Meta, segue com o instante dela.
+        expect(
+          (
+            ingestInbound.mock.calls[1]![1] as { occurredAt: Date }
+          ).occurredAt.getTime()
+        ).toBe(1795576203 * 1000);
+        expect(logs()).toContain('unreadable timestamp');
+        expectLogsClean();
+      }
+    );
+
+    it.each<[string, (s: Obj) => void]>([
+      ['ausente', (s) => delete s.timestamp],
+      ['não numérico', (s) => (s.timestamp = 'ontem')],
+      ['fora do alcance de Date', (s) => (s.timestamp = '9'.repeat(30))],
+      ['em milissegundos', (s) => (s.timestamp = '1795576195000')],
+      ['no ano 5138', (s) => (s.timestamp = '99999999999')],
+    ])(
+      'status com timestamp %s: espelhado (carimbo do servidor) e o change seguinte processado',
+      async (_label, mutate) => {
+        const bad = { ...realStatus(), id: WAMID_A };
+        mutate(bad);
+
+        const before = Date.now();
+        await run(post(stChange('pnid-1', [bad]), msgChange('pnid-2')));
+
+        expect(updatesOn('messages')).toHaveLength(1);
+        const [rec] = updatesOn('broadcast_recipients');
+        const readAt = Date.parse(String(rec!.payload.read_at));
+        expect(readAt).toBeGreaterThanOrEqual(before);
+        expect(readAt).toBeLessThanOrEqual(Date.now());
+        expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+        expect(ingestedAccounts()).toEqual(['acct-2']);
+        expect(logs()).toContain('unreadable timestamp');
+        expectLogsClean();
+      }
+    );
+  });
+
+  // L-3: o limite é agora + 1 dia.
+  it.each<[string, number, boolean]>([
+    ['exatamente um dia à frente', 86_400, true],
+    ['um segundo além de um dia', 86_401, false],
+  ])('mensagem com timestamp %s', async (_label, aheadSeconds, kept) => {
+    const now = 1795576203;
+    vi.useFakeTimers({ toFake: ['Date'], now: now * 1000 });
+    try {
+      await run(
+        post(
+          msgChange('pnid-1', (ch) => {
+            ch.value.messages[0].timestamp = String(now + aheadSeconds);
+          })
+        )
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const at = (ingestInbound.mock.calls[0]![1] as { occurredAt: Date })
+      .occurredAt;
+    expect(at.getTime()).toBe((kept ? now + aheadSeconds : now) * 1000);
+    expect(logs().includes('unreadable timestamp')).toBe(!kept);
+  });
+
+  describe('status quebrado no meio de um change', () => {
+    it('item nulo, depois um status bom: o bom é espelhado', async () => {
+      await run(
+        post(stChange('pnid-1', [null, { ...realStatus(), id: WAMID_A }]))
+      );
+
+      expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+        [['in', 'id', [`msg-${WAMID_A}`]]],
+      ]);
+      expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1);
+      expect(logs()).toContain('"unit":"status","index":0');
+      expectLogsClean();
+    });
+
+    it('webhook de saída que rejeita no primeiro status: o segundo é espelhado', async () => {
+      dispatchWebhookEvent.mockRejectedValueOnce(new Error('dispatch boom'));
+
+      await run(
+        post(
+          stChange('pnid-1', [
+            { ...realStatus(), id: WAMID_A },
+            { ...realStatus(), id: WAMID_A2 },
+          ])
+        )
+      );
+
+      expect(updatesOn('messages').map((u) => u.filters)).toEqual([
+        [['in', 'id', [`msg-${WAMID_A}`]]],
+        [['in', 'id', [`msg-${WAMID_A2}`]]],
+      ]);
+      expect(logs()).toContain('dispatch boom');
+      expectLogsClean();
+    });
+
+    it('evento de template que lança: o change de mensagem seguinte é ingerido', async () => {
+      await run(
+        post(
+          // `value` nulo estoura dentro do tratador de template.
+          { field: 'message_template_status_update', value: null },
+          msgChange('pnid-1')
+        )
+      );
+
+      expect(ingestedAccounts()).toEqual(['acct-1']);
+      expectLogsClean();
+    });
+
+    it('status que lança num change: o change de mensagem seguinte é ingerido', async () => {
+      dispatchWebhookEvent.mockRejectedValue(new Error('dispatch boom'));
+
+      await run(
+        post(
+          stChange('pnid-1', [{ ...realStatus(), id: WAMID_A }]),
+          msgChange('pnid-2')
+        )
+      );
+
+      expect(ingestedAccounts()).toEqual(['acct-2']);
+    });
+  });
+
+  describe('forma do corpo', () => {
+    const good = () => msgChange('pnid-1');
+
+    it.each<[string, () => unknown[]]>([
+      ['entry sem `changes`', () => [{ id: 'waba-x' }]],
+      ['`changes` que não é lista', () => [{ id: 'waba-x', changes: 'x' }]],
+      ['`changes` objeto', () => [{ id: 'waba-x', changes: {} }]],
+      ['entry nulo', () => [null]],
+      ['entry que não é objeto', () => ['x', 42]],
+    ])('%s: pula o entry e processa os demais', async (_label, build) => {
+      await run(
+        JSON.stringify({
+          object: 'x',
+          entry: [...build(), ...entriesWith(good())],
+        })
+      );
+
+      expect(ingestedAccounts()).toEqual(['acct-1']);
+      expect(console.error).not.toHaveBeenCalled();
+      expectLogsClean();
+    });
+
+    it.each<[string, Obj | null | string]>([
+      ['change nulo', null],
+      ['change que não é objeto', 'x'],
+      ['value nulo', { field: 'messages', value: null }],
+      ['value ausente', { field: 'messages' }],
+      ['value que não é objeto', { field: 'messages', value: 'x' }],
+      [
+        'statuses que não é lista',
+        {
+          field: 'messages',
+          value: {
+            metadata: { phone_number_id: 'pnid-1' },
+            statuses: 'abc',
+          },
+        },
+      ],
+      [
+        'messages/contacts que não são listas',
+        {
+          field: 'messages',
+          value: {
+            metadata: { phone_number_id: 'pnid-1' },
+            messages: 'x',
+            contacts: 'y',
+          },
+        },
+      ],
+    ])('%s: pula o change e o seguinte é ingerido', async (_label, bad) => {
+      await run(post(bad as Obj, good()));
+
+      expect(ingestedAccounts()).toEqual(['acct-1']);
+      // Forma inválida é esperada de quem assina: aviso, não erro.
+      expect(console.error).not.toHaveBeenCalled();
+      expectLogsClean();
+    });
+
+    it('sem metadata: sem número não há config (erro de sempre); o change seguinte é ingerido', async () => {
+      await run(
+        post(
+          { field: 'messages', value: { messages: [{}], contacts: [{}] } },
+          good()
+        )
+      );
+
+      expect(ingestedAccounts()).toEqual(['acct-1']);
+      expectLogsClean();
+    });
+
+    it('`entry` que não é lista: nada a processar, sem exceção, repetidor chamado', async () => {
+      await run(JSON.stringify({ object: 'x', entry: { changes: [] } }));
+
+      expect(ingestInbound).not.toHaveBeenCalled();
+      expect(logs()).toContain('`entry` is not a list');
+    });
+
+    it('corpo JSON `null` com assinatura válida: sem exceção e sem log de erro', async () => {
+      await run('null');
+
+      expect(console.error).not.toHaveBeenCalled();
+    });
+  });
+
+  it('POST bom continua igual: nenhum aviso, nenhum erro', async () => {
+    await run(post(msgChange('pnid-1'), msgChange('pnid-2')));
+
+    expect(ingestedAccounts()).toEqual(['acct-1', 'acct-2']);
+    expect(console.error).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+});
+
+// Revisão integrada da SPEC 088, achado A-1 — um POST assinado de 4 MiB com
+// itens nulos parava o processo (todas as contas) por até um minuto e
+// escrevia 188 MB de log. Corpos reais da Meta como base.
+describe('POST /api/whatsapp/webhook — um POST não gasta o processo inteiro (A-1)', () => {
+  const N = 50_000;
+  const WAMID_A = 'wamid.HBgLMTYzMTU1NTExODEVAgARGBJBQUFBQUFBQUFBQUFBQUFBQUEA';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Obj = Record<string, any>;
+
+  const many = (item: unknown, n = N) => Array.from({ length: n }, () => item);
+  function stChange(statuses: unknown[], phoneNumberId = 'pnid-1'): Obj {
+    const change = JSON.parse(realStatusesRawBody({ phoneNumberId })).entry[0]
+      .changes[0];
+    change.value.statuses = statuses;
+    return change;
+  }
+  function msgChange(messages?: unknown[], phoneNumberId = 'pnid-1'): Obj {
+    const change = JSON.parse(realMessagesRawBody({ phoneNumberId })).entry[0]
+      .changes[0];
+    if (messages) change.value.messages = messages;
+    return change;
+  }
+  const realStatus = (over: Obj = {}) => ({
+    ...JSON.parse(realStatusesRawBody()).entry[0].changes[0].value.statuses[0],
+    id: WAMID_A,
+    ...over,
+  });
+  const realMessage = (over: Obj = {}) => ({
+    ...JSON.parse(realMessagesRawBody()).entry[0].changes[0].value.messages[0],
+    ...over,
+  });
+  const post = (...changes: unknown[]) =>
+    JSON.stringify(envelope('100000000004821', changes as Obj[]));
+
+  async function run(raw: string) {
+    const res = await POST(
+      webhookRequest(raw, { 'x-hub-signature-256': WELL_FORMED_HEADER })
+    );
+    expect(res.status).toBe(200);
+    await expect(afterCallbacks[afterCallbacks.length - 1]!()).resolves.toBe(
+      undefined
+    );
+    expect(relayMetaWebhook).toHaveBeenCalledTimes(1);
+    expect(relayMetaWebhook.mock.calls[0]![1]).toMatchObject({ rawBody: raw });
+  }
+
+  const lines = () =>
+    [console.log, console.info, console.warn, console.error].flatMap((fn) =>
+      vi.mocked(fn).mock.calls.map((c) => c.map(String).join(' '))
+    );
+  const summaries = () =>
+    lines().filter((l) => /POST (cut short|processed)/.test(l));
+  const summary = () => {
+    const [line] = summaries();
+    return JSON.parse(line!.slice(line!.indexOf('{')));
+  };
+  const messageUpdates = () =>
+    tableUpdates.filter((u) => u.table === 'messages').length;
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    mockedSigner = { kind: 'channels', phoneNumberIds: new Set(['pnid-1']) };
+    messageRows = [storedMessage(WAMID_A, 'acct-1')];
+  });
+
+  it.each<[string, () => string]>([
+    ['statuses nulos', () => post(stChange(many(null)))],
+    ['statuses numéricos', () => post(stChange(many(0)))],
+    ['statuses em lista', () => post(stChange(many([])))],
+    ['statuses sem id', () => post(stChange(many({})))],
+    ['statuses com id vazio', () => post(stChange(many({ id: '' })))],
+    ['statuses com id não texto', () => post(stChange(many({ id: 7 })))],
+    ['messages nulas', () => post(msgChange(many(null)))],
+    ['messages em lista', () => post(msgChange(many([])))],
+    ['changes nulos', () => post(...many(null))],
+    ['changes sem value', () => post(...many({ field: 'messages' }))],
+    ['entry nulos', () => JSON.stringify({ object: 'x', entry: many(null) })],
+    [
+      'entry sem changes',
+      () => JSON.stringify({ object: 'x', entry: many({ id: 'w' }) }),
+    ],
+  ])(
+    '%s × 50 mil: poucas linhas, nenhuma consulta, POST abandonado',
+    async (_label, build) => {
+      await run(build());
+
+      // 20 linhas de item mais o resumo.
+      expect(lines().length).toBeLessThanOrEqual(21);
+      expect(summaries()).toHaveLength(1);
+      expect(summary()).toMatchObject({
+        reason: 'malformed_items',
+        malformed: 100,
+        failed: 0,
+      });
+      expect(tablesQueried).toEqual([]);
+      expect(tableUpdates).toEqual([]);
+      expect(ingestInbound).not.toHaveBeenCalled();
+      // Abandonado: nem leu o resto da lista.
+      expect(summary().items).toBeLessThan(200);
+    }
+  );
+
+  it('99 itens inválidos: os statuses e a mensagem válidos depois deles são processados', async () => {
+    await run(
+      post(
+        stChange([...many(null, 50), realStatus()]),
+        stChange([...many({}, 49), realStatus()]),
+        msgChange()
+      )
+    );
+
+    expect(messageUpdates()).toBe(2);
+    expect(dispatchWebhookEvent).toHaveBeenCalledTimes(2);
+    expect(ingestInbound).toHaveBeenCalledTimes(1);
+    expect(lines().length).toBeLessThanOrEqual(21);
+    expect(summaries()[0]).toContain('POST processed');
+  });
+
+  it('o 100º inválido abandona o POST, mas o que veio ANTES dele já valeu', async () => {
+    await run(
+      post(
+        stChange([realStatus(), ...many(null, 100), realStatus()]),
+        msgChange()
+      )
+    );
+
+    expect(messageUpdates()).toBe(1);
+    expect(ingestInbound).not.toHaveBeenCalled();
+    expect(summaries()[0]).toContain('POST cut short');
+  });
+
+  it('webhook de saída falhando em 300 statuses bem formados: nenhum é descartado', async () => {
+    dispatchWebhookEvent.mockRejectedValue(new Error('boom'));
+    await run(post(stChange(many(realStatus(), 300)), msgChange()));
+
+    expect(messageUpdates()).toBe(300);
+    expect(ingestInbound).toHaveBeenCalledTimes(1);
+    expect(lines().length).toBeLessThanOrEqual(21);
+    expect(summary()).toMatchObject({
+      reason: null,
+      malformed: 0,
+      failed: 300,
+    });
+  });
+
+  it('banco fora do ar em 300 statuses: todos tentados, log limitado, e o que vem depois é ingerido', async () => {
+    messagesSelectError = { message: 'db down' };
+    await run(post(stChange(many(realStatus(), 300)), msgChange()));
+
+    expect(messagesSelects).toBe(600);
+    expect(ingestInbound).toHaveBeenCalledTimes(1);
+    expect(lines().length).toBeLessThanOrEqual(21);
+    expect(summary().reason).toBeNull();
+  });
+
+  it('ingest falhando em 300 mensagens bem formadas: todas tentadas', async () => {
+    ingestInbound.mockRejectedValue(new Error('db down'));
+    await run(
+      post(
+        msgChange(
+          Array.from({ length: 300 }, (_, i) => realMessage({ id: `w.${i}` }))
+        )
+      )
+    );
+
+    expect(ingestInbound).toHaveBeenCalledTimes(300);
+    expect(lines().length).toBeLessThanOrEqual(21);
+    expect(summary()).toMatchObject({ reason: null, failed: 300 });
+  });
+
+  it.each<[string, number, () => string]>([
+    // Leitura da lista e processamento: 10 + 10.
+    [
+      'statuses bem formados',
+      19,
+      () => post(stChange(many(realStatus(), 1000))),
+    ],
+    ['mensagens que falham sem I/O', 19, () => post(msgChange(many({}, 1000)))],
+    [
+      'changes fora do escopo do segredo',
+      9,
+      () => post(...many({ field: 'messages', value: {} }, 1000)),
+    ],
+    [
+      'entry sem trabalho',
+      9,
+      () => JSON.stringify({ entry: many({ changes: [] }, 1000) }),
+    ],
+  ])(
+    '%s × 1.000: o event loop roda durante o processamento',
+    async (_l, minTurns, build) => {
+      await POST(
+        webhookRequest(build(), { 'x-hub-signature-256': WELL_FORMED_HEADER })
+      );
+      let turns = 0;
+      let running = true;
+      const spin = () => {
+        turns++;
+        if (running) setImmediate(spin);
+      };
+      setImmediate(spin);
+      await afterCallbacks[0]!();
+      running = false;
+
+      // Um a cada 100 itens, no mínimo.
+      expect(turns).toBeGreaterThanOrEqual(minTurns);
+      expect(lines().length).toBeLessThanOrEqual(21);
+    }
+  );
+
+  it('teto de itens: corta com UM aviso', async () => {
+    await run(
+      JSON.stringify({
+        entry: [
+          ...many({ changes: [] }, MAX_ITEMS_PER_POST),
+          { id: 'w', changes: [msgChange()] },
+        ],
+      })
+    );
+
+    expect(ingestInbound).not.toHaveBeenCalled();
+    expect(lines()).toHaveLength(1);
+    expect(summary()).toMatchObject({
+      reason: 'item_ceiling',
+      items: MAX_ITEMS_PER_POST,
+    });
+  });
+
+  it('teto de itens dentro de `statuses`: os anteriores são processados', async () => {
+    await run(
+      JSON.stringify({
+        entry: [
+          ...many({ changes: [] }, MAX_ITEMS_PER_POST - 5),
+          // entry, change e 3 statuses cabem; o 4º é o primeiro fora.
+          { id: 'w', changes: [stChange(many(realStatus(), 4))] },
+        ],
+      })
+    );
+
+    expect(messageUpdates()).toBe(3);
+    expect(lines()).toHaveLength(1);
+    expect(summary().reason).toBe('item_ceiling');
+  });
+
+  it('lote máximo da Meta (1.000 atualizações, uma entry cada): tudo processado, nenhuma linha de log', async () => {
+    const entry = {
+      id: '100000000004821',
+      changes: [stChange([realStatus()])],
+    };
+    await run(
+      JSON.stringify(envelopeOf(Array.from({ length: 1000 }, () => entry)))
+    );
+
+    expect(messageUpdates()).toBe(1000);
+    expect(dispatchWebhookEvent).toHaveBeenCalledTimes(1000);
+    expect(lines()).toEqual([]);
+  });
+
+  it.each<[string, () => string]>([
+    [
+      'change fora do escopo',
+      () => post(...many({ field: 'messages', value: {} }, 1000)),
+    ],
+    [
+      'evento de template sem id',
+      () =>
+        post(
+          ...many({ field: 'message_template_status_update', value: {} }, 1000)
+        ),
+    ],
+    [
+      'components_update de template',
+      () =>
+        post(
+          ...many(
+            { field: 'message_template_components_update', value: {} },
+            1000
+          )
+        ),
+    ],
+    [
+      '131042 sem timestamp',
+      () =>
+        post(
+          stChange(
+            many(
+              { id: 'w', status: 'failed', errors: [{ code: 131042 }] },
+              1000
+            )
+          )
+        ),
+    ],
+  ])('%s × 1.000: as linhas de log também têm teto', async (_l, build) => {
+    await run(build());
+    expect(lines().length).toBeLessThanOrEqual(21);
+    expect(summaries()[0]).toContain('POST processed');
+  });
+
+  it('ruído do corpo não cala a falha nossa no mesmo POST', async () => {
+    messagesUpdateError = () => ({ code: '57014', message: 'timeout' });
+    await run(post(stChange([...many(null, 50), realStatus()])));
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(lines().some((l) => l.includes('Error updating message'))).toBe(
+      true
+    );
+    expect(lines().length).toBeLessThanOrEqual(21);
+  });
+
+  it('o log dos itens inválidos leva só a posição, nunca o conteúdo', async () => {
+    await run(post(stChange([{ id: 7, recipient_id: '16315551181' }])));
+
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toContain(
+      '"entry":0,"change":0,"unit":"status","index":0'
+    );
+    expect(lines()[0]).not.toContain('16315551181');
   });
 });

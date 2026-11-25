@@ -252,6 +252,16 @@ export const RATE_LIMITS = {
    *  usuário (até 5 s de timeout); 6/min cobre acertar a URL e repetir, e
    *  não deixa o botão virar um amplificador de requisições. */
   metaRelayTest: { limit: 6, windowMs: 60_000 },
+  /** ENTREGAS do repetidor do webhook da Meta (SPEC 088 §4.3, achado B-2),
+   *  por CONTA. Sem teto, o admin da conta assina com o próprio `app_secret`
+   *  POSTs ilimitados do próprio número e cada um sai do servidor para a URL
+   *  que ele escolheu. 50/s é folgado de propósito (R-5: uma conta com muito
+   *  tráfego legítimo, como um disparo grande, recebe rajadas de status) e
+   *  ainda limita o pior caso a ~50 requisições/s por conta. Excedente é
+   *  descartado sem `fetch` e NÃO conta como falha. Janela fixa, em memória,
+   *  por processo (como os demais): numa janela de 1 s uma rajada na virada
+   *  pode levar até 2× o teto, e N instâncias multiplicam o teto por N. */
+  metaRelayDelivery: { limit: 50, windowMs: 1_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

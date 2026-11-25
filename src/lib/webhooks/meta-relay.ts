@@ -22,6 +22,11 @@
 // runs inside the webhook's `after()` and must not affect the 200 Meta
 // already received.
 //
+// A blocked account (`accounts.blocked_at`) is not relayed (SPEC 062
+// §4.3), and each account has a delivery ceiling per window
+// (`RATE_LIMITS.metaRelayDelivery`); both skip the delivery without
+// touching `failure_count`.
+//
 // Logs carry only `account_id`, HTTP status and duration — never the
 // body, the key or the full URL.
 // ============================================================
@@ -30,6 +35,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { RATE_LIMITS, checkRateLimit } from '@/lib/rate-limit';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import {
   signerCoversPhoneNumber,
@@ -199,10 +205,66 @@ function noteRelaySchemaMissing(error: unknown): boolean {
   return true;
 }
 
-/** Test hook: clears the per-process schema state. */
+/** account → `reset` of the window already warned about (one warning each). */
+const rateWarnedWindow = new Map<string, number>();
+
+/**
+ * Per-account delivery ceiling (B-2). Uses the shared in-memory limiter,
+ * so it is per process: with N instances the ceiling is N× and a burst
+ * across a window boundary can reach 2×. Returns `false` when the
+ * delivery must be dropped. Logs ONE warning per account per window —
+ * only `account_id` and the ceiling, never body, URL or key.
+ */
+function admitDelivery(accountId: string): boolean {
+  const result = checkRateLimit(
+    `meta-relay:${accountId}`,
+    RATE_LIMITS.metaRelayDelivery
+  );
+  if (result.success) return true;
+  if (rateWarnedWindow.get(accountId) !== result.reset) {
+    if (rateWarnedWindow.size >= 1000) rateWarnedWindow.clear();
+    rateWarnedWindow.set(accountId, result.reset);
+    console.warn(
+      `[meta-relay] delivery ceiling reached account=${accountId} limit=${result.limit}/${RATE_LIMITS.metaRelayDelivery.windowMs}ms — excess dropped, not counted as failure`
+    );
+  }
+  return false;
+}
+
+/**
+ * Of `accountIds`, the ones that may receive a relay: present and not
+ * blocked, in ONE query. Fail-closed — an error yields an empty set. An
+ * account with no row is not allowed either (like `isAccountBlocked`).
+ * Needs `service_role`: under RLS a blocked account's row is invisible,
+ * which here also reads as "not allowed".
+ */
+async function loadRelayableAccountIds(
+  db: SupabaseClient,
+  accountIds: string[]
+): Promise<Set<string>> {
+  const { data, error } = await db
+    .from('accounts')
+    .select('id, blocked_at')
+    .in('id', accountIds);
+  if (error) {
+    console.error(
+      '[meta-relay] blocked-account lookup failed — relay skipped (fail-closed):',
+      errMsg(error)
+    );
+    return new Set();
+  }
+  return new Set(
+    ((data ?? []) as { id: string; blocked_at: string | null }[])
+      .filter((row) => row.blocked_at === null)
+      .map((row) => row.id)
+  );
+}
+
+/** Test hook: clears the per-process schema and rate-warning state. */
 export function __resetMetaRelayStateForTests(): void {
   relaySchemaUnavailableUntil = 0;
   relaySchemaWarned = false;
+  rateWarnedWindow.clear();
 }
 
 /**
@@ -386,10 +448,27 @@ export async function relayMetaWebhook(
     );
     const plans = planMetaRelay(input.body, owners);
 
+    // Candidates: enabled relay AND an owned `change` in this POST.
+    const candidates = enabled.filter((relay) => plans.has(relay.account_id));
+    if (candidates.length === 0) return;
+
+    // B-4: a blocked account stops sending (SPEC 062 §4.3); D-9 only keeps
+    // storing its inbound. Fail-closed: if blocking cannot be read, nobody
+    // is relayed — the relay is best effort anyway (R-7), delivering to a
+    // blocked account is the harmful side, and a database that cannot
+    // answer here would hardly serve the rest of the POST.
+    const allowed = await loadRelayableAccountIds(
+      db,
+      candidates.map((relay) => relay.account_id)
+    );
+
     const jobs: Promise<void>[] = [];
-    for (const relay of enabled) {
+    for (const relay of candidates) {
+      if (!allowed.has(relay.account_id)) continue;
       const plan = plans.get(relay.account_id);
       if (!plan) continue;
+      // B-2: per-account ceiling; the excess is dropped, not a failure.
+      if (!admitDelivery(relay.account_id)) continue;
       const body =
         plan.kind === 'raw' ? input.rawBody : JSON.stringify(plan.body);
       jobs.push(deliverRelay(db, relay, body));

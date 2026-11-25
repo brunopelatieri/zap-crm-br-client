@@ -78,6 +78,12 @@ export interface TemplateWebhookScope {
 }
 
 /**
+ * Where the lines go. The route passes its per-POST guard, which caps how
+ * many lines one webhook body can produce; `console` otherwise.
+ */
+type TemplateWebhookLog = Pick<Console, 'info' | 'warn' | 'error'>;
+
+/**
  * Dispatch a single change record to the matching handler. Returns
  * silently on unrecognised fields — the caller already pre-filtered
  * via isTemplateWebhookField, but treat unknown values as no-ops
@@ -89,10 +95,11 @@ export async function handleTemplateWebhookChange(
   // the admin client and exposes it as `any`. Type as the generic
   // SupabaseClient here so this module is testable in isolation.
   supabase: SupabaseClient,
-  scope?: TemplateWebhookScope
+  scope?: TemplateWebhookScope,
+  log: TemplateWebhookLog = console
 ): Promise<void> {
   if (scope && scope.accountIds.length === 0) {
-    console.warn(
+    log.warn(
       '[template-webhook] event ignored — the App Secret that signed it covers no account:',
       change.field
     );
@@ -103,18 +110,23 @@ export async function handleTemplateWebhookChange(
       await handleStatusUpdate(
         change.value as TemplateStatusUpdateValue,
         supabase,
-        scope
+        scope,
+        log
       );
       return;
     case 'message_template_quality_update':
       await handleQualityUpdate(
         change.value as TemplateQualityUpdateValue,
         supabase,
-        scope
+        scope,
+        log
       );
       return;
     case 'message_template_components_update':
-      handleComponentsUpdate(change.value as TemplateComponentsUpdateValue);
+      handleComponentsUpdate(
+        change.value as TemplateComponentsUpdateValue,
+        log
+      );
       return;
   }
 }
@@ -122,14 +134,15 @@ export async function handleTemplateWebhookChange(
 async function handleStatusUpdate(
   value: TemplateStatusUpdateValue,
   supabase: SupabaseClient,
-  scope?: TemplateWebhookScope
+  scope: TemplateWebhookScope | undefined,
+  log: TemplateWebhookLog
 ): Promise<void> {
   const metaTemplateId =
     value.message_template_id !== undefined
       ? String(value.message_template_id)
       : null;
   if (!metaTemplateId || !value.event) {
-    console.warn(
+    log.warn(
       '[template-webhook] status update missing message_template_id or event:',
       value
     );
@@ -157,7 +170,7 @@ async function handleStatusUpdate(
   const { data, error } = await query.select('id');
 
   if (error) {
-    console.error(
+    log.error(
       '[template-webhook] status update failed for meta_template_id',
       metaTemplateId,
       error.message
@@ -165,7 +178,7 @@ async function handleStatusUpdate(
     return;
   }
   if (!data || data.length === 0) {
-    console.warn(
+    log.warn(
       '[template-webhook] status update received for unknown template:',
       metaTemplateId,
       value.message_template_name
@@ -173,7 +186,7 @@ async function handleStatusUpdate(
     return;
   }
   if (data.length > 1) {
-    console.warn(
+    log.warn(
       `[template-webhook] status update matched ${data.length} rows for meta_template_id ${metaTemplateId} — investigate.`
     );
   }
@@ -182,14 +195,15 @@ async function handleStatusUpdate(
 async function handleQualityUpdate(
   value: TemplateQualityUpdateValue,
   supabase: SupabaseClient,
-  scope?: TemplateWebhookScope
+  scope: TemplateWebhookScope | undefined,
+  log: TemplateWebhookLog
 ): Promise<void> {
   const metaTemplateId =
     value.message_template_id !== undefined
       ? String(value.message_template_id)
       : null;
   if (!metaTemplateId) {
-    console.warn(
+    log.warn(
       '[template-webhook] quality update missing message_template_id:',
       value
     );
@@ -210,7 +224,7 @@ async function handleQualityUpdate(
   const { error } = await query;
 
   if (error) {
-    console.error(
+    log.error(
       '[template-webhook] quality update failed for meta_template_id',
       metaTemplateId,
       error.message
@@ -228,8 +242,11 @@ async function handleQualityUpdate(
  * thought they submitted. A future PR could mark the row with a
  * "Meta modified this template" banner.
  */
-function handleComponentsUpdate(value: TemplateComponentsUpdateValue): void {
-  console.info(
+function handleComponentsUpdate(
+  value: TemplateComponentsUpdateValue,
+  log: TemplateWebhookLog
+): void {
+  log.info(
     '[template-webhook] components updated by Meta for template',
     value.message_template_id,
     value.message_template_name,

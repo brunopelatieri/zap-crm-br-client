@@ -16,6 +16,10 @@ import {
   META_WEBHOOK_MAX_BODY_BYTES,
   readTextWithLimit,
 } from '@/lib/whatsapp/webhook-body';
+import {
+  WebhookPostGuard,
+  isJsonObject,
+} from '@/lib/whatsapp/webhook-post-guard';
 import { proxyMediaUrl } from '@/lib/storage/media-url';
 import { buildMediaPath, baseMimeType } from '@/lib/storage/upload-media';
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
@@ -29,9 +33,15 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook';
 import { readStatus } from '@/lib/whatsapp/billing-monitor';
+import { resolveNumberOwner } from '@/lib/whatsapp/number-owner';
+import {
+  findStatusMessages,
+  findStatusRecipient,
+} from '@/lib/whatsapp/status-scope';
 import {
   createWebhookPaymentSignals,
   notePricingSchemaMissing,
+  parseMetaTimestamp,
   pricingPatchFor,
   type WebhookPaymentSignals,
 } from '@/lib/whatsapp/billing-signal';
@@ -329,170 +339,325 @@ export async function POST(request: Request) {
   return NextResponse.json({ status: 'received' }, { status: 200 });
 }
 
+/** Onde, no POST, a unidade de trabalho está (só posições, nunca conteúdo). */
+interface WorkSite {
+  entry: number;
+  change: number;
+  /** `status` / `message`, quando a unidade é menor que o `change`. */
+  unit?: 'status' | 'message';
+  index?: number;
+  phoneNumberId?: unknown;
+}
+
+/**
+ * Executa UMA unidade de trabalho (um `change`, um `status` ou uma
+ * mensagem) isolada das demais do mesmo POST (achado B-6 da revisão de
+ * segurança da SPEC 088). A Meta já recebeu 200 e não reenvia: uma exceção
+ * que escapasse daqui apagaria, em definitivo, tudo o que vem depois no
+ * mesmo POST, inclusive os eventos de OUTRO número.
+ *
+ * Nunca lança. O log leva só o tipo e a mensagem do erro (curta), a
+ * posição e o `phone_number_id` truncado: o corpo, o token, o segredo e o
+ * telefone do contato nunca entram. A quantidade de linhas por POST é a do
+ * `guard` (A-1).
+ */
+async function isolated(
+  guard: WebhookPostGuard,
+  site: WorkSite,
+  work: () => Promise<unknown>
+) {
+  try {
+    await work();
+  } catch (error) {
+    // Erro do Supabase/PostgREST costuma ser um objeto simples
+    // `{ code, message }`, não `Error`: lê os campos dos dois.
+    const err =
+      error !== null && typeof error === 'object'
+        ? (error as { name?: unknown; message?: unknown; code?: unknown })
+        : null;
+    guard.failed(
+      `[webhook] ${site.unit ?? 'change'} failed — the remaining events of this POST are still processed:`,
+      JSON.stringify({
+        entry: site.entry,
+        change: site.change,
+        unit: site.unit ?? 'change',
+        index: site.index ?? null,
+        // Valor vem do corpo (de quem assinou): limitado.
+        phone_number_id:
+          typeof site.phoneNumberId === 'string'
+            ? site.phoneNumberId.slice(0, 64)
+            : null,
+        error: typeof err?.name === 'string' ? err.name : typeof error,
+        ...(typeof err?.code === 'string'
+          ? { code: err.code.slice(0, 32) }
+          : {}),
+        // Valores entre aspas (Postgres cita a entrada rejeitada) saem do
+        // log: podem ser dado do contato.
+        error_message: (typeof err?.message === 'string' ? err.message : '')
+          .replace(/"[^"]*"|'[^']*'/g, '…')
+          .slice(0, 200),
+      })
+    );
+  }
+}
+
 async function processWebhook(
   body: { entry?: WhatsAppWebhookEntry[] },
   signer: MetaWebhookSigner
 ) {
-  if (!body.entry) return;
+  // A-1: quantos itens, quantas linhas de log e quanto event loop este
+  // POST pode gastar. O corpo é de quem assinou.
+  const guard = new WebhookPostGuard();
+  try {
+    await processEntries(body, signer, guard);
+  } finally {
+    guard.finish();
+  }
+}
+
+async function processEntries(
+  body: { entry?: WhatsAppWebhookEntry[] },
+  signer: MetaWebhookSigner,
+  guard: WebhookPostGuard
+) {
+  // Defesa de forma (B-6): o corpo é de quem assinou. `entry`/`changes`
+  // que não sejam lista, ou itens nulos, só pulam o que está quebrado.
+  const entries: unknown = body?.entry;
+  if (entries === undefined || entries === null) return;
+  if (!Array.isArray(entries)) {
+    guard.warn('[webhook] body ignored — `entry` is not a list');
+    return;
+  }
 
   // Contas cujos templates este POST pode tocar (eventos de template não
   // têm `phone_number_id`). Só consultado com segredo de canal, uma vez
   // por POST e só se vier evento de template; `null` = sem restrição.
   let templateAccounts: Promise<string[] | null> | null = null;
+  const getTemplateAccounts = () =>
+    (templateAccounts ??= accountIdsForSigner(supabaseAdmin(), signer));
 
-  for (const entry of body.entry) {
-    for (const change of entry.changes) {
-      // Template-lifecycle events (status / quality / components
-      // updates from Meta) come in on a different change.field and
-      // have a different value shape — route them through the
-      // dedicated handler. Skip the messaging branches below so we
-      // don't try to read message-shaped fields off a template event.
-      if (isTemplateWebhookField(change.field)) {
-        templateAccounts ??= accountIdsForSigner(supabaseAdmin(), signer);
-        const accountIds = await templateAccounts;
-        await handleTemplateWebhookChange(
-          { field: change.field, value: change.value as unknown },
-          supabaseAdmin(),
-          accountIds ? { accountIds } : undefined
+  for (let e = 0; e < entries.length; e++) {
+    if (!(await guard.next())) return;
+    const entry = entries[e] as WhatsAppWebhookEntry | null;
+    if (!entry || typeof entry !== 'object' || !Array.isArray(entry.changes)) {
+      guard.malformed(
+        `[webhook] entry ${e} ignored — missing or invalid \`changes\``
+      );
+      continue;
+    }
+
+    for (let c = 0; c < entry.changes.length; c++) {
+      if (!(await guard.next())) return;
+      const change = entry.changes[c]!;
+      if (!isJsonObject(change)) {
+        guard.malformed(
+          `[webhook] change ${c} of entry ${e} ignored — not an object`
         );
         continue;
       }
-
-      const value = change.value;
-
-      // Revisão de segurança da SPEC 088 — o `app_secret` de um canal é
-      // gravado pelo admin da conta, sem validação na Meta. Sem esta
-      // guarda, o admin de A assina com o próprio segredo um `change` do
-      // número de B e injeta mensagens/status no inbox de B. Fora do
-      // escopo do segredo (ou sem número, com segredo de canal): ignora
-      // ESTE `change` e segue com os demais; a Meta recebe 200 do mesmo
-      // jeito (nada de reentrega).
-      const changePhoneNumberId = value?.metadata?.phone_number_id;
-      if (!signerCoversPhoneNumber(signer, changePhoneNumberId)) {
-        console.warn(
-          '[webhook] change ignored — phone_number_id outside the scope of the App Secret that signed this POST:',
-          // Valor vem do corpo (de quem assinou): limitado, sem quebra de linha.
-          JSON.stringify(String(changePhoneNumberId ?? '').slice(0, 64))
-        );
-        continue;
-      }
-
-      // Handle status updates
-      if (value.statuses) {
-        // SPEC 076 §10.2 — conta/WABA do número (pela config, §7.8) e o
-        // retrato de pagamento vêm de um cache de PROCESSO dentro do
-        // `signals` (R-10): criar um por `change` é barato.
-        const statusPhoneNumberId = value.metadata?.phone_number_id;
-        const signals = statusPhoneNumberId
-          ? createWebhookPaymentSignals(supabaseAdmin(), {
-              phoneNumberId: statusPhoneNumberId,
-              entryWabaId: entry.id,
-            })
-          : null;
-        for (const status of value.statuses) {
-          await handleStatusUpdate(status, signals);
-        }
-      }
-
-      // Handle incoming messages
-      if (!value.messages || !value.contacts) continue;
-
-      const phoneNumberId = value.metadata.phone_number_id;
-
-      // Find user's config by phone_number_id. `.single()` returns
-      // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
-      // operators see the real cause in logs. ≥2 rows shouldn't happen
-      // post-migration 013 (UNIQUE constraint), but a row created
-      // before the constraint, or a race, would still surface here.
-      const { data: configRows, error: configError } = await supabaseAdmin()
-        .from('whatsapp_config')
-        .select('*')
-        .eq('phone_number_id', phoneNumberId);
-
-      if (configError) {
-        console.error(
-          'Error fetching whatsapp_config for phone_number_id:',
-          phoneNumberId,
-          configError
-        );
-        continue;
-      }
-
-      if (!configRows || configRows.length === 0) {
-        console.error('No config found for phone_number_id:', phoneNumberId);
-        continue;
-      }
-
-      if (configRows.length > 1) {
-        console.error(
-          `Multiple configs (${configRows.length}) found for phone_number_id:`,
-          phoneNumberId,
-          '— inbound message dropped. Resolve duplicates so each number maps to a single account.',
-          'Account owners:',
-          configRows.map(
-            (r: { account_id: string; user_id: string }) =>
-              `${r.account_id} (admin ${r.user_id})`
+      await isolated(
+        guard,
+        {
+          entry: e,
+          change: c,
+          phoneNumberId: change?.value?.metadata?.phone_number_id,
+        },
+        () =>
+          processChange(
+            entry,
+            change,
+            { e, c },
+            signer,
+            getTemplateAccounts,
+            guard
           )
-        );
-        continue;
-      }
+      );
+    }
+  }
+}
 
-      const config = configRows[0];
+/** Um `change` do POST. Quem chama isola a exceção (`isolated`). */
+async function processChange(
+  entry: WhatsAppWebhookEntry,
+  change: WhatsAppWebhookEntry['changes'][number],
+  pos: { e: number; c: number },
+  signer: MetaWebhookSigner,
+  getTemplateAccounts: () => Promise<string[] | null>,
+  guard: WebhookPostGuard
+) {
+  // Template-lifecycle events (status / quality / components
+  // updates from Meta) come in on a different change.field and
+  // have a different value shape — route them through the
+  // dedicated handler. Skip the messaging branches below so we
+  // don't try to read message-shaped fields off a template event.
+  if (isTemplateWebhookField(change.field)) {
+    const accountIds = await getTemplateAccounts();
+    await handleTemplateWebhookChange(
+      { field: change.field, value: change.value as unknown },
+      supabaseAdmin(),
+      accountIds ? { accountIds } : undefined,
+      guard
+    );
+    return;
+  }
 
-      // `channel_id` já vive em `whatsapp_config` desde a 055; o
-      // fallback só cobre uma conta que nunca passou pelo backfill.
-      // Resolvido UMA vez, fora do laço de mensagens.
-      const channelId: string =
-        config.channel_id ??
-        (await resolveDefaultChannelId(supabaseAdmin(), config.account_id));
+  const value = change.value;
+  if (!isJsonObject(value)) {
+    guard.malformed(
+      `[webhook] change ${pos.c} of entry ${pos.e} ignored — no \`value\``
+    );
+    return;
+  }
 
-      // SPEC 064 D-12 — número desativado não ingere.
-      //
-      // "Desativar" preserva canal, histórico e configuração e zera só
-      // o segredo (`access_token = ''`). Sem esta guarda, o `decrypt`
-      // logo abaixo estouraria com erro de criptografia, e pior: uma
-      // conversa nova nasceria num canal que não pode responder. Antes
-      // da 072 o caso equivalente (config apagada) caía no genérico
-      // "No config found" — agora o log diz o motivo certo.
-      const { data: channelRow, error: channelError } = await supabaseAdmin()
-        .from('channels')
-        .select('id, name, status')
-        .eq('id', channelId)
-        .eq('account_id', config.account_id)
-        .maybeSingle();
+  // Revisão de segurança da SPEC 088 — o `app_secret` de um canal é
+  // gravado pelo admin da conta, sem validação na Meta. Sem esta
+  // guarda, o admin de A assina com o próprio segredo um `change` do
+  // número de B e injeta mensagens/status no inbox de B. Fora do
+  // escopo do segredo (ou sem número, com segredo de canal): ignora
+  // ESTE `change` e segue com os demais; a Meta recebe 200 do mesmo
+  // jeito (nada de reentrega).
+  const changePhoneNumberId = value.metadata?.phone_number_id;
+  if (!signerCoversPhoneNumber(signer, changePhoneNumberId)) {
+    guard.warn(
+      '[webhook] change ignored — phone_number_id outside the scope of the App Secret that signed this POST:',
+      // Valor vem do corpo (de quem assinou): limitado, sem quebra de linha.
+      JSON.stringify(String(changePhoneNumberId ?? '').slice(0, 64))
+    );
+    return;
+  }
 
-      if (channelError) {
-        console.error(
-          '[webhook] channel lookup failed for phone_number_id:',
-          phoneNumberId,
-          channelError
-        );
-        continue;
-      }
-      if (!channelRow) {
-        console.error(
-          '[webhook] inbound message dropped — channel',
-          channelId,
-          'no longer exists for phone_number_id:',
-          phoneNumberId
-        );
-        continue;
-      }
-      if (channelRow.status === 'disabled') {
-        console.warn(
-          '[webhook] inbound message ignored — number is disabled:',
-          `${channelRow.name} (phone_number_id ${phoneNumberId}, channel ${channelId})`
-        );
-        continue;
-      }
+  // Handle status updates
+  if (Array.isArray(value.statuses)) {
+    await processStatuses(
+      value.statuses,
+      value.metadata?.phone_number_id,
+      entry.id,
+      pos,
+      guard
+    );
+  }
 
-      const decryptedAccessToken = decrypt(config.access_token);
+  // Handle incoming messages
+  if (!Array.isArray(value.messages) || !Array.isArray(value.contacts)) return;
 
-      for (let i = 0; i < value.messages.length; i++) {
-        const message = value.messages[i];
-        const contact = value.contacts[i] || value.contacts[0];
+  const phoneNumberId = value.metadata?.phone_number_id;
 
-        await processMessage(
+  // Antes de qualquer consulta (A-1): lista só de itens malformados não
+  // toca o banco.
+  const messages = await guard.wellFormed(
+    value.messages as unknown[],
+    isMessageItem,
+    (index) => malformedItem(guard, pos, 'message', index)
+  );
+  if (messages.length === 0) return;
+
+  // Find user's config by phone_number_id. `.single()` returns
+  // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
+  // operators see the real cause in logs. ≥2 rows shouldn't happen
+  // post-migration 013 (UNIQUE constraint), but a row created
+  // before the constraint, or a race, would still surface here.
+  const { data: configRows, error: configError } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('*')
+    .eq('phone_number_id', phoneNumberId);
+
+  if (configError) {
+    guard.error(
+      'Error fetching whatsapp_config for phone_number_id:',
+      phoneNumberId,
+      configError
+    );
+    return;
+  }
+
+  if (!configRows || configRows.length === 0) {
+    guard.error('No config found for phone_number_id:', phoneNumberId);
+    return;
+  }
+
+  if (configRows.length > 1) {
+    guard.error(
+      `Multiple configs (${configRows.length}) found for phone_number_id:`,
+      phoneNumberId,
+      '— inbound message dropped. Resolve duplicates so each number maps to a single account.',
+      'Account owners:',
+      configRows.map(
+        (r: { account_id: string; user_id: string }) =>
+          `${r.account_id} (admin ${r.user_id})`
+      )
+    );
+    return;
+  }
+
+  const config = configRows[0];
+
+  // `channel_id` já vive em `whatsapp_config` desde a 055; o
+  // fallback só cobre uma conta que nunca passou pelo backfill.
+  // Resolvido UMA vez, fora do laço de mensagens.
+  const channelId: string =
+    config.channel_id ??
+    (await resolveDefaultChannelId(supabaseAdmin(), config.account_id));
+
+  // SPEC 064 D-12 — número desativado não ingere.
+  //
+  // "Desativar" preserva canal, histórico e configuração e zera só
+  // o segredo (`access_token = ''`). Sem esta guarda, o `decrypt`
+  // logo abaixo estouraria com erro de criptografia, e pior: uma
+  // conversa nova nasceria num canal que não pode responder. Antes
+  // da 072 o caso equivalente (config apagada) caía no genérico
+  // "No config found" — agora o log diz o motivo certo.
+  const { data: channelRow, error: channelError } = await supabaseAdmin()
+    .from('channels')
+    .select('id, name, status')
+    .eq('id', channelId)
+    .eq('account_id', config.account_id)
+    .maybeSingle();
+
+  if (channelError) {
+    guard.error(
+      '[webhook] channel lookup failed for phone_number_id:',
+      phoneNumberId,
+      channelError
+    );
+    return;
+  }
+  if (!channelRow) {
+    guard.error(
+      '[webhook] inbound message dropped — channel',
+      channelId,
+      'no longer exists for phone_number_id:',
+      phoneNumberId
+    );
+    return;
+  }
+  if (channelRow.status === 'disabled') {
+    guard.warn(
+      '[webhook] inbound message ignored — number is disabled:',
+      `${channelRow.name} (phone_number_id ${phoneNumberId}, channel ${channelId})`
+    );
+    return;
+  }
+
+  // Token ilegível deste canal derruba só ESTE `change` (`isolated`): os
+  // `changes` de outro número no mesmo POST seguem.
+  const decryptedAccessToken = decrypt(config.access_token);
+
+  for (const { item: message, index: i } of messages) {
+    const contact = value.contacts[i] || value.contacts[0];
+
+    await guard.breathe();
+    // Uma mensagem que falha não derruba as seguintes do mesmo `change`.
+    await isolated(
+      guard,
+      {
+        entry: pos.e,
+        change: pos.c,
+        unit: 'message',
+        index: i,
+        phoneNumberId,
+      },
+      () =>
+        processMessage(
           message,
           contact,
           // Tenancy — drives every contact / conversation lookup
@@ -503,10 +668,10 @@ async function processWebhook(
           // the admin who saved the WhatsApp config.
           config.user_id,
           decryptedAccessToken,
-          channelId
-        );
-      }
-    }
+          channelId,
+          guard
+        )
+    );
   }
 }
 
@@ -552,23 +717,130 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
   return ii > ci;
 }
 
-async function handleStatusUpdate(
-  status: {
-    id: string;
-    status: string;
-    timestamp: string;
-    recipient_id: string;
-    errors?: Array<{ code: number; title?: string; message?: string }>;
-    pricing?: {
-      billable?: boolean;
-      pricing_model?: string;
-      category?: string;
-      type?: string;
-    };
-  },
-  // SPEC 076 §10.2 — `null` sem `metadata.phone_number_id`.
-  signals: WebhookPaymentSignals | null
+/** `messages.status` recusado pela CHECK da migração 001. */
+const PG_CHECK_VIOLATION = '23514';
+
+type WhatsAppStatus = NonNullable<
+  WhatsAppWebhookEntry['changes'][number]['value']['statuses']
+>[number];
+
+/** Item de forma inválida numa lista do `change`: só a posição vai ao log. */
+function malformedItem(
+  guard: WebhookPostGuard,
+  pos: { e: number; c: number },
+  unit: 'status' | 'message',
+  index: number
 ) {
+  guard.malformed(
+    `[webhook] ${unit} ignored — malformed:`,
+    JSON.stringify({ entry: pos.e, change: pos.c, unit, index })
+  );
+}
+
+function isMessageItem(item: unknown): item is WhatsAppMessage {
+  return isJsonObject(item);
+}
+
+/** Um `status` sem `id` não aponta para mensagem nenhuma. */
+function isStatusItem(item: unknown): item is WhatsAppStatus {
+  return isJsonObject(item) && typeof item.id === 'string' && item.id !== '';
+}
+
+/**
+ * Todos os `statuses` de um `change`, na conta do número (achado B-1 da
+ * revisão de segurança da SPEC 088).
+ *
+ * O escopo do segredo só prova que quem assinou fala pelo NÚMERO; o
+ * `statuses[].id` é texto livre. Por isso a conta é resolvida pela
+ * `whatsapp_config`, uma vez por `change`, e todo efeito de
+ * `handleStatusUpdate` fica dentro dela.
+ *
+ * Sem número (só passa pelo escopo com `META_APP_SECRET`): sem conta para
+ * filtrar e sem sinal de pagamento, como sempre foi.
+ */
+async function processStatuses(
+  rawStatuses: unknown[],
+  phoneNumberId: string | null | undefined,
+  entryWabaId: string,
+  pos: { e: number; c: number },
+  guard: WebhookPostGuard
+) {
+  // Antes de qualquer consulta (A-1): item malformado não toca o banco.
+  const statuses = await guard.wellFormed(rawStatuses, isStatusItem, (index) =>
+    malformedItem(guard, pos, 'status', index)
+  );
+  if (statuses.length === 0) return;
+
+  let accountId: string | null = null;
+  let signals: WebhookPaymentSignals | null = null;
+
+  if (phoneNumberId !== undefined && phoneNumberId !== null) {
+    const { owner, reason } = await resolveNumberOwner(
+      supabaseAdmin(),
+      phoneNumberId
+    );
+    if (!owner) {
+      guard.warn(
+        `[webhook] statuses ignored — no active account for the number (${reason}):`,
+        JSON.stringify(String(phoneNumberId).slice(0, 64))
+      );
+      return;
+    }
+    accountId = owner.accountId;
+    // SPEC 076 §10.2 — o retrato de pagamento vem de um cache de PROCESSO
+    // dentro do `signals` (R-10): criar um por `change` é barato.
+    signals = createWebhookPaymentSignals(supabaseAdmin(), {
+      phoneNumberId,
+      entryWabaId,
+      owner,
+      warn: (message) => guard.warn(message),
+    });
+  }
+
+  let foreign = 0;
+  for (const { item: status, index } of statuses) {
+    await guard.breathe();
+    // Um status quebrado não derruba os outros do mesmo `change` (B-6).
+    await isolated(
+      guard,
+      {
+        entry: pos.e,
+        change: pos.c,
+        unit: 'status',
+        index,
+        phoneNumberId,
+      },
+      async () => {
+        const outcome = await handleStatusUpdate(
+          status,
+          accountId,
+          signals,
+          guard
+        );
+        if (outcome === 'foreign') foreign++;
+      }
+    );
+  }
+  // Um aviso por `change`: a quantidade de statuses é de quem assinou.
+  if (foreign > 0) {
+    guard.warn(
+      `[webhook] ${foreign} status(es) ignored — message belongs to another account than the number:`,
+      JSON.stringify(String(phoneNumberId).slice(0, 64))
+    );
+  }
+}
+
+/** `foreign`: o `wamid` é de outra conta e nenhum efeito foi disparado. */
+async function handleStatusUpdate(
+  status: WhatsAppStatus,
+  // Conta do número do `change`; `null` sem `metadata.phone_number_id`.
+  accountId: string | null,
+  // SPEC 076 §10.2 — `null` sem `metadata.phone_number_id`.
+  signals: WebhookPaymentSignals | null,
+  guard: WebhookPostGuard
+): Promise<'handled' | 'foreign'> {
+  const logError = (...message: unknown[]) => guard.error(...message);
+
   // Meta's async "message undeliverable" callback — the only place this
   // error ever surfaces, since the send call itself already returned
   // 200. Computed once, up front, so both mirrors below (messages and
@@ -582,10 +854,11 @@ async function handleStatusUpdate(
   }
 
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status. No
-  //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
-  //    repeat across numbers), so this updates 0..N rows and must not
-  //    assume a single row.
+  //    already match the CHECK constraint on messages.status.
+  //    message_id is NOT unique (migration 009 — Meta ids repeat across
+  //    numbers), so this updates 0..N rows and must not assume a single
+  //    row — but only rows of the number's own account (B-1). PostgREST
+  //    can't filter an UPDATE by an embed, hence SELECT, then UPDATE by id.
   //
   //    SPEC 076 D-7 — `pricing` da Meta (`billable`/`category`) vai no
   //    MESMO UPDATE, sem 2ª escrita por status (todo `sent` e `delivered`
@@ -600,24 +873,46 @@ async function handleStatusUpdate(
     ...(errorMessage ? { error_message: errorMessage } : {}),
   };
   const pricingPatch = pricingPatchFor(read);
-  let { error: msgErr } = await supabaseAdmin()
-    .from('messages')
-    .update({ ...statusPatch, ...pricingPatch })
-    .eq('message_id', status.id);
+  // Leitura que falha é repetida UMA vez, aqui (L-2): o espelho e o webhook
+  // de saída usam o MESMO resultado. Reler só no fim deixava sair um
+  // `message.status_updated` de um status que o CRM não gravou.
+  const readMessages = () =>
+    findStatusMessages(supabaseAdmin(), status.id, accountId, logError);
+  let messages = await readMessages();
+  if (messages.failed) messages = await readMessages();
+  const messageIds = messages.own.map((m) => m.id);
 
-  if (
-    msgErr &&
-    Object.keys(pricingPatch).length > 0 &&
-    notePricingSchemaMissing(msgErr)
-  ) {
-    ({ error: msgErr } = await supabaseAdmin()
-      .from('messages')
-      .update(statusPatch)
-      .eq('message_id', status.id));
-  }
+  // O espelho deixou de ser gravado por falha do banco: o CRM segue no
+  // status anterior, então o webhook de saída não anuncia este.
+  let mirrorLost = false;
+  if (messageIds.length > 0) {
+    const updateMessages = (patch: Record<string, unknown>) =>
+      supabaseAdmin().from('messages').update(patch).in('id', messageIds);
 
-  if (msgErr) {
-    console.error('Error updating message status:', msgErr);
+    let patch: Record<string, unknown> = { ...statusPatch, ...pricingPatch };
+    let { error: msgErr } = await updateMessages(patch);
+
+    if (
+      msgErr &&
+      Object.keys(pricingPatch).length > 0 &&
+      notePricingSchemaMissing(msgErr)
+    ) {
+      patch = statusPatch;
+      ({ error: msgErr } = await updateMessages(patch));
+    }
+
+    // Falha passageira: UMA nova tentativa (o UPDATE é idempotente). Status
+    // fora do vocabulário do CRM (ex.: `played`) nunca será gravado: não se
+    // repete, e o evento segue saindo como sempre.
+    const outsideVocabulary = () => msgErr?.code === PG_CHECK_VIOLATION;
+    if (msgErr && !outsideVocabulary()) {
+      ({ error: msgErr } = await updateMessages(patch));
+    }
+
+    if (msgErr) {
+      mirrorLost = !outsideVocabulary();
+      guard.error('Error updating message status:', msgErr);
+    }
   }
 
   // Webhook fan-out for this status change happens at the END of this
@@ -628,17 +923,26 @@ async function handleStatusUpdate(
   //    (added in migration 003). The aggregate trigger on
   //    broadcast_recipients re-derives the parent broadcast's
   //    sent/delivered/read/failed counts automatically.
-  const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString();
+  //    Timestamp ausente/ilegível (B-6): o status NÃO é descartado; os
+  //    carimbos `sent_at`/`delivered_at`/`read_at` usam o nosso relógio,
+  //    a aproximação mais próxima do instante real.
+  const metaAt = parseMetaTimestamp(status.timestamp);
+  if (!metaAt) {
+    guard.warn(
+      '[webhook] status with missing or unreadable timestamp — using the server clock'
+    );
+  }
+  const tsIso = (metaAt ?? new Date()).toISOString();
 
-  const { data: recipient, error: recFetchErr } = await supabaseAdmin()
-    .from('broadcast_recipients')
-    .select('id, status, contact_id')
-    .eq('whatsapp_message_id', status.id)
-    .maybeSingle();
+  const recipientLookup = await findStatusRecipient(
+    supabaseAdmin(),
+    status.id,
+    accountId,
+    logError
+  );
+  const recipient = recipientLookup.own;
 
-  if (recFetchErr) {
-    console.error('Error fetching broadcast recipient:', recFetchErr);
-  } else if (
+  if (
     recipient &&
     // Guard transitions — forward-only on the success ladder, and
     // `failed` only from pre-delivered states.
@@ -657,15 +961,26 @@ async function handleStatusUpdate(
       .eq('id', recipient.id);
 
     if (recUpdateErr) {
-      console.error('Error updating broadcast recipient status:', recUpdateErr);
-    } else if (status.status === 'failed' && recipient.contact_id) {
+      guard.error('Error updating broadcast recipient status:', recUpdateErr);
+    } else if (status.status === 'failed' && recipient.contactId) {
       // Auto-limpeza de números mortos (§6.4) — best-effort.
       await detectDeadNumberOnFailure(supabaseAdmin(), {
-        contactId: recipient.contact_id,
+        contactId: recipient.contactId,
         errorMessage,
       });
     }
   }
+
+  // B-1 — o `wamid` existe e é de outra conta: nada daqui para baixo.
+  // `wamid` que não existe em conta NENHUMA segue: o status pode chegar
+  // antes do INSERT da mensagem, ou ser de um envio feito fora do CRM pelo
+  // mesmo número, e o 131042 vale para o WABA do número do mesmo jeito.
+  const isOwn = messageIds.length > 0 || recipient !== null;
+  if (!isOwn && (messages.foreign || recipientLookup.foreign)) {
+    return 'foreign';
+  }
+  // Leitura que falhou (posse desconhecida) também segue (L-1): o sinal só
+  // atinge o WABA do PRÓPRIO número, e a Meta não reenvia o 131042.
 
   // SPEC 076 §10.3 — sinal de pagamento (131042 liga; cobrável
   // `sent`/`delivered` posterior ao último erro limpa). Nunca lança — e o
@@ -675,52 +990,36 @@ async function handleStatusUpdate(
     try {
       await signals.handleStatus(status, read);
     } catch (err) {
-      console.error('[webhook] payment signal failed:', err);
+      guard.error('[webhook] payment signal failed:', err);
     }
   }
 
   // 3) Webhook fan-out for messages we store (inbox / API sends).
   //    Runs last so a slow subscriber can't delay the mirrors above.
-  //    Bounded to one row (message_id isn't unique) purely to resolve
-  //    the owning account for delivery.
-  const { data: msgRow } = await supabaseAdmin()
-    .from('messages')
-    .select(
-      'conversation_id, conversations(account_id, channel_id, channels(type))'
-    )
-    .eq('message_id', status.id)
-    .limit(1)
-    .maybeSingle();
+  //    One row (message_id isn't unique) purely to resolve the
+  //    conversation/channel, always of the number's own account — the
+  //    same read the mirror used: a row the mirror didn't see, or failed
+  //    to write, is not announced.
+  const target = mirrorLost ? undefined : messages.own[0];
 
-  if (msgRow) {
-    const conv = msgRow.conversations as {
-      account_id: string;
-      channel_id: string | null;
-      channels: { type: string } | { type: string }[] | null;
-    } | null;
-    const accountId = conv?.account_id;
-    if (accountId) {
-      // SPEC 049 §5.5 — purely additive, same fields as message.received
-      // / conversation.created: existing subscribers ignore what they
-      // don't know about.
-      const channelRel = conv?.channels;
-      const channelType = Array.isArray(channelRel)
-        ? channelRel[0]?.type
-        : channelRel?.type;
-      await dispatchWebhookEvent(
-        supabaseAdmin(),
-        accountId,
-        'message.status_updated',
-        {
-          whatsapp_message_id: status.id,
-          conversation_id: msgRow.conversation_id,
-          status: status.status,
-          channel_id: conv?.channel_id ?? null,
-          channel_type: channelType ?? null,
-        }
-      );
-    }
+  if (target) {
+    // SPEC 049 §5.5 — purely additive, same fields as message.received
+    // / conversation.created: existing subscribers ignore what they
+    // don't know about.
+    await dispatchWebhookEvent(
+      supabaseAdmin(),
+      target.accountId,
+      'message.status_updated',
+      {
+        whatsapp_message_id: status.id,
+        conversation_id: target.conversationId,
+        status: status.status,
+        channel_id: target.channelId,
+        channel_type: target.channelType,
+      }
+    );
   }
+  return 'handled';
 }
 
 /**
@@ -774,7 +1073,8 @@ async function processMessage(
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
   accessToken: string,
-  channelId: string
+  channelId: string,
+  guard: WebhookPostGuard
 ) {
   // Tudo o que acontece DEPOIS de uma mensagem entrar (contato,
   // conversa, janela de 24h, opt-out, flows, automações, IA, webhooks de
@@ -795,7 +1095,18 @@ async function processMessage(
   // ingest o usa tanto no `created_at` da mensagem quanto na âncora da
   // janela de sessão, e um `new Date()` aqui produziria uma âncora no
   // futuro sempre que o webhook chegasse atrasado.
-  const metaMessageAt = new Date(parseInt(message.timestamp) * 1000);
+  //
+  // Timestamp ausente/ilegível (B-6): a mensagem NÃO é descartada (perdê-la
+  // é pior que um horário aproximado) e usa o nosso relógio. Antes, uma
+  // `Date` inválida lançava `RangeError` dentro do ingest, depois de o
+  // contato e a conversa já existirem.
+  const metaMessageAtOrNull = parseMetaTimestamp(message.timestamp);
+  if (!metaMessageAtOrNull) {
+    guard.warn(
+      '[webhook] message with missing or unreadable timestamp — using the server clock'
+    );
+  }
+  const metaMessageAt = metaMessageAtOrNull ?? new Date();
 
   // Reactions aren't messages: the ingest never inserts into `messages`,
   // never bumps unread_count and never touches last_message_text for
@@ -827,7 +1138,7 @@ async function processMessage(
     const originalId =
       message.original_message_id || message.revoke?.original_message_id;
     if (!originalId) {
-      console.warn(
+      guard.warn(
         '[whatsapp webhook] evento revoke sem original_message_id — ignorado'
       );
       return;

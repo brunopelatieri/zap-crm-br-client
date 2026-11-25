@@ -962,7 +962,9 @@ is by `value.metadata.phone_number_id` only. Never relayed:
   channel's own Meta App Secret only speaks for the numbers whose channel
   stores that same App Secret (a number under a non-default Meta App needs
   its own App Secret saved to be relayed);
-- anything that belongs to another account.
+- anything that belongs to another account;
+- anything while your account is blocked;
+- deliveries above 50 per second per account (see **Volume** below).
 
 The QR-code (Evolution) channel is not covered; only Cloud API numbers.
 
@@ -1011,8 +1013,10 @@ over the raw request body. Parse the JSON only after the check.
 - Meta resends a webhook when it does not get a `200`, so the same event
   may reach you more than once. Dedupe on `messages[].id`, and on
   `statuses[].id` together with `status`.
-- **Volume.** Every Meta POST becomes a delivery. A broadcast to thousands
-  of contacts produces tens of thousands of `statuses` POSTs (`sent`,
+- **Volume.** Every relayed Meta POST becomes a delivery, up to **50 per
+  second per account** (counted per server process); the excess is dropped,
+  not retried, and does not count as a failure. A broadcast to thousands of
+  contacts produces tens of thousands of `statuses` POSTs (`sent`,
   `delivered`, `read`); size your target for it, or the 15-failure limit
   can trip within seconds.
 - The payload carries your contacts' phone numbers, names and message

@@ -233,6 +233,27 @@ describe('parseMetaTimestamp', () => {
       expect(parseMetaTimestamp(v)).toBeNull();
     }
   });
+
+  it.each([
+    ['milissegundos (ano 58868, o Postgres recusa)', '1795576195000'],
+    ['ano 5138 (o Postgres aceita)', '99999999999'],
+    ['fora do alcance de Date', '9'.repeat(30)],
+  ])('%s → null', (_label, raw) => {
+    expect(parseMetaTimestamp(raw)).toBeNull();
+  });
+
+  it('o limite é agora + 1 dia, inclusive', () => {
+    const now = 1790823600;
+    vi.useFakeTimers({ toFake: ['Date'], now: now * 1000 });
+    try {
+      expect(parseMetaTimestamp(now + 86_400)?.getTime()).toBe(
+        (now + 86_400) * 1000
+      );
+      expect(parseMetaTimestamp(now + 86_401)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('isPaymentMethodError', () => {
@@ -731,12 +752,18 @@ describe('createWebhookPaymentSignals', () => {
     ]);
   });
 
-  it('timestamp ilegível: ignora sem consultar', async () => {
-    const { db, ops } = makeDb({ table: standardTables({}) });
-    const s = createWebhookPaymentSignals(db, { phoneNumberId: 'pnid-7781' });
-    await s.handleStatus(failed131042('nope'));
-    expect(ops).toHaveLength(0);
-  });
+  // Sem instante utilizável não há como ordenar o erro com a limpeza; um
+  // carimbo no futuro distante prenderia o episódio para sempre.
+  it.each(['nope', '1795576195000', '99999999999'])(
+    'timestamp ilegível (%s): ignora sem consultar',
+    async (raw) => {
+      const { db, ops } = makeDb({ table: standardTables({}) });
+      const s = createWebhookPaymentSignals(db, { phoneNumberId: 'pnid-7781' });
+      await s.handleStatus(failed131042(raw));
+      await s.handleStatus(billable('delivered', raw));
+      expect(ops).toHaveLength(0);
+    }
+  );
 
   it('falha na leitura do retrato: não lança e não chama a função', async () => {
     const { db, rpcs } = makeDb({

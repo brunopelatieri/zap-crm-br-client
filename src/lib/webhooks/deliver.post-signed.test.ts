@@ -11,6 +11,7 @@ import { isDeliverableUrl } from './ssrf';
 type FetchCall = [string, RequestInit & { headers: Record<string, string> }];
 
 beforeEach(() => {
+  vi.mocked(isDeliverableUrl).mockClear();
   vi.mocked(isDeliverableUrl).mockResolvedValue(true);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -128,6 +129,63 @@ describe('postSignedPayload', () => {
       error: 'network',
       status: null,
     });
+  });
+
+  it.each([
+    'http://1.1.1.1/x',
+    'http://t.test/hook',
+    'ftp://t.test/x',
+    'https://user:pw@t.test/x?t=1',
+    'https://user@t.test/x?t=1',
+    'https://:pw@t.test/x?t=1',
+    'not a url',
+  ])('SPEC 088 M-2: %s é recusada antes de DNS e fetch', async (url) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await postSignedPayload({ ...base, url });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'not_public',
+      status: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(isDeliverableUrl).not.toHaveBeenCalled();
+    if (result.ok) throw new Error('unreachable');
+    for (const leak of ['pw', 't=1', '/x', 'user', 't.test']) {
+      expect(result.message).not.toContain(leak);
+    }
+  });
+
+  it('SPEC 088 B-8: erro do fetch com a URL inteira não vaza na mensagem', async () => {
+    const url = 'https://t.test/x?t=1';
+    const err = new TypeError(`fetch failed for ${url} with pw`);
+    (err as { cause?: unknown }).cause = {
+      code: 'ENOTFOUND',
+      message: `getaddrinfo ENOTFOUND ${url}`,
+    };
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err));
+
+    const result = await postSignedPayload({ ...base, url });
+
+    expect(result).toMatchObject({ ok: false, error: 'network' });
+    if (result.ok) throw new Error('unreachable');
+    expect(result.message).toBe('request failed (ENOTFOUND)');
+    for (const leak of ['pw', 't=1', '/x', 't.test']) {
+      expect(result.message).not.toContain(leak);
+    }
+  });
+
+  it('SPEC 088 B-8: code do cause fora do padrão é descartado', async () => {
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = { code: 'https://t.test/x?t=1' };
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err));
+
+    const result = await postSignedPayload(base);
+
+    if (result.ok) throw new Error('unreachable');
+    expect(result.message).toBe('request failed');
   });
 
   it('a mensagem de falha não carrega URL nem chave', async () => {

@@ -1,14 +1,14 @@
 # SPEC 088 — Repetidor do webhook da Meta
 
-| Campo            | Valor                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status           | **Implementada, não commitada** — D-1…D-11 ratificadas em 2026-11-23. F1 (migração 101, aplicada no `vn`), F2, F3 e F4 prontas no working tree; F5 (documentação) concluída. Revisão de segurança feita; corrigidos em 2026-11-23 o achado 1 (o `app_secret` de um canal só fala pelos números que o guardam, §4.1) e o achado 2 (guarda SSRF interpreta IPv6 de verdade, R-2). **Pendentes:** F6 (teste manual do §9 em produção), decisão do mantenedor sobre o mesmo vetor do achado 1 no ingest, e a fixture de `statuses` (POST real da Meta; só a de mensagem existe) |
-| Data             | 2026-11-23                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Escopo           | `POST /api/whatsapp/webhook` (gancho), `src/lib/webhooks/` (módulo novo + refatoração da entrega), rotas `/api/account/meta-relay`, cartão em "Chaves de API"                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Depende de       | SPEC 064 (N números oficiais por conta), migração 028 (`sign.ts`, `ssrf.ts`, `deliver.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Migração         | **`101_meta_webhook_relay.sql`** — tabela `meta_webhook_relays` + função `record_meta_relay_failure`. Conferir o número em `status.md` antes de criar                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Dependências npm | Nenhuma                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| i18n             | Chaves novas em `Settings.apiKeys.metaRelay.*` e `Activity.actions.*` (D-10), nos dois dicionários                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Campo            | Valor                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status           | **Implementada; F1 a F5 commitadas, F6 parcial** — D-1…D-11 ratificadas em 2026-11-23. No HEAD: F1 (migração 101, aplicada no `vn`), F2, F3, F4, F5, ingest escopado pelo segredo que assinou (§4.1), M-1 itens 1 a 3 (§4.4) e as fixtures reais de `statuses` e `messages`. **No working tree em 2026-11-25, a commitar pelo mantenedor:** correções B-1, B-2, B-4, B-6, B-8 e M-2 e as da revisão integrada, A-1 e L-1 a L-3 (§11). **F6 parcial:** itens 1 a 5 e 11 do §9 testados em produção em 2026-11-25; itens 6 a 10 e 12 a 14 não executados |
+| Data             | 2026-11-23                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Escopo           | `POST /api/whatsapp/webhook` (gancho), `src/lib/webhooks/` (módulo novo + refatoração da entrega), rotas `/api/account/meta-relay`, cartão em "Chaves de API"                                                                                                                                                                                                                                                                                                                                                                                          |
+| Depende de       | SPEC 064 (N números oficiais por conta), migração 028 (`sign.ts`, `ssrf.ts`, `deliver.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Migração         | **`101_meta_webhook_relay.sql`** — tabela `meta_webhook_relays` + função `record_meta_relay_failure`. Conferir o número em `status.md` antes de criar                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Dependências npm | Nenhuma                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| i18n             | Chaves novas em `Settings.apiKeys.metaRelay.*` e `Activity.actions.*` (D-10), nos dois dicionários                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ---
 
@@ -96,7 +96,7 @@ normalmente; o repetidor é uma saída a mais, em paralelo.
 | `src/app/api/account/meta-relay/route.ts` **(novo)**                      | `GET`, `PUT`, `DELETE` (§5.1)                                                                                      |
 | `src/app/api/account/meta-relay/secret/route.ts` **(novo)**               | `POST` — gera chave nova                                                                                           |
 | `src/app/api/account/meta-relay/test/route.ts` **(novo)**                 | `POST` — teste de conectividade                                                                                    |
-| `src/lib/rate-limit.ts`                                                   | `RATE_LIMITS.metaRelayTest` (6/min por conta)                                                                      |
+| `src/lib/rate-limit.ts`                                                   | `RATE_LIMITS.metaRelayTest` (6/min por conta) e `RATE_LIMITS.metaRelayDelivery` (50/s por conta, achado B-2)       |
 | `src/components/settings/meta-relay-settings.tsx` **(novo)**              | O cartão (§6)                                                                                                      |
 | `src/components/settings/api-keys-settings.tsx`                           | Renderiza o cartão abaixo da lista de chaves, só para admin+                                                       |
 | `messages/en.json`, `messages/pt-BR.json`                                 | `Settings.apiKeys.metaRelay.*`                                                                                     |
@@ -144,7 +144,8 @@ webhook da Meta válido, só com dados da conta.
 ### 2.3 Semântica
 
 Uma tentativa por POST da Meta, timeout de 5 s (`DELIVERY_TIMEOUT_MS`),
-`redirect: 'manual'`, `isDeliverableUrl` antes do `fetch`. Sem garantia
+`redirect: 'manual'`, só `https` e sem credenciais na URL (recusado antes
+do DNS), `isDeliverableUrl` antes do `fetch`. Sem garantia
 de ordem. A Meta reenvia quando não recebe `200`, então o mesmo evento
 pode chegar mais de uma vez: o consumidor deduplica por `messages[].id`
 e por `statuses[].id` + `status`. Sucesso zera `failure_count`; a 15ª
@@ -264,11 +265,11 @@ automações de B. Regra, por `change` (helper compartilhado
   2026-11-24 (leitura): os 2 números conectados estão em Apps distintos,
   cada um com o próprio `app_secret`; o terceiro está `disabled` e sem
   segredo. Nenhum número ativo é afetado hoje.
-- **Risco remanescente (documentado, não corrigido):** o espelho de
-  `statuses` atualiza `messages`/`broadcast_recipients` pelo `wamid`, sem
-  filtrar pela conta do número. O admin de A, com o próprio número no
-  escopo, ainda poderia mudar o status de uma mensagem de B **se
-  conhecesse o `wamid`** dela (opaco, não exposto a outras contas).
+- **`statuses` ficam na conta do número** (B-1 da revisão final, tratado
+  em 2026-11-25): o escopo acima só prova que quem assinou fala pelo
+  número; o `statuses[].id` é texto livre. A conta é resolvida uma vez por
+  `change` (`resolveNumberOwner`) e o espelho só toca mensagens e disparos
+  dela (§11).
 
 ### 4.2 Função pura
 
@@ -304,11 +305,27 @@ export async function relayMetaWebhook(
    (`account_id, channel_id, phone_number_id`) e o `status` dos canais.
    No máximo duas consultas.
 3. `planMetaRelay`.
-4. Para cada conta com repetidor ligado **e** plano: `postSignedPayload`
+4. **Conta bloqueada não recebe (achado B-4).** Das contas com repetidor
+   ligado **e** plano, uma única consulta a `accounts` (`id, blocked_at`,
+   `in(ids)`); só segue quem existe e tem `blocked_at` nulo. **Falha
+   fechada:** erro de leitura ⇒ ninguém é repassado, com um
+   `console.error` sem corpo/URL/chave. Justificativa: o repasse é
+   melhor esforço (R-7), entregar a conta bloqueada é o lado danoso, e
+   um banco que não responde aqui dificilmente atenderia o resto do POST
+   (o oposto de `loadBlockedAccountIds`, que falha aberta porque tem
+   o backstop de envio conta a conta; o repasse não tem backstop).
+   Sem plano para ninguém, nem consulta.
+5. **Teto por conta (achado B-2).** Cada entrega passa por
+   `checkRateLimit('meta-relay:<account_id>', RATE_LIMITS.metaRelayDelivery)`
+   (50 por janela fixa de 1 s). O excedente é **descartado sem `fetch`**,
+   com um `console.warn` por conta e por janela (só `account_id` e o
+   teto) e **não conta como falha**: não mexe em `failure_count` nem
+   aciona o auto-desligamento. Conta bloqueada não consome o orçamento.
+6. Para cada conta que passou nos dois filtros: `postSignedPayload`
    com os cabeçalhos do §2.2, em `Promise.allSettled`. Sucesso:
    `failure_count = 0`, `last_delivery_at = now()`. Falha:
    `record_meta_relay_failure(account_id, 15)`.
-5. Nunca lança. Tabela ausente (código implantado antes da 101): encerra
+7. Nunca lança. Tabela ausente (código implantado antes da 101): encerra
    em silêncio, com um aviso por processo (molde de
    `notePricingSchemaMissing`, em `billing-signal.ts`).
 
@@ -526,20 +543,172 @@ npm run typecheck && npm run i18n:check && npm run lint && npm run test && npm r
 
 ## 11. Segurança e riscos
 
-| #    | Ponto                                                                                                              | Tratamento                                                                                                                                                                                                                        |
-| ---- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R-1  | **Vazamento entre contas.**                                                                                        | §4: dono só pelo número, fail-closed; testes 7.1.2 e manual 11                                                                                                                                                                    |
-| R-2  | **SSRF.** A URL vem do usuário e quem requisita é o servidor.                                                      | `isDeliverableUrl` + `redirect: 'manual'` em toda entrega e no teste; teste não aceita URL no corpo nem devolve resposta. A guarda interpreta IPv6 de verdade (IPv4 embutido em hex, NAT64, 6to4; achado 2 da revisão)            |
-| R-3  | **Chave.**                                                                                                         | Cifrada em repouso, mostrada uma vez, nunca logada, tabela sem policy; rotação invalida a anterior na hora                                                                                                                        |
-| R-4  | **LGPD.** O payload leva telefone, nome e texto do contato para fora do CRM.                                       | Só admin+ configura; aviso no cartão; registro de atividade (D-10)                                                                                                                                                                |
-| R-5  | **Volume.** Um disparo de 10 mil contatos gera dezenas de milhares de POSTs de status, e cada um vira uma entrega. | Aceito: é o comportamento pedido. Documentar para o consumidor                                                                                                                                                                    |
-| R-6  | **Desligamento por falhas.** Com volume alto, 15 falhas seguidas acontecem em segundos.                            | A tela mostra o motivo e a data; notificação ativa fica fora desta SPEC                                                                                                                                                           |
-| R-7  | **Perda de evento.** Sem fila: destino fora do ar perde o que chegou no intervalo.                                 | Mesmo limite dos webhooks de saída atuais                                                                                                                                                                                         |
-| R-8  | **Custo por POST.** Uma consulta a mais em todo POST da Meta, mesmo sem repetidor ligado.                          | Tabela pequena. Cache de processo com TTL curto só se medir problema                                                                                                                                                              |
-| R-9  | **DNS rebinding** no destino.                                                                                      | Risco residual já documentado no topo de `ssrf.ts`                                                                                                                                                                                |
-| R-10 | **POST anônimo caro** (M-1 da revisão final): corpo sem limite e banco antes da assinatura.                        | Itens 1 a 3 corrigidos em 2026-11-24 (§4.4). Residual: cabeçalho bem formado e falso ainda custa uma consulta, as decifrações e N+1 HMACs de até 4 MiB; o cache de segredos e o limite no Traefik (itens 4 e 5) ficam para depois |
+| #    | Ponto                                                                                                                                                                          | Tratamento                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R-1  | **Vazamento entre contas.**                                                                                                                                                    | §4: dono só pelo número, fail-closed; testes 7.1.2 e manual 11                                                                                                                                                                                                                                                                                                                                        |
+| R-2  | **SSRF.** A URL vem do usuário e quem requisita é o servidor.                                                                                                                  | `isDeliverableUrl` + `redirect: 'manual'` em toda entrega e no teste; teste não aceita URL no corpo nem devolve resposta. A guarda interpreta IPv6 de verdade (IPv4 embutido em hex, NAT64, 6to4; achado 2 da revisão)                                                                                                                                                                                |
+| R-3  | **Chave.**                                                                                                                                                                     | Cifrada em repouso, mostrada uma vez, nunca logada, tabela sem policy; rotação invalida a anterior na hora                                                                                                                                                                                                                                                                                            |
+| R-4  | **LGPD.** O payload leva telefone, nome e texto do contato para fora do CRM.                                                                                                   | Só admin+ configura; aviso no cartão; registro de atividade (D-10)                                                                                                                                                                                                                                                                                                                                    |
+| R-5  | **Volume.** Um disparo de 10 mil contatos gera dezenas de milhares de POSTs de status, e cada um vira uma entrega até o teto do R-11.                                          | Aceito até 50 entregas/s por conta; o excedente é descartado (R-11). Documentado para o consumidor                                                                                                                                                                                                                                                                                                    |
+| R-6  | **Desligamento por falhas.** Com volume alto, 15 falhas seguidas acontecem em segundos.                                                                                        | A tela mostra o motivo e a data; notificação ativa fica fora desta SPEC                                                                                                                                                                                                                                                                                                                               |
+| R-7  | **Perda de evento.** Sem fila: destino fora do ar perde o que chegou no intervalo.                                                                                             | Mesmo limite dos webhooks de saída atuais                                                                                                                                                                                                                                                                                                                                                             |
+| R-8  | **Custo por POST.** Uma consulta a mais em todo POST da Meta, mesmo sem repetidor ligado.                                                                                      | Tabela pequena. Cache de processo com TTL curto só se medir problema                                                                                                                                                                                                                                                                                                                                  |
+| R-9  | **DNS rebinding** no destino.                                                                                                                                                  | Risco residual já documentado no topo de `ssrf.ts`                                                                                                                                                                                                                                                                                                                                                    |
+| R-10 | **POST anônimo caro** (M-1 da revisão final): corpo sem limite e banco antes da assinatura.                                                                                    | Itens 1 a 3 corrigidos em 2026-11-24 (§4.4). Residual: cabeçalho bem formado e falso ainda custa uma consulta, as decifrações e N+1 HMACs de até 4 MiB; o cache de segredos e o limite no Traefik (itens 4 e 5) ficam para depois                                                                                                                                                                     |
+| R-11 | **Refletor de POST** (B-2 da revisão final): o admin da conta assina com o próprio `app_secret` POSTs ilimitados do próprio número, e cada um sai para a URL que ele escolheu. | **Tratado em 2026-11-25** (§4.3 passo 5): teto de 50 entregas/s por conta, excedente descartado sem falha. Limite do `rate-limit.ts`: em memória, **por processo** (N instâncias ⇒ N× o teto) e janela fixa (rajada na virada pode levar até 2×). Alvo que responde 2xx continua sem desligar, mas agora a vazão é limitada. Eventos descartados não são reenviados (R-7)                             |
+| R-12 | **Conta bloqueada** (B-4 da revisão final): a SPEC 062 §4.3 diz que a conta bloqueada para de enviar; a exceção D-9 é só para **guardar** o inbound.                           | **Tratado em 2026-11-25** (§4.3 passo 4): conta bloqueada não recebe repasse, falha fechada. **Limitação aceita:** o admin bloqueado não consegue desligar o repetidor (`requireRole` recusa), então ele fica ligado e inerte até o desbloqueio, sem contar falha. **Fora desta correção:** os webhooks de saída (`dispatchWebhookEvent`) têm o mesmo buraco, pré-existente, a tratar em SPEC própria |
 
 Logs: só `account_id`, status HTTP e duração. Nunca corpo, chave ou URL completa.
+
+**M-2 e B-8 da revisão final: tratados em 2026-11-25.** `postSignedPayload`
+(`deliver.ts`, usado pelos webhooks de saída e pelo repetidor) recusa, antes
+da resolução DNS e do `fetch`, URL com `protocol !== 'https:'` ou com
+`user:senha@`. A falha volta como `not_public` (a UI e o botão de teste
+mantêm o contrato `timeout | not_public | http_error | network`, sem chave
+i18n nova). B-8: o campo `message` do resultado agora é sempre texto fixo
+ou classe do erro mais código de sistema (`ENOTFOUND`...); a mensagem crua do
+`fetch`, que traz a URL inteira com senha e query, não é mais copiada nem
+logada, e o log de `dispatchWebhookEvent` mostra só `id` do endpoint, classe
+do erro e status. Conferido em leitura no `vn` em 2026-11-25: `webhook_endpoints`
+tem 0 linhas e `meta_webhook_relays` tem 1, https, então a mudança não derruba
+nenhuma entrega existente.
+**Fora desta correção** (SPEC própria, com confirmação do mantenedor): fixar o
+IP resolvido no socket (DNS rebinding, R-9, e o oráculo de `/test`, B-7);
+`CHECK (url LIKE 'https://%')` em `webhook_endpoints` (exige migração; sem
+ela, `http://` gravado direto pelo PostgREST apenas falha na entrega e conta
+para o desligamento automático); timeout de DNS (B-3).
+
+**B-1 da revisão final: tratado em 2026-11-25.** O espelho de `statuses`
+localizava a mensagem só pelo `wamid`: o admin de A, assinando com o próprio
+segredo um `change` do próprio número, mudava o status de uma mensagem de B,
+marcava o contato de B como inválido (131026) e disparava
+`message.status_updated` para B. Agora:
+
+- A conta do número vem da `whatsapp_config`, uma vez por `change`
+  (`src/lib/whatsapp/number-owner.ts`, cache de processo de 15 s que o sinal
+  de pagamento reaproveita). Número desconhecido, duplicado, de canal
+  `disabled` ou com falha de leitura nas duas tentativas (L-2): os `statuses` do `change` são ignorados
+  com um `console.warn` (sem corpo) e o resto do POST segue.
+- `messages` e `broadcast_recipients` são lidos junto com a conta da conversa
+  e do disparo (`src/lib/whatsapp/status-scope.ts`) e só as linhas da conta
+  são atualizadas, por `id`. `messages.channel_id` não serve de filtro: é nulo
+  nas 3.920 mensagens do `vn` com `message_id` (leitura de 2026-11-25).
+- `wamid` que existe só em outra conta: nenhum efeito (espelho, pricing,
+  sinal de pagamento, número morto, webhook de saída). `wamid` que não existe
+  em conta nenhuma: nada a espelhar, mas o sinal de pagamento do próprio
+  número continua (status antes do INSERT, ou envio feito fora do CRM).
+- O contato do destinatário também precisa ser da conta: a RLS de
+  `broadcast_recipients` só confere o disparo.
+- `META_APP_SECRET` sem número no `change`: como antes.
+
+**B-6 da revisão final: tratado em 2026-11-25.** Em `processWebhook`, uma
+exceção num `change` derrubava os seguintes do mesmo POST, e a Meta já tinha
+recebido `200` (sem reentrega, perda definitiva). Casos reproduzidos:
+`decrypt` de token inválido, timestamp ausente/ilegível (`RangeError` no
+`toISOString()`), `changes` ausente. Se a Meta juntasse contas num POST, o
+token corrompido de A apagaria os eventos de B (o repetidor já era imune).
+Agora, em `route.ts`:
+
+- **Isolamento por unidade.** Cada `change`, cada `status` e cada mensagem
+  roda dentro de `isolated()`, que nunca lança. O erro vai para um
+  `console.error` com `unit` (`change`/`status`/`message`), posição
+  (`entry`, `change`, índice), `phone_number_id` truncado em 64, classe do
+  erro (e `code`, quando houver) e mensagem truncada em 200, sem valores entre
+  aspas (o Postgres cita a entrada rejeitada). Nunca o corpo, o token, o
+  segredo nem o telefone do contato. A exceção não chega ao `after()`; o `200` e o repetidor
+  não mudam. O log do ingest que rejeita mudou de
+  `Error processing webhook:` + objeto para esse JSON curto. Um token ilegível
+  derruba só os `changes` daquele canal.
+- **Defesa de forma.** `entry` que não é lista: o corpo é ignorado com aviso.
+  `entry` nulo ou sem `changes` em lista: pula o entry (aviso). `change` ou
+  `value` nulo/não objeto: pula o `change` (aviso). `statuses`, `messages` e
+  `contacts` que não são listas: nada a processar. Forma inválida é aviso, não
+  erro: é esperada de quem assina.
+- **Timestamp ausente, não numérico ou fora do alcance de `Date`
+  (decisão):** o item **não é descartado**; usa-se o relógio do servidor, com
+  um `console.warn` sem valor. Status: `sent_at`/`delivered_at`/`read_at` do
+  disparo levam o instante de recebimento (perder o espelho de entrega por um
+  carimbo seria pior). Mensagem: `occurredAt` = agora (antes a `Date` inválida
+  chegava ao ingest e lançava depois de contato e conversa existirem, deixando
+  conversa vazia). Limite: um evento **atrasado** e sem timestamp ganha o
+  instante do recebimento, e aí a âncora da janela de 24 h fica adiante da real
+  e alonga a janela (o aviso da SPEC 045 no próprio `route.ts`). Irrelevante
+  com a Meta real, que sempre manda o timestamp. Timestamp numérico legível segue como antes; a leitura agora
+  é estrita (`parseMetaTimestamp`): `0`, negativo ou texto com sufixo
+  (`"1786000000x"`) caem no relógio do servidor, em vez de passar pelo
+  `parseInt`.
+- **Fora desta correção:** escopo de signer/conta, validação (M-1), o
+  repetidor, `deliver.ts`, `ssrf.ts` e o cache de segredos. Limite aceito: o
+  isolamento não reprocessa; o que falhou foi perdido, como sempre foi (R-7).
+  `handleTemplateWebhookChange` também fica isolado por `change`
+  (`accountIdsForSigner`, cujo resultado é memorizado por POST, nunca rejeita).
+
+**A-1 da revisão integrada: tratado em 2026-11-25.** Com o isolamento do B-6,
+cada item quebrado virou uma exceção e uma linha de log sem parar o POST. Um
+POST assinado de 4 MiB com `"statuses":[null,…]` (830 mil itens) parava o
+processo, e portanto todas as contas, por 53 s e escrevia 188 MB de log;
+`statuses:[0,…]` fazia 2,5 milhões de consultas em série. Agora cada POST tem
+um `WebhookPostGuard` (`src/lib/whatsapp/webhook-post-guard.ts`):
+
+- **Forma antes do banco.** `entry` sem `changes`, `change`/`value` que não é
+  objeto, mensagem que não é objeto e `status` sem `id` (string não vazia) são
+  pulados antes de qualquer consulta, e até a conta do número só é lida se
+  sobrar item bem formado.
+- **Abandono.** No 100º item de **forma** inválida o resto do POST é
+  descartado; o que veio antes já foi processado. Falha ao processar item bem
+  formado (banco fora do ar) **não** conta.
+- **Teto de 20.000 itens** por POST (`entry` + `change` + `status` +
+  mensagem), com um aviso. A Meta documenta no máximo 1.000 atualizações por
+  lote (Graph API Webhooks, página genérica; a do WhatsApp só cita 3 MB): no
+  pior caso, 3.000 itens.
+- **Log:** no máximo 20 linhas da rota por POST (das quais até 10 de aviso; o
+  resto fica para erro, que o ruído do corpo não cala) mais uma de resumo (`POST cut
+short` ou `POST processed`), com as contagens. Vale para o que recebe o guard
+  (rota, `status-scope`, eventos de template e o aviso sem I/O do sinal de
+  pagamento); ingest, mídia e `number-owner` logam por conta própria, sempre
+  depois de I/O e limitados pelo teto de itens.
+- **Event loop** cedido (`setImmediate`) a cada 100 itens.
+
+Não mudam o `200` imediato, o `rawBody` do repetidor, a ordem de validação
+(M-1), o escopo do segredo e da conta (B-1) nem o isolamento (B-6).
+
+**L-1 a L-3 da revisão integrada: tratados em 2026-11-25.**
+
+- **L-1:** falha de leitura não descarta mais o sinal de pagamento (131042 ou
+  limpeza): ele só atinge o WABA do próprio número. `wamid` que se sabe ser de
+  outra conta continua sem efeito nenhum.
+- **L-2:** a leitura de `messages` que falha é repetida uma vez **antes** do
+  espelho, e o webhook de saída usa o mesmo resultado (não há mais releitura
+  no fim): sem linha no espelho, não sai `message.status_updated`. A leitura
+  do dono do número também ganha uma nova tentativa; o negativo segue sem
+  cache. O **UPDATE** do espelho que falha também é repetido uma vez e, se
+  falhar de novo, o evento não sai (o disparo e o sinal de pagamento seguem).
+  Exceção: status que a CHECK de `messages.status` recusa (`23514`, ex.:
+  `played`) nunca será gravado; não se repete e o evento sai como sempre saiu.
+- **L-3:** timestamp além de agora + 1 dia é ilegível (relógio do servidor,
+  com aviso). Em milissegundos, `"1795576195000"` dá o ano 58868, que o
+  Postgres recusa (`pg_input_is_valid` = `false` no `vn`). O teto
+  fica em `parseMetaTimestamp`, então vale também para o sinal de pagamento:
+  131042 ou cobrável com carimbo ilegível é ignorado com aviso (regra da SPEC
+  076), porque um ano aceito pelo Postgres (5138) gravaria um
+  `last_payment_error_at` que nenhuma mensagem cobrável limparia.
+
+**Riscos conhecidos, fora de escopo (revisão integrada), sem correção aqui:**
+
+- **I-4:** `findStatusMessages` lê sem filtro de conta e sem ordem. Quem
+  conhece um `wamid` de outra conta e insere na própria conta mais linhas com
+  esse `message_id` do que o limite do PostgREST (padrão 1.000) pode empurrar a
+  linha da outra para fora do resultado, e aquele status se perde. Plausível,
+  não reproduzido.
+- **I-5:** `number-owner.ts` não confere `channel.account_id`, como fazem o
+  ingest e o repetidor. Sem efeito entre contas.
+- **I-6:** número que troca de conta fica até 15 s na conta antiga (a sessão de
+  pagamento, até 30 s); `invalidatePaymentSignalCache` não limpa o cache de
+  dono. Aceito.
+- **I-7:** pré-existentes: `Error updating message status:` imprime o objeto do
+  PostgREST, cujo `details` pode trazer a linha inteira; e
+  `detectDeadNumberOnFailure` olha as duas últimas falhas do contato sem
+  filtrar a conta do disparo.
 
 ---
 

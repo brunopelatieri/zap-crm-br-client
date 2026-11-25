@@ -54,6 +54,7 @@ import {
   type ReadStatusResult,
   type WebhookStatusItem,
 } from './billing-monitor';
+import type { NumberOwner } from './number-owner';
 
 export type PaymentSignalKind = 'payment_error' | 'billable_ok';
 
@@ -130,7 +131,7 @@ async function lookupTarget(
   db: SupabaseClient,
   input: { phoneNumberId: string; entryWabaId?: string | null }
 ): Promise<TargetLookup> {
-  const { phoneNumberId, entryWabaId } = input;
+  const { phoneNumberId } = input;
 
   const { data, error } = await db
     .from('whatsapp_config')
@@ -157,23 +158,35 @@ async function lookupTarget(
     return { kind: 'none' };
   }
 
-  const row = rows[0]!;
-  if (!row.waba_id) {
+  return targetFromOwner(
+    { accountId: rows[0]!.account_id, wabaId: rows[0]!.waba_id },
+    input
+  );
+}
+
+/** Alvo a partir da conta/WABA já lidos da `whatsapp_config`. */
+function targetFromOwner(
+  owner: NumberOwner,
+  input: { phoneNumberId: string; entryWabaId?: string | null }
+): TargetLookup {
+  const { phoneNumberId, entryWabaId } = input;
+  const { accountId, wabaId } = owner;
+  if (!wabaId) {
     console.warn(
       `[billing-signal] skipped pnid=${maskId(phoneNumberId)} reason=no_waba_id`
     );
     return { kind: 'none' };
   }
 
-  if (entryWabaId && entryWabaId !== row.waba_id) {
+  if (entryWabaId && entryWabaId !== wabaId) {
     console.warn(
-      `[billing-signal] waba mismatch pnid=${maskId(phoneNumberId)} entry=${maskId(entryWabaId)} config=${maskId(row.waba_id)} — using config`
+      `[billing-signal] waba mismatch pnid=${maskId(phoneNumberId)} entry=${maskId(entryWabaId)} config=${maskId(wabaId)} — using config`
     );
   }
 
   return {
     kind: 'ok',
-    target: { accountId: row.account_id, wabaId: row.waba_id, phoneNumberId },
+    target: { accountId, wabaId, phoneNumberId },
   };
 }
 
@@ -236,11 +249,22 @@ const sessionCache = new Map<
   { promise: Promise<SessionState | null>; expiresAt: number }
 >();
 
+interface SessionInput {
+  phoneNumberId: string;
+  entryWabaId?: string | null;
+  /** Dono já resolvido pelo chamador: dispensa a leitura da config. */
+  owner?: NumberOwner;
+  /** Aviso sem I/O por status: o webhook limita as linhas por POST. */
+  warn?: (message: string) => void;
+}
+
 async function loadSession(
   db: SupabaseClient,
-  input: { phoneNumberId: string; entryWabaId?: string | null }
+  input: SessionInput
 ): Promise<SessionState | null> {
-  const found = await lookupTarget(db, input);
+  const found = input.owner
+    ? targetFromOwner(input.owner, input)
+    : await lookupTarget(db, input);
   if (found.kind === 'error') return null;
   if (found.kind === 'none') {
     return { target: null, pending: false, lastErrorAtMs: null };
@@ -280,7 +304,7 @@ async function loadSession(
  */
 function getSession(
   db: SupabaseClient,
-  input: { phoneNumberId: string; entryWabaId?: string | null }
+  input: SessionInput
 ): Promise<SessionState | null> {
   const key = input.phoneNumberId;
   const now = Date.now();
@@ -559,7 +583,18 @@ export function signalKindForStatus(
   return null;
 }
 
-/** `timestamp` do status da Meta (segundos, string) → Date, ou `null`. */
+/** Folga para o relógio da Meta estar adiante do nosso. */
+const META_FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * `timestamp` da Meta (segundos, string) → Date, ou `null` se ausente, não
+ * numérico ou fora do alcance. Nunca uma `Date` inválida: o `toISOString()`
+ * dela lança e levava junto o resto do POST (achado B-6 da SPEC 088).
+ *
+ * Mais de um dia no futuro também é ilegível (L-3): milissegundos no lugar
+ * de segundos dão o ano 58868, que o Postgres recusa, e um ano aceito (5138)
+ * gravaria um `last_payment_error_at` que nenhuma mensagem cobrável limpa.
+ */
 export function parseMetaTimestamp(raw: unknown): Date | null {
   const n =
     typeof raw === 'number'
@@ -568,7 +603,9 @@ export function parseMetaTimestamp(raw: unknown): Date | null {
         ? Number(raw)
         : NaN;
   if (!Number.isFinite(n) || n <= 0) return null;
-  return new Date(n * 1000);
+  const date = new Date(n * 1000);
+  // `NaN <= n` é falso: cobre a `Date` inválida.
+  return date.getTime() <= Date.now() + META_FUTURE_TOLERANCE_MS ? date : null;
 }
 
 /**
@@ -624,11 +661,12 @@ export interface WebhookPaymentSignals {
  * A sessão (conta + WABA + retrato) é lida preguiçosamente — só quando
  * um status carrega sinal (131042, ou cobrável `sent`/`delivered`) — e
  * vem do cache de processo (ver o cabeçalho). Barato de criar: o
- * chamador pode criar um por `change`.
+ * chamador pode criar um por `change`. O webhook já resolveu o dono do
+ * número para filtrar o espelho (`number-owner.ts`) e o passa em `owner`.
  */
 export function createWebhookPaymentSignals(
   db: SupabaseClient,
-  input: { phoneNumberId: string; entryWabaId?: string | null }
+  input: SessionInput
 ): WebhookPaymentSignals {
   return {
     async handleStatus(status, preRead) {
@@ -639,7 +677,7 @@ export function createWebhookPaymentSignals(
 
         const ts = parseMetaTimestamp(status.timestamp);
         if (!ts) {
-          console.warn(
+          (input.warn ?? console.warn)(
             `[billing-signal] ${kind} ignored — unreadable timestamp pnid=${maskId(input.phoneNumberId)}`
           );
           return;
