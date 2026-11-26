@@ -440,7 +440,7 @@ describe('MESSAGE — identidade', () => {
     await post(
       SECRET,
       payload('SEND_MESSAGE', {
-        Info: { Sender: '5519992496598@s.whatsapp.net', ID: 'msg-1' },
+        Info: { Sender: '5519991234567@s.whatsapp.net', ID: 'msg-1' },
         Message: { conversation: 'oi' },
       })
     );
@@ -656,8 +656,8 @@ describe('READ_RECEIPT', () => {
 describe('corrida entre o webhook e a nossa própria gravação', () => {
   const IMAGE_ECHO = {
     Info: {
-      Chat: '5519992876519@s.whatsapp.net',
-      Sender: '5519992496598:16@s.whatsapp.net',
+      Chat: '5519993216540@s.whatsapp.net',
+      Sender: '5519991234567:16@s.whatsapp.net',
       IsFromMe: true,
       ID: '3EB06F113CBB1D06DE0EDA',
       Type: 'ImageMessage',
@@ -852,7 +852,7 @@ describe('nomes reais de evento (whatsmeow)', () => {
       SECRET,
       payload('Connected', {
         status: 'open',
-        jid: '5519992496598:12@s.whatsapp.net',
+        jid: '5519991234567:12@s.whatsapp.net',
         pushName: 'Bruno',
       })
     );
@@ -866,14 +866,14 @@ describe('nomes reais de evento (whatsmeow)', () => {
       SECRET,
       payload('Connected', {
         status: 'open',
-        jid: '5519992496598:12@s.whatsapp.net',
+        jid: '5519991234567:12@s.whatsapp.net',
       })
     );
 
     const update = opsFor('evolution_instances', 'update')[0];
     expect(update.payload).toMatchObject({
-      connected_jid: '5519992496598:12@s.whatsapp.net',
-      connected_phone: '5519992496598',
+      connected_jid: '5519991234567:12@s.whatsapp.net',
+      connected_phone: '5519991234567',
     });
   });
 
@@ -888,7 +888,7 @@ describe('nomes reais de evento (whatsmeow)', () => {
     await post(
       SECRET,
       payload('PairSuccess', {
-        ID: '5519992496598:5@s.whatsapp.net',
+        ID: '5519991234567:5@s.whatsapp.net',
         status: 'open',
       })
     );
@@ -919,7 +919,7 @@ describe('vínculo do canal pelo número do WhatsApp', () => {
       SECRET,
       payload('Connected', {
         status: 'open',
-        jid: '5519992496598:12@s.whatsapp.net',
+        jid: '5519991234567:12@s.whatsapp.net',
       })
     );
 
@@ -928,7 +928,7 @@ describe('vínculo do canal pelo número do WhatsApp', () => {
       instanceId: 'inst-row-1',
       channelId: 'chan-1',
       // Sem o sufixo `:NN` de dispositivo — é o telefone que identifica.
-      phone: '5519992496598',
+      phone: '5519991234567',
     });
   });
 
@@ -944,7 +944,7 @@ describe('vínculo do canal pelo número do WhatsApp', () => {
       SECRET,
       payload('Connected', {
         status: 'open',
-        jid: '5519992496598@s.whatsapp.net',
+        jid: '5519991234567@s.whatsapp.net',
       })
     );
 
@@ -1007,8 +1007,8 @@ describe('mídia recebida', () => {
       SECRET,
       payload('MESSAGE', {
         Info: {
-          Chat: '5519992876519@s.whatsapp.net',
-          Sender: '5519992876519@s.whatsapp.net',
+          Chat: '5519993216540@s.whatsapp.net',
+          Sender: '5519993216540@s.whatsapp.net',
           SenderAlt: '240213376897243@lid',
           ID: 'ACE35C38199DD9759F85696603A8D9C3',
           IsFromMe: false,

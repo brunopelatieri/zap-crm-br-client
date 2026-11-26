@@ -42,7 +42,7 @@ segredo que chega ao browser deixa de ser segredo.
 
 ```bash
 # Lista separada por vírgula. Ausente = o console NÃO EXISTE (404 em tudo).
-PLATFORM_OWNER_EMAILS=bruno@zapcrmbr.com
+PLATFORM_OWNER_EMAILS=dono@exemplo.com
 ```
 
 ```ts
@@ -569,8 +569,8 @@ Puro, sem I/O, com teste co-locado — no padrão de `src/lib/plans/` e
 | `summary.ts` | Puro: agrega a visão geral (contas por status, vencendo em N dias, em overage) a partir de linhas já lidas |
 
 **Testes obrigatórios:** `owner.test.ts` (lista vazia, espaços, maiúsculas,
-e-mail não confirmado, e-mail parcialmente igual — `bruno@zapcrmbr.com.br` não
-casa com `bruno@zapcrmbr.com`), `guards.test.ts` (autobloqueio recusado nas
+e-mail não confirmado, e-mail parcialmente igual — `dono@exemplo.com.br` não
+casa com `dono@exemplo.com`), `guards.test.ts` (autobloqueio recusado nas
 quatro formas: mesma conta, mesmo usuário, e-mail com caixa diferente, e-mail
 com espaço), `summary.test.ts` (janela de vencimento na borda, conta sem
 vencimento não entra em "vencendo").
@@ -952,7 +952,7 @@ do `docs/spec-056-teste-manual.md`.
    via `curl` com o cookie de sessão dele.
 2. `PLATFORM_OWNER_EMAILS` ausente → 404 para o próprio proprietário.
 3. E-mail com caixa/espaço diferente (` Bruno@ZapCrmBr.com `) → **entra** (a
-   normalização da §2.2); `bruno@zapcrmbr.com.br` → **não entra**.
+   normalização da §2.2); `dono@exemplo.com.br` → **não entra**.
 4. Bloquear conta → membro dela recebe `0` linhas em `contacts`/`conversations`
    **por SQL com a sessão dele** (não só pela tela), e vê `/blocked`.
 5. Conta bloqueada recebendo mensagem → a mensagem **entra** no banco (D-9);
@@ -995,7 +995,7 @@ do `docs/spec-056-teste-manual.md`.
 
 ```bash
 # Identidade do proprietário da plataforma. Ausente = console não existe (404).
-PLATFORM_OWNER_EMAILS=bruno@zapcrmbr.com
+PLATFORM_OWNER_EMAILS=dono@exemplo.com
 
 # Continua valendo para /api/admin/** (automação) — D-2.
 PLATFORM_ADMIN_SECRET=<openssl rand -hex 32>

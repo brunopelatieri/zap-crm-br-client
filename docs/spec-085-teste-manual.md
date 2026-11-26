@@ -9,7 +9,7 @@ Checklist executável do [§12.3 da SPEC 085](./spec-085-formularios-nucleo.md#1
 **Regras deste roteiro**
 
 - O `vn` é **produção e não tem backup**. Todo `SELECT` daqui é livre; todo `UPDATE`/`INSERT`/`DELETE` está marcado **(DML)** e só roda com "pode rodar" explícito do mantenedor.
-- Antes de qualquer SQL: MCP `get_project_url` → `https://awylbfsywsrnkztvovud.supabase.co` (o `vn`). Nunca outro projeto.
+- Antes de qualquer SQL: MCP `get_project_url` → `https://<ref-do-projeto-vn>.supabase.co` (o `vn`). Nunca outro projeto.
 - Use só a **conta-piloto** (§1) e contatos de teste com telefones seus. Nada contra contato real de cliente.
 
 ---

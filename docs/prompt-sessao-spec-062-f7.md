@@ -262,7 +262,7 @@ projeto especificamente — não toque `rs`/`jh`):
   mantenedor logado, use-o para verificar as telas novas e os itens 13–15
   acima **contra o projeto `vn`**. Para isso funcionar, `PLATFORM_OWNER_EMAILS`
   precisa estar setado em `.env.local` (o e-mail do mantenedor é
-  `brunopelatieri@gmail.com`) — se você mesmo adicionar essa variável para
+  `dono@exemplo.com`) — se você mesmo adicionar essa variável para
   testar, **remova-a de novo ao final** (é assim que as sessões anteriores
   desta SPEC fizeram — grep por "TEMPORÁRIO" em `.env.local` para ver se
   sobrou alguma de sessão anterior, o que seria inesperado). Qualquer

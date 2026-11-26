@@ -28,7 +28,7 @@ describe('sendTemplateMessage — rawComponents (SPEC 083)', () => {
     const r = await sendTemplateMessage({
       phoneNumberId: 'pn',
       accessToken: 'tk',
-      to: '5519992496598',
+      to: '5519991234567',
       templateName: 'area_codigo',
       language: 'pt_BR',
       params: ['ignorado'],
@@ -47,7 +47,7 @@ describe('sendTemplateMessage — rawComponents (SPEC 083)', () => {
     await sendTemplateMessage({
       phoneNumberId: 'pn',
       accessToken: 'tk',
-      to: '5519992496598',
+      to: '5519991234567',
       templateName: 'aviso',
       params: ['Ana'],
     });

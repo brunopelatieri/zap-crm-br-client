@@ -105,7 +105,7 @@ const INPUT = {
   accountId: 'acct-1',
   instanceId: 'inst-nova',
   channelId: 'chan-nova',
-  phone: '5519992496598',
+  phone: '5519991234567',
 };
 
 function opsFor(table: string, verb?: RecordedOp['verb']) {
@@ -135,7 +135,7 @@ describe('sem canal anterior para o número', () => {
 
     expect(result).toEqual({ channelId: 'chan-nova', adopted: false });
     const update = opsFor('channels', 'update')[0];
-    expect(update.payload).toEqual({ identifier: '5519992496598' });
+    expect(update.payload).toEqual({ identifier: '5519991234567' });
   });
 
   it('não reaponta a instância nem apaga canal nenhum', async () => {
@@ -184,7 +184,7 @@ describe('número repareado — canal anterior existe', () => {
       )
     );
     expect(adopted?.payload).toMatchObject({
-      identifier: '5519992496598',
+      identifier: '5519991234567',
       status: 'connected',
       status_detail: null,
       // O operador acabou de escolher este nome ao recriar a instância.
@@ -212,7 +212,7 @@ describe('número repareado — canal anterior existe', () => {
     expect(lookup.filters).toContainEqual([
       'eq',
       'identifier',
-      '5519992496598',
+      '5519991234567',
     ]);
     expect(lookup.filters).toContainEqual(['neq', 'id', 'chan-nova']);
   });
@@ -257,7 +257,7 @@ describe('identifier já correto', () => {
   it('não reescreve o identifier à toa', async () => {
     currentDb = makeDb({
       'channels.select': [
-        { data: { name: 'bruno', identifier: '5519992496598' } },
+        { data: { name: 'bruno', identifier: '5519991234567' } },
         { data: null },
       ],
     });

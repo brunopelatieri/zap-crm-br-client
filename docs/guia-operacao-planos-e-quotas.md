@@ -301,7 +301,7 @@ curl -X PUT "$BASE_URL/api/admin/accounts/<ACCOUNT_ID>/plan" \
   -H "x-admin-secret: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
-    "actor": "bruno@zapcrmbr.com",
+    "actor": "dono@exemplo.com",
     "planCode": "professional",
     "reason": "Upgrade confirmado por Pix em 2026-08-25"
   }'
@@ -328,7 +328,7 @@ curl -X PUT "$BASE_URL/api/admin/accounts/<ACCOUNT_ID>/plan" \
   -H "x-admin-secret: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
-    "actor": "bruno@zapcrmbr.com",
+    "actor": "dono@exemplo.com",
     "limitOverrides": { "contacts": 15000, "channels_whatsapp_qr": 5 },
     "reason": "Negociado — 15k contatos e 5 instâncias QR por 6 meses"
   }'
@@ -352,7 +352,7 @@ curl -X PUT "$BASE_URL/api/admin/accounts/<ACCOUNT_ID>/plan" \
 curl -X PUT "$BASE_URL/api/admin/accounts/<ACCOUNT_ID>/plan" \
   -H "x-admin-secret: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
-  -d '{ "actor": "bruno@zapcrmbr.com", "status": "suspended", "reason": "Pagamento em atraso" }'
+  -d '{ "actor": "dono@exemplo.com", "status": "suspended", "reason": "Pagamento em atraso" }'
 ```
 
 Status válidos: `trialing`, `active`, `past_due`, `suspended`, `canceled`.
@@ -397,7 +397,7 @@ curl -X PATCH "$BASE_URL/api/admin/plan-requests" \
   -d '{
     "id": "<REQUEST_ID>",
     "decision": "approved",
-    "actor": "bruno@zapcrmbr.com",
+    "actor": "dono@exemplo.com",
     "note": "Pix confirmado"
   }'
 ```
@@ -414,7 +414,7 @@ curl -X PATCH "$BASE_URL/api/admin/plan-requests" \
   -d '{
     "id": "<REQUEST_ID>",
     "decision": "rejected",
-    "actor": "bruno@zapcrmbr.com",
+    "actor": "dono@exemplo.com",
     "note": "Pagamento não confirmado"
   }'
 ```

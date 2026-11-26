@@ -179,11 +179,11 @@ plano num `EXCEPTION WHEN OTHERS`. O evento é emitido pelo **primeiro
 ```bash
 SMTP_HOST=smtp.seuprovedor.com
 SMTP_PORT=587                    # 465 → TLS implícito; 587/25 → STARTTLS
-SMTP_USER=avisos@zapcrmbr.com
+SMTP_USER=avisos@exemplo.com
 SMTP_PASSWORD=…
 SMTP_SECURE=false                # true força TLS implícito (independe da porta)
-SMTP_FROM="ZAP CRM BR <avisos@zapcrmbr.com>"
-SYSTEM_NOTIFICATION_EMAIL=bruno@zapcrmbr.com   # destinatário dos avisos
+SMTP_FROM="ZAP CRM BR <avisos@exemplo.com>"
+SYSTEM_NOTIFICATION_EMAIL=dono@exemplo.com   # destinatário dos avisos
 ```
 
 **Sem `SMTP_HOST` ou sem `SYSTEM_NOTIFICATION_EMAIL`, o canal é `skipped`** —
@@ -393,11 +393,11 @@ confirmar com o mantenedor**, projeto por projeto (`vn`, `rs`, `jh`).
 # E-mail do sistema. Sem SMTP_HOST ou SYSTEM_NOTIFICATION_EMAIL → canal desligado.
 SMTP_HOST=smtp.seuprovedor.com
 SMTP_PORT=587
-SMTP_USER=avisos@zapcrmbr.com
+SMTP_USER=avisos@exemplo.com
 SMTP_PASSWORD=…
 SMTP_SECURE=false
-SMTP_FROM="ZAP CRM BR <avisos@zapcrmbr.com>"
-SYSTEM_NOTIFICATION_EMAIL=bruno@zapcrmbr.com
+SMTP_FROM="ZAP CRM BR <avisos@exemplo.com>"
+SYSTEM_NOTIFICATION_EMAIL=dono@exemplo.com
 
 # Webhook. A primeira continua valendo (compat); a segunda é o alias novo.
 PLAN_REQUEST_WEBHOOK_URL=https://n8n.exemplo.com/webhook/zapcrm

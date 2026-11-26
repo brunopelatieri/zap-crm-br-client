@@ -40,7 +40,7 @@ const input = {
   db: {} as SupabaseClient,
   accountId: 'acc1',
   contactId: 'c1',
-  contactPhone: '5519992496598',
+  contactPhone: '5519991234567',
   conversationId: 'conv1',
   text: 'senha',
 };
@@ -77,7 +77,7 @@ describe('handlePortalKeyword', () => {
     expect(await handlePortalKeyword(input, d)).toBe(true);
 
     expect(d.requestCode).toHaveBeenCalledWith({
-      phones: ['5519992496598', '551992496598'],
+      phones: ['5519991234567', '551991234567'],
       publicCode: 'ABCD2345',
       purpose: 'reset',
       code: expect.stringMatching(/^\d{6}$/),

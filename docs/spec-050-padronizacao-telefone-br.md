@@ -15,8 +15,8 @@
 
 `contacts.phone` é `TEXT NOT NULL` sem constraint, e **dois** dos caminhos de escrita gravam o
 que o usuário digitou — enquanto os outros cinco gravam dígitos-only com DDI. O resultado é uma
-coluna onde `"+55 (19) 9 9249-6598"` e `"5519992496598"` são o mesmo contato escrito de duas
-formas, e onde um número sem DDI (`"19992496598"`) é indistinguível de um número de outro país.
+coluna onde `"+55 (11) 9 9999-9999"` e `"5511999999999"` são o mesmo contato escrito de duas
+formas, e onde um número sem DDI (`"11999999999"`) é indistinguível de um número de outro país.
 
 Esta SPEC fecha os dois caminhos abertos e acrescenta o que o app nunca teve: **validação
 brasileira de verdade** (DDD contra a lista da Anatel, celular × fixo), hoje existente apenas
@@ -284,7 +284,7 @@ export function normalizeContactPhone(
   opts?: { brMode?: boolean } // default: isBrDeployment()
 ): PhoneNormalizeResult;
 
-/** Exibição: 5519992496598 → "+55 (19) 99249-6598". Nunca lança. */
+/** Exibição: 5511999999999 → "+55 (11) 99999-9999". Nunca lança. */
 export function formatPhoneForDisplay(digits: string): string;
 ```
 
@@ -365,7 +365,7 @@ dois contatos por causa do índice único do banco.
 
 `formatPhoneForDisplay` aplicado onde hoje se renderiza `contact.phone` cru: detalhe do
 contato, sidebar do inbox, lista de conversas, diretório de contatos, cards de negócio. Sem
-isso, F2/F3 **pioram** a UX (todo mundo passa a ver `5519992496598`).
+isso, F2/F3 **pioram** a UX (todo mundo passa a ver `5511999999999`).
 
 ### F5 — (Opcional) Dados legados e constraint
 
@@ -397,8 +397,8 @@ Mensagens de `/api/**` permanecem em **inglês** (política da §4 do relatório
 
 | Entrada                               | Modo   | Esperado                                                           |
 | ------------------------------------- | ------ | ------------------------------------------------------------------ |
-| `+55 (19) 9 9249-6598`                | BR     | ok · `5519992496598` · mobile                                      |
-| `19992496598`                         | BR     | ok · `5519992496598` (DDI adicionado)                              |
+| `+55 (11) 9 9999-9999`                | BR     | ok · `5511999999999` · mobile                                      |
+| `11999999999`                         | BR     | ok · `5511999999999` (DDI adicionado)                              |
 | `(11) 3456-7890`                      | BR     | ok · `551134567890` · **landline**                                 |
 | `011 99999-9999`                      | BR     | ok (0 de tronco removido)                                          |
 | `5551987654321`                       | BR     | ok · DDD 51 (**não** confundir com DDI+DDD 55)                     |
@@ -406,7 +406,7 @@ Mensagens de `/api/**` permanecem em **inglês** (política da §4 do relatório
 | `10 98765-4321`                       | BR     | ✗ `invalid_ddd`                                                    |
 | `11 9876-543`                         | BR     | ✗ `invalid_length` (9 dígitos total — nem 10 nem 11)               |
 | `+351 912 345 678`                    | BR     | ok · `foreign` (não rejeita estrangeiro)                           |
-| `19992496598`                         | não-BR | ✗ `missing_country_code`                                           |
+| `11999999999`                         | não-BR | ✗ `missing_country_code`                                           |
 | `''` / `'abc'`                        | ambos  | ✗ `empty`                                                          |
 | **D-6 — celular legado de 8 dígitos** |        |                                                                    |
 | `11 9876-5432`                        | BR     | ok · `551198765432` · **`mobile_legacy`** · `legacy: true`         |
@@ -488,7 +488,7 @@ a migração falha em produção. Formato sugerido: `phone ~ '^[1-9][0-9]{6,14}$
 | F1   | `phone/br.ts` + testes | —                                                                  |
 | F2   | Formulário com máscara | Continua entrando texto livre pelo caminho mais usado              |
 | F3   | Importação normalizada | CSV de cliente (com máscara BR) continua sujando a base            |
-| F4   | Exibição formatada     | **F2/F3 pioram a UX** — todos veem `5519992496598`                 |
+| F4   | Exibição formatada     | **F2/F3 pioram a UX** — todos veem `5511999999999`                 |
 | F5   | Legado + constraint    | Base fica com dois formatos convivendo; nada quebra, mas não fecha |
 
 **Risco principal:** F2 e F3 mudam o valor gravado. Um contato criado depois da mudança e um

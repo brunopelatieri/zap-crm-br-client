@@ -12,13 +12,13 @@ Checklist executável do [§12 da SPEC 062](./spec-062-console-do-proprietario.m
 
 Feito uma vez, antes dos 16 itens abaixo. **Nunca contra dado real de cliente** — use contas descartáveis, e reverta qualquer estado de teste ao final de cada item (cada item abaixo já tem seu próprio "reverter" quando aplica).
 
-- [ ] **`PLATFORM_OWNER_EMAILS`** configurada no servidor que você vai testar, com o e-mail da sua própria sessão (`brunopelatieri@gmail.com` ou o e-mail que você usa para logar). Se for testar local (`npm run dev`) e a variável ainda não estiver em `.env.local`:
+- [ ] **`PLATFORM_OWNER_EMAILS`** configurada no servidor que você vai testar, com o e-mail da sua própria sessão (`dono@exemplo.com` ou o e-mail que você usa para logar). Se for testar local (`npm run dev`) e a variável ainda não estiver em `.env.local`:
 
   ```bash
   # .env.local — TEMPORÁRIO, para este teste. Remova de novo ao final
   # (grep por "TEMPORÁRIO" em .env.local antes de começar, pra ver se
   # sobrou alguma de uma sessão anterior — seria inesperado).
-  PLATFORM_OWNER_EMAILS=brunopelatieri@gmail.com  # TEMPORÁRIO — remover ao final
+  PLATFORM_OWNER_EMAILS=dono@exemplo.com  # TEMPORÁRIO — remover ao final
   ```
 
   Reinicie o `npm run dev` depois de editar (variável de ambiente só é lida no boot).
@@ -96,7 +96,7 @@ Feito uma vez, antes dos 16 itens abaixo. **Nunca contra dado real de cliente** 
 
 **Por quê:** a §2.2 exige `trim` + `toLowerCase` na comparação, e um subdomínio a mais não pode colar por engano.
 
-`src/lib/platform/owner.test.ts` já cobre, na unidade, exatamente os casos do enunciado (espaço ao redor, maiúsculas/minúsculas, `bruno@zapcrmbr.com.br` não casando com `bruno@zapcrmbr.com`, prefixo a mais não casando). Rode para confirmar que ainda está verde:
+`src/lib/platform/owner.test.ts` já cobre, na unidade, exatamente os casos do enunciado (espaço ao redor, maiúsculas/minúsculas, `dono@exemplo.com.br` não casando com `dono@exemplo.com`, prefixo a mais não casando). Rode para confirmar que ainda está verde:
 
 ```bash
 npx vitest run src/lib/platform/owner.test.ts

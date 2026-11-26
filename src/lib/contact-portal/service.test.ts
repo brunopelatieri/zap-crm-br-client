@@ -47,14 +47,14 @@ describe('chamadas às portal_*', () => {
   it('requestCode manda candidatos, código, hash de IP e os limites', async () => {
     const db = fakeDb([{ status: 'sent', contact_id: 'c1', account_id: 'a1' }]);
     const r = await createPortalService(db).requestCode({
-      phones: ['5519992496598', '551992496598'],
+      phones: ['5519991234567', '551991234567'],
       publicCode: 'ABCD2345',
       purpose: 'reset',
       code: '123456',
       ipHash: 'f'.repeat(64),
     });
     expect(db.rpc).toHaveBeenCalledWith('portal_request_code', {
-      p_phones: ['5519992496598', '551992496598'],
+      p_phones: ['5519991234567', '551991234567'],
       p_public_code: 'ABCD2345',
       p_purpose: 'reset',
       p_code: '123456',
@@ -158,15 +158,15 @@ describe('publicAccountName', () => {
 describe('erros', () => {
   it('erro do banco vira PortalServiceError com o código, sem a entrada', async () => {
     const svc = createPortalService(
-      fakeDb(null, { code: '22023', message: 'invalid phone 5519992496598' })
+      fakeDb(null, { code: '22023', message: 'invalid phone 5519991234567' })
     );
     const err = await svc
-      .login({ phones: ['5519992496598'], password: 'Segredo#1', ipHash: 'h' })
+      .login({ phones: ['5519991234567'], password: 'Segredo#1', ipHash: 'h' })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PortalServiceError);
     expect((err as PortalServiceError).pgCode).toBe('22023');
     expect((err as Error).message).toBe('portal_login failed (22023)');
-    expect((err as Error).message).not.toContain('5519992496598');
+    expect((err as Error).message).not.toContain('5519991234567');
     expect((err as Error).message).not.toContain('Segredo');
   });
 

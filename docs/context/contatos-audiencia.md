@@ -17,7 +17,7 @@ UI: `src/components/{contacts,import}/`, `src/components/broadcasts/audience/`; 
 
 ## Telefone — o contrato
 
-- **Formato gravado:** só dígitos, com DDI, sem `+` nem máscara (`5519992496598`). É o que a coluna gerada `contacts.phone_normalized` calcula e o que Meta e Evolution esperam. Máscara é só apresentação (`formatPhoneForDisplay`).
+- **Formato gravado:** só dígitos, com DDI, sem `+` nem máscara (`5511999999999`). É o que a coluna gerada `contacts.phone_normalized` calcula e o que Meta e Evolution esperam. Máscara é só apresentação (`formatPhoneForDisplay`).
 - **Dedup autoritativo** = `phone_normalized` único por conta; colisão `23505` é corrida, não falha. `phonesMatch` (últimos 8 dígitos) serve só a avisos de "possível duplicata".
 - **A força da validação BR (DDD, 9º dígito) varia por caminho** — decisão D-5 da [SPEC 050](../spec-050-padronizacao-telefone-br.md): formulário manual **bloqueia**; importação de contatos pula a linha e reporta; audiência de disparo usa o mesmo normalizador (SPEC 052 D-2); API pública `/api/v1` só normaliza (validação de DDD **desligada** de propósito); webhook Meta/QRCode **nunca** valida — recusar inbound perderia a mensagem do cliente.
 - **Quem decide "deploy brasileiro"** é `NEXT_PUBLIC_APP_LOCALE`, **não** o cookie `NEXT_LOCALE` (D-1): validação é integridade de dado, tem que ser uniforme por instalação. Não use `useLocale()` para isso.

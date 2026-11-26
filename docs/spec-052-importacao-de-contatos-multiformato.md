@@ -73,8 +73,8 @@ Antes de escrever qualquer instrução de formatação, os dois parsers foram ex
 | **F** | `Maria D'Ávila`, `O'Brien & Co`                                                         | `Maria DÁvila`, `OBrien & Co` — o apóstrofo é **apagado**         | 🐛 dado corrompido                      |
 | **G** | `"Maria ""Bibi"" Souza"` (aspas escapadas, RFC 4180)                                    | `Maria Bibi Souza` — as aspas internas somem                      | ⚠️ cosmético                            |
 | **H** | XLSX · célula `tags` = `vip, lead`                                                      | `tagNames: ["vip","lead"]`                                        | ✅ (planilha não tem o problema do CSV) |
-| **I** | XLSX · telefone como **número**                                                         | `5519992496598` correto; `'0 19 99249-6598'` como texto sobrevive | ✅ (já tratado)                         |
-| **J** | Audiência: `5510987654321` (DDD 10 não existe), `19992496598` (sem DDI), `999999999999` | **as três passam como válidas**                                   | 🐛 SPEC 050 D-5 não cumprida            |
+| **I** | XLSX · telefone como **número**                                                         | `5511999999999` correto; `'0 11 99999-9999'` como texto sobrevive | ✅ (já tratado)                         |
+| **J** | Audiência: `5510987654321` (DDD 10 não existe), `11999999999` (sem DDI), `999999999999` | **as três passam como válidas**                                   | 🐛 SPEC 050 D-5 não cumprida            |
 | **K** | `parseTagCell('vip\|lead')` / `('vip / lead')`                                          | uma etiqueta só — apenas `,` e `;` separam                        | ✅ (comportamento a documentar)         |
 
 **O que isso significa para o pedido "qual é a instrução certa":**
@@ -93,8 +93,8 @@ Antes de escrever qualquer instrução de formatação, os dois parsers foram ex
 [`src/lib/audience/normalize.ts:81-91`](../src/lib/audience/normalize.ts#L81-L91) usa
 `sanitizePhoneForMeta` + `isValidE164` e nada mais. Consequências hoje, em produção:
 
-1. O mesmo `19992496598` numa planilha vira **`5519992496598`** se entrar por Contatos e
-   **`19992496598`** se entrar por Disparos — dois formatos para a mesma pessoa, e o segundo é
+1. O mesmo `11999999999` numa planilha vira **`5511999999999`** se entrar por Contatos e
+   **`11999999999`** se entrar por Disparos — dois formatos para a mesma pessoa, e o segundo é
    um número que a Meta lê como DDI 19.
 2. Um DDD inexistente (10, 20, 23…) entra na audiência e queima cota de disparo.
 
@@ -180,7 +180,7 @@ createRowNormalizer({ validate: normalizeContactPhone }); // padrão nos dois ca
 
 | Linha da planilha             | Antes                                | Depois                                |
 | ----------------------------- | ------------------------------------ | ------------------------------------- |
-| `19992496598` (sem DDI, BR)   | enviado como `19992496598` (DDI 19!) | vira `5519992496598` ✅ **corrigido** |
+| `11999999999` (sem DDI, BR)   | enviado como `11999999999` (DDI 19!) | vira `5511999999999` ✅ **corrigido** |
 | `5510987654321` (DDD 10)      | entra na audiência                   | rejeitada · motivo `invalid_ddd`      |
 | `999999999999`                | entra na audiência                   | rejeitada · motivo `invalid_ddd`      |
 | `+351912345678` (estrangeiro) | entra                                | entra (D-2 da SPEC 050 preserva) ✅   |
@@ -511,7 +511,7 @@ Os casos A–K da §2.2 viram teste — foi como foram descobertos.
 | Entrada         | Antes (hoje) | Depois (D-2)                            |
 | --------------- | ------------ | --------------------------------------- |
 | `5510987654321` | válida       | inválida · `invalid_ddd`                |
-| `19992496598`   | válida crua  | válida · **`5519992496598`**            |
+| `11999999999`   | válida crua  | válida · **`5511999999999`**            |
 | `999999999999`  | válida       | inválida · `invalid_ddd`                |
 | `+351912345678` | válida       | válida · `foreign`                      |
 | `551198765432`  | válida       | válida · `mobile_legacy` (SPEC 050 D-6) |

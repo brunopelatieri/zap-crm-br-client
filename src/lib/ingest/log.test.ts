@@ -73,7 +73,7 @@ describe('logIngestEvent', () => {
       }),
     } as unknown as SupabaseClient;
 
-    const payload = { phone: '5519992496598', name: 'Maria' };
+    const payload = { phone: '5519991234567', name: 'Maria' };
     await logIngestEvent(db, { ...BASE_PARAMS, payload });
 
     expect(insertedRow).not.toBeNull();

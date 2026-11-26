@@ -18,7 +18,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const PHONE_NUMBER_ID = '892352847302912';
-const PHONE = '5519992496598';
+const PHONE = '5519991234567';
 
 describe('channelIdentifierIsPhone', () => {
   it('com o phone_number_id em mãos, a comparação é exata', () => {
@@ -73,7 +73,7 @@ describe('channelIdentifierDisplay', () => {
   it('formata o telefone reconciliado', () => {
     expect(
       channelIdentifierDisplay({ type: 'whatsapp_cloud', identifier: PHONE })
-    ).toBe('+55 (19) 99249-6598');
+    ).toBe('+55 (19) 99123-4567');
   });
 
   it('devolve null para o id da Meta — a tela mostra o rótulo do canal', () => {

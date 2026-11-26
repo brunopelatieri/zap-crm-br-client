@@ -76,7 +76,7 @@ describe('POST /area/api/request-code', () => {
     const deliver = vi.fn();
     journeys.requestAccessCode.mockResolvedValueOnce({ deliver });
     const sent = await requestCode(
-      post('/area/api/request-code', { phone: '19992496598' })
+      post('/area/api/request-code', { phone: '19991234567' })
     );
 
     journeys.requestAccessCode.mockResolvedValueOnce({ deliver: null });
@@ -113,7 +113,7 @@ describe('POST /area/api/request-code', () => {
           host: 'evil.example',
           'x-forwarded-host': 'evil.example',
         },
-        body: JSON.stringify({ phone: '19992496598' }),
+        body: JSON.stringify({ phone: '19991234567' }),
       });
     // Origin = host forjado passa no `isSameOriginWrite` (o navegador da
     // vítima nunca manda isso; um script manda) — o link não pode segui-lo.
@@ -134,7 +134,7 @@ describe('POST /area/api/request-code', () => {
     journeys.requestAccessCode.mockResolvedValue({ deliver: null });
     await requestCode(
       post('/area/api/request-code', {
-        phone: '19992496598',
+        phone: '19991234567',
         purpose: 'qualquer',
         publicCode: 'ABCD2345',
       })
@@ -153,7 +153,7 @@ describe('POST /area/api/login', () => {
       accessCount: 2,
     });
     const res = await login(
-      post('/area/api/login', { phone: '19992496598', password: 'x' })
+      post('/area/api/login', { phone: '19991234567', password: 'x' })
     );
     expect(res.status).toBe(200);
     expect((await res.json()).next).toBe('/area/escolher-conta');
@@ -188,7 +188,7 @@ describe('POST /area/api/complete-code', () => {
       token: 'K'.repeat(43),
     });
     const body = {
-      phone: '19992496598',
+      phone: '19991234567',
       code: '123456',
       password: 'x',
       confirmPassword: 'x',

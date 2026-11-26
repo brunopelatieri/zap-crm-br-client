@@ -318,7 +318,7 @@ Puro onde dá, com teste co-locado — padrão de `src/lib/plans/` e `src/lib/pl
 **Testes obrigatórios:**
 
 - `manual-billing.test.ts`: data de hoje aceita, ontem recusada, hoje + 3 anos aceita e + 3 anos + 1 dia recusada (D-3); `paidAt` futuro recusado; `periods` 0, 13 e 1,5 recusados; método fora da lista recusado; valor negativo recusado; prévia mensal sobre **31/01 → 28/02** e anual sobre **29/02** (as armadilhas da SPEC 062 §5.1, de novo); prévia parte do vencimento atual e não de hoje; vencimento nulo → base hoje.
-- `user-identity.test.ts`: nome só com espaços, 121 caracteres, com `\u0000`; e-mail do alvo na lista do proprietário (com caixa e espaço diferentes) → `cannot_edit_platform_owner_email`; e-mail **novo** na lista → `email_reserved_for_platform_owner`; `bruno@zapcrmbr.com.br` **não** casa com `bruno@zapcrmbr.com` (mesma armadilha do `owner.test.ts`); mesmo e-mail com caixa diferente → `email_unchanged`.
+- `user-identity.test.ts`: nome só com espaços, 121 caracteres, com `\u0000`; e-mail do alvo na lista do proprietário (com caixa e espaço diferentes) → `cannot_edit_platform_owner_email`; e-mail **novo** na lista → `email_reserved_for_platform_owner`; `dono@exemplo.com.br` **não** casa com `dono@exemplo.com` (mesma armadilha do `owner.test.ts`); mesmo e-mail com caixa diferente → `email_unchanged`.
 - `user-identity-actions.test.ts` (com `db` falso): falha do e-mail não chama a escrita do nome; falha do nome depois do e-mail devolve `partial_update` com `emailUpdated: true`.
 - `lifecycle.test.ts`: update com zero linhas não emite evento.
 - `billing-renew.test.ts`: os campos novos chegam à RPC com os nomes certos (`p_actor`, `p_method`, `p_amount_cents`).

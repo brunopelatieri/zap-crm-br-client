@@ -312,7 +312,7 @@ describe('deliverAccessCode', () => {
   it('falha de envio: log só com o nome do erro (sem telefone nem código)', async () => {
     findOrCreateConversation.mockResolvedValue('conv1');
     sendAndPersistOutbound.mockRejectedValue(
-      new Error('contact phone invalid: 5519992496598 code 048213')
+      new Error('contact phone invalid: 5519991234567 code 048213')
     );
     const errSpy = vi
       .spyOn(console, 'error')
@@ -327,7 +327,7 @@ describe('deliverAccessCode', () => {
       reason: 'send_failed',
     });
     const logged = errSpy.mock.calls.flat().join(' ');
-    expect(logged).not.toContain('5519992496598');
+    expect(logged).not.toContain('5519991234567');
     expect(logged).not.toContain('048213');
     errSpy.mockRestore();
   });

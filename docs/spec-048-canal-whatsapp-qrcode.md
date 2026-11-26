@@ -41,7 +41,7 @@ texto, ou nada.
 
 ### 1.1-bis 🔴 VEREDITO: botões e listas **não funcionam** no canal QR
 
-Teste executado contra número real (`5519992876519`), pela instância `deploy`, em 12/08:
+Teste executado contra número real (`5519993216540`), pela instância `deploy`, em 12/08:
 
 | Endpoint       | Resultado                                          |
 | -------------- | -------------------------------------------------- |
@@ -77,7 +77,7 @@ decisão até o teste real.
 
 ### 1.2 Sondagem contra instância conectada — o que só o servidor respondeu
 
-Segunda rodada, com a instância real **"deploy"** (`5519992496598`, conectada). Somente
+Segunda rodada, com a instância real **"deploy"** (`5511999999999`, conectada). Somente
 leitura. Fecha as quatro perguntas que faltavam e levanta três requisitos novos.
 
 | Pergunta F0                       | Resposta do servidor                                                                                                       |
@@ -142,9 +142,9 @@ devolve o LID:
 
 ```jsonc
 {
-  "Query": "+5519992496598@s.whatsapp.net",
+  "Query": "+5511999999999@s.whatsapp.net",
   "IsInWhatsapp": true,
-  "JID": "5519992496598@s.whatsapp.net",
+  "JID": "5511999999999@s.whatsapp.net",
   "LID": "226559659127039@lid",
   "VerifiedName": "Bruno Pelatieri Goulart",
 }
@@ -175,7 +175,7 @@ sintético.
 
 #### 🔴 R4 — O JID carrega sufixo de dispositivo
 
-`"jid": "5519992496598:12@s.whatsapp.net"` — o `:12` é o número do dispositivo. A extração do
+`"jid": "5511999999999:12@s.whatsapp.net"` — o `:12` é o número do dispositivo. A extração do
 telefone precisa remover **`:NN` antes do `@`**, senão o dedupe da migração 022 nunca casa.
 Teste unitário obrigatório no adaptador.
 

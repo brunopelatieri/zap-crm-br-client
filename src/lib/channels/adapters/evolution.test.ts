@@ -95,7 +95,7 @@ describe('sendText', () => {
     });
 
     const result = await evolutionAdapter.sendText(CTX, {
-      to: '+55 (19) 99249-6598',
+      to: '+55 (19) 99123-4567',
       text: 'oi',
     });
 
@@ -105,7 +105,7 @@ describe('sendText', () => {
       expect.objectContaining({
         method: 'POST',
         key: 'instance-token-1',
-        body: expect.objectContaining({ number: '5519992496598', text: 'oi' }),
+        body: expect.objectContaining({ number: '5519991234567', text: 'oi' }),
       })
     );
     expect(result.providerMessageId).toBe('EVO123');
@@ -119,7 +119,7 @@ describe('sendText', () => {
     expect(ensureContactIdentity).toHaveBeenCalledWith({
       accountId: 'acct-1',
       instanceToken: 'instance-token-1',
-      phone: '5519992496598',
+      phone: '5519991234567',
     });
   });
 
@@ -178,8 +178,8 @@ describe('sendText', () => {
     // tinha o id que o recibo procurava.
     evolutionRequest.mockResolvedValue({
       Info: {
-        Chat: '5519992876519@s.whatsapp.net',
-        Sender: '5519992496598:15@s.whatsapp.net',
+        Chat: '5519993216540@s.whatsapp.net',
+        Sender: '5519991234567:15@s.whatsapp.net',
         IsFromMe: true,
         ID: '3EB0DD2120CF0A8A5E4270',
         ServerID: 0,
@@ -191,7 +191,7 @@ describe('sendText', () => {
     });
 
     const result = await evolutionAdapter.sendText(CTX, {
-      to: '5519992876519',
+      to: '5519993216540',
       text: 'oi',
     });
 

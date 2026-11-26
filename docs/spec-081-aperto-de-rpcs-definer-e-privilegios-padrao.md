@@ -139,7 +139,7 @@ Rode no diretório do ZAP, com o projeto `vn` confirmado pelo mantenedor. Os pas
 
 ## 6. Resultado da aplicação no `vn` (2026-11-19)
 
-Projeto confirmado pelo mantenedor (`get_project_url` → `awylbfsywsrnkztvovud`). Passos 1–3 e 6 lidos por uma sessão com `execute_sql` e `get_advisors` (só leitura); passos 4 e 5 aplicados **pelo mantenedor no SQL Editor**, 090 e 091 em execuções separadas. Como não passaram por `apply_migration`, **não há registro em `schema_migrations`**: a prova é o script.
+Projeto confirmado pelo mantenedor (`get_project_url` → `<ref-do-projeto-vn>`). Passos 1–3 e 6 lidos por uma sessão com `execute_sql` e `get_advisors` (só leitura); passos 4 e 5 aplicados **pelo mantenedor no SQL Editor**, 090 e 091 em execuções separadas. Como não passaram por `apply_migration`, **não há registro em `schema_migrations`**: a prova é o script.
 
 ### Antes (passo 3)
 

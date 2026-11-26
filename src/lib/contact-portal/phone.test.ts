@@ -9,22 +9,22 @@ const br = { brMode: true };
 
 describe('phoneCandidates', () => {
   it('celular atual → canônico primeiro e a variante sem o nono dígito', () => {
-    expect(phoneCandidates('+55 (19) 9 9249-6598', br)).toEqual([
-      '5519992496598',
-      '551992496598',
+    expect(phoneCandidates('+55 (19) 9 9123-4567', br)).toEqual([
+      '5519991234567',
+      '551991234567',
     ]);
   });
 
   it('celular digitado sem o nono dígito → canônico (com o 9) primeiro', () => {
-    expect(phoneCandidates('(19) 9249-6598', br)).toEqual([
-      '5519992496598',
-      '551992496598',
+    expect(phoneCandidates('(19) 9123-4567', br)).toEqual([
+      '5519991234567',
+      '551991234567',
     ]);
   });
 
   it('as duas formas do mesmo celular dão os mesmos candidatos', () => {
-    expect(phoneCandidates('19992496598', br)).toEqual(
-      phoneCandidates('1992496598', br)
+    expect(phoneCandidates('19991234567', br)).toEqual(
+      phoneCandidates('1991234567', br)
     );
   });
 
@@ -43,7 +43,7 @@ describe('phoneCandidates', () => {
   });
 
   it('todo candidato casa com o formato que o banco aceita', () => {
-    for (const raw of ['19992496598', '1992496598', '1134567890']) {
+    for (const raw of ['19991234567', '1991234567', '1134567890']) {
       for (const c of phoneCandidates(raw, br) ?? []) {
         expect(c).toMatch(/^[0-9]{10,15}$/);
       }

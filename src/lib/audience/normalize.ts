@@ -19,8 +19,8 @@
  * O validador é parametrizável (`validate`), mas o padrão para os dois
  * consumidores — contatos e audiência — é `normalizeContactPhone`
  * (SPEC 050): antes da SPEC 052, a audiência validava só com
- * `isValidE164`, então o mesmo `19992496598` virava um telefone válido
- * de DDI 19 aqui e um `5519992496598` correto do lado de contatos —
+ * `isValidE164`, então o mesmo `19991234567` virava um telefone válido
+ * de DDI 19 aqui e um `5519991234567` correto do lado de contatos —
  * duas normalizações diferentes para a mesma planilha (SPEC 052 §2.2
  * achado J). Ver SPEC 052 D-2 para a tabela de comportamento antes/depois.
  */

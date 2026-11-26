@@ -158,7 +158,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 const verifyPhoneNumber = vi.fn(async () => ({
   id: '892352847302912',
-  display_phone_number: '+55 19 99249-6598',
+  display_phone_number: '+55 19 99123-4567',
   verified_name: 'Loja Teste',
 }));
 const registerPhoneNumber = vi.fn(async () => ({}));
@@ -277,7 +277,7 @@ describe('GET — lista de números, sem segredo (§5/§6.1)', () => {
     // `phone_number_id` e `status` está congelado em `disconnected`.
     await get();
 
-    expect(state.channels[0].identifier).toBe('5519992496598');
+    expect(state.channels[0].identifier).toBe('5519991234567');
     expect(state.channels[0].status).toBe('connected');
   });
 
@@ -385,7 +385,7 @@ describe('POST — idempotência e criação (§5)', () => {
     });
 
     expect(state.channels[0].status).toBe('connected');
-    expect(state.channels[0].identifier).toBe('5519992496598');
+    expect(state.channels[0].identifier).toBe('5519991234567');
     expect(state.channels[0].connected_at).not.toBeNull();
   });
 

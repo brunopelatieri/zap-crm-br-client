@@ -189,7 +189,7 @@ describe('sendIngestTemplate — channel capability (SPEC 049 §5.3)', () => {
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'tpl-1',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -208,7 +208,7 @@ describe('sendIngestTemplate — template lookup', () => {
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'missing',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -217,7 +217,7 @@ describe('sendIngestTemplate — template lookup', () => {
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'missing',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -234,7 +234,7 @@ describe('sendIngestTemplate — template lookup', () => {
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'tpl-1',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -257,7 +257,7 @@ describe('sendIngestTemplate — channel not configured', () => {
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'tpl-1',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -276,7 +276,7 @@ describe('sendIngestTemplate — send success/failure', () => {
 
     const result = await sendIngestTemplate(db, {
       accountId: 'acc-1',
-      phone: '5519992496598',
+      phone: '5519991234567',
       templateId: 'tpl-1',
       templateParams: ['Maria'],
       recipientRowId: 'rec-1',
@@ -310,7 +310,7 @@ describe('sendIngestTemplate — send success/failure', () => {
 
     await sendIngestTemplate(db, {
       accountId: 'acc-1',
-      phone: '5519992496598',
+      phone: '5519991234567',
       templateId: 'tpl-1',
       templateParams: [],
       recipientRowId: 'rec-1',
@@ -337,7 +337,7 @@ describe('sendIngestTemplate — send success/failure', () => {
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'tpl-1',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -364,7 +364,7 @@ describe('sendIngestTemplate — template×channel compatibility (SPEC 065 D-3)'
     await expect(
       sendIngestTemplate(db, {
         accountId: 'acc-1',
-        phone: '5519992496598',
+        phone: '5519991234567',
         templateId: 'tpl-1',
         templateParams: [],
         recipientRowId: 'rec-1',
@@ -387,7 +387,7 @@ describe('sendIngestTemplate — template×channel compatibility (SPEC 065 D-3)'
 
     const result = await sendIngestTemplate(db, {
       accountId: 'acc-1',
-      phone: '5519992496598',
+      phone: '5519991234567',
       templateId: 'tpl-1',
       templateParams: [],
       recipientRowId: 'rec-1',

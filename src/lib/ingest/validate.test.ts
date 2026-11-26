@@ -5,7 +5,7 @@ import { parseIngestPayload } from './validate';
 const BASE = {
   webhook_id: '1234567890123456',
   webhook_name: 'Landing page — Black Friday',
-  phone: '19992496598', // celular BR válido, sem DDI
+  phone: '19991234567', // celular BR válido, sem DDI
 };
 
 describe('parseIngestPayload — bad_request', () => {
@@ -123,7 +123,7 @@ describe('parseIngestPayload — phone (SPEC 050, ligada)', () => {
 
   it('rejects an unknown DDD (invalid_ddd)', () => {
     // DDD 20 não existe na lista da Anatel.
-    expect(parseIngestPayload({ ...BASE, phone: '20992496598' })).toMatchObject(
+    expect(parseIngestPayload({ ...BASE, phone: '20991234567' })).toMatchObject(
       {
         ok: false,
         code: 'invalid_phone',
@@ -133,7 +133,7 @@ describe('parseIngestPayload — phone (SPEC 050, ligada)', () => {
   });
 
   it('rejects an 11-digit local part whose 9th digit is not 9 (mobile_invalid_ninth_digit)', () => {
-    expect(parseIngestPayload({ ...BASE, phone: '19892496598' })).toMatchObject(
+    expect(parseIngestPayload({ ...BASE, phone: '19891234567' })).toMatchObject(
       {
         ok: false,
         code: 'invalid_phone',
@@ -170,22 +170,22 @@ describe('parseIngestPayload — phone (SPEC 050, ligada)', () => {
 
   it('accepts an 8-digit legacy mobile (SPEC 050 D-6)', () => {
     // DDD 19, local de 8 dígitos começando em 9 → mobile_legacy, aceito.
-    const result = parseIngestPayload({ ...BASE, phone: '1992496598' });
+    const result = parseIngestPayload({ ...BASE, phone: '1991234567' });
     expect(result).toMatchObject({ ok: true });
   });
 
   it('normalizes with country code, digits-only, no +', () => {
-    const result = parseIngestPayload({ ...BASE, phone: '(19) 99249-6598' });
+    const result = parseIngestPayload({ ...BASE, phone: '(19) 99123-4567' });
     expect(result).toMatchObject({ ok: true });
-    if (result.ok) expect(result.value.phone).toBe('5519992496598');
+    if (result.ok) expect(result.value.phone).toBe('5519991234567');
   });
 
   it('coerces a JS number the same way webhook_id does (does not treat it as empty)', () => {
-    // 19992496598 sem aspas — mesmo tipo de erro de chamador que o
+    // 19991234567 sem aspas — mesmo tipo de erro de chamador que o
     // teste de webhook_id já cobre; phone precisa da MESMA coerção.
-    const result = parseIngestPayload({ ...BASE, phone: 19992496598 });
+    const result = parseIngestPayload({ ...BASE, phone: 19991234567 });
     expect(result).toMatchObject({ ok: true });
-    if (result.ok) expect(result.value.phone).toBe('5519992496598');
+    if (result.ok) expect(result.value.phone).toBe('5519991234567');
   });
 });
 

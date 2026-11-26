@@ -152,7 +152,7 @@ export function normalizeContactPhone(
 }
 
 /**
- * Exibição: `5519992496598` → `"+55 (19) 99924-9658"`. Nunca lança —
+ * Exibição: `5519991234567` → `"+55 (19) 99123-4567"`. Nunca lança —
  * dígitos que não casam com um formato BR conhecido voltam com um `+`
  * na frente e mais nada (fallback seguro para número estrangeiro).
  */

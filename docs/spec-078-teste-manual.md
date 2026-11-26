@@ -24,7 +24,7 @@ Feita uma vez, antes dos itens. **Nunca contra dado real de cliente** — use co
   -- apply_plan_renewal deve aparecer UMA vez, com pronargs = 9
   ```
 
-- [ ] **`PLATFORM_OWNER_EMAILS`** configurada no servidor de teste com o e-mail da sua sessão (`brunopelatieri@gmail.com` ou o que você usa). Local: `.env.local` + reiniciar o `npm run dev`.
+- [ ] **`PLATFORM_OWNER_EMAILS`** configurada no servidor de teste com o e-mail da sua sessão (`dono@exemplo.com` ou o que você usa). Local: `.env.local` + reiniciar o `npm run dev`.
 
 - [ ] **Conta A ("vítima")** criada por `/signup`, num plano **mensal pago com ciclo** (ex.: Essencial), com **dois membros**: um `owner` e um `agent`/`admin`. Os dois precisam ter e-mail **seu e acessível** (use aliases `seu+a1@gmail.com`, `seu+a2@gmail.com`) — os itens 12 a 16 e 18 dependem de receber/entrar com eles.
 - [ ] **Conta B** em plano **sem ciclo** (Grátis/`unlimited`) — só para o item 3.
@@ -354,7 +354,7 @@ Repita o item 12 no `owner` da Conta A. O diálogo deve exibir, além dos avisos
    ```bash
    curl -s -X PATCH "$BASE_URL/api/platform/users/<id do agent>" \
      -H "Cookie: $COOKIE" -H "Content-Type: application/json" \
-     -d '{"email":"brunopelatieri@gmail.com"}'     # um e-mail de PLATFORM_OWNER_EMAILS
+     -d '{"email":"dono@exemplo.com"}'     # um e-mail de PLATFORM_OWNER_EMAILS
    # Esperado: HTTP 400, code "email_reserved_for_platform_owner"
    ```
 

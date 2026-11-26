@@ -36,7 +36,7 @@ exige acesso ao servidor, o mesmo nível de confiança que
 
 ```bash
 # .env.local (ou variável de ambiente do host em produção)
-PLATFORM_OWNER_EMAILS=bruno@zapcrmbr.com,outra-pessoa@zapcrmbr.com
+PLATFORM_OWNER_EMAILS=dono@exemplo.com,outra-pessoa@exemplo.com
 ```
 
 Lista separada por vírgula. **Sem essa variável, o console não existe** —
@@ -833,7 +833,7 @@ efeito ficariam indistinguíveis no histórico.
 
 ```bash
 # Identidade do proprietário — sem ela, /admin e /api/platform/** são 404.
-PLATFORM_OWNER_EMAILS=bruno@zapcrmbr.com
+PLATFORM_OWNER_EMAILS=dono@exemplo.com
 
 # A OUTRA porta (automação/scripts) — continua existindo em paralelo,
 # nunca confundir as duas.
@@ -853,11 +853,11 @@ MESSAGE_RETENTION_ENABLED=true
 # /admin/notifications, nada quebra.
 SMTP_HOST=smtp.seuprovedor.com
 SMTP_PORT=587
-SMTP_USER=avisos@zapcrmbr.com
+SMTP_USER=avisos@exemplo.com
 SMTP_PASSWORD=
 SMTP_SECURE=false
-SMTP_FROM="ZAP CRM BR <avisos@zapcrmbr.com>"
-SYSTEM_NOTIFICATION_EMAIL=bruno@zapcrmbr.com
+SMTP_FROM="ZAP CRM BR <avisos@exemplo.com>"
+SYSTEM_NOTIFICATION_EMAIL=dono@exemplo.com
 
 # Webhook dos mesmos avisos — PLAN_REQUEST_WEBHOOK_URL continua valendo
 # (compat); se as duas existirem, SYSTEM_EVENT_WEBHOOK_URL vence.

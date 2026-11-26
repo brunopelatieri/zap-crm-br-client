@@ -9,19 +9,19 @@ describe('normalizeContactPhone — modo BR', () => {
   const br = { brMode: true };
 
   it('normaliza um celular formatado com máscara e DDI', () => {
-    const r = normalizeContactPhone('+55 (19) 9 9249-6598', br);
+    const r = normalizeContactPhone('+55 (19) 9 9123-4567', br);
     expect(r).toMatchObject({
       ok: true,
-      phone: '5519992496598',
+      phone: '5519991234567',
       kind: 'mobile',
     });
   });
 
   it('adiciona o DDI quando ausente', () => {
-    const r = normalizeContactPhone('19992496598', br);
+    const r = normalizeContactPhone('19991234567', br);
     expect(r).toMatchObject({
       ok: true,
-      phone: '5519992496598',
+      phone: '5519991234567',
       kind: 'mobile',
     });
   });
@@ -139,7 +139,7 @@ describe('normalizeContactPhone — modo não-BR', () => {
   const nonBr = { brMode: false };
 
   it('recusa número doméstico sem DDI em vez de adivinhar o país', () => {
-    expect(normalizeContactPhone('19992496598', nonBr)).toEqual({
+    expect(normalizeContactPhone('19991234567', nonBr)).toEqual({
       ok: false,
       reason: 'missing_country_code',
     });
@@ -150,7 +150,7 @@ describe('normalizeContactPhone — modo não-BR', () => {
       ok: true,
       kind: 'foreign',
     });
-    expect(normalizeContactPhone('+5519992496598', nonBr)).toMatchObject({
+    expect(normalizeContactPhone('+5519991234567', nonBr)).toMatchObject({
       ok: true,
       kind: 'mobile',
     });
@@ -159,7 +159,7 @@ describe('normalizeContactPhone — modo não-BR', () => {
 
 describe('formatPhoneForDisplay', () => {
   it('formata celular BR', () => {
-    expect(formatPhoneForDisplay('5519992496598')).toBe('+55 (19) 99249-6598');
+    expect(formatPhoneForDisplay('5519991234567')).toBe('+55 (19) 99123-4567');
   });
 
   it('formata fixo BR', () => {

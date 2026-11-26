@@ -118,7 +118,7 @@ describe('requestAccessCode', () => {
       });
       const r = await requestAccessCode(
         {
-          rawPhone: '19992496598',
+          rawPhone: '19991234567',
           publicCode: null,
           purpose: 'first_access',
           ipHash: IP,
@@ -155,7 +155,7 @@ describe('requestAccessCode', () => {
 
     const r = await requestAccessCode(
       {
-        rawPhone: '(19) 99249-6598',
+        rawPhone: '(19) 99123-4567',
         publicCode: 'ABCD2345',
         purpose: 'first_access',
         ipHash: IP,
@@ -192,7 +192,7 @@ describe('requestAccessCode', () => {
     );
     const r = await requestAccessCode(
       {
-        rawPhone: '19992496598',
+        rawPhone: '19991234567',
         publicCode: null,
         purpose: 'reset',
         ipHash: IP,
@@ -206,7 +206,7 @@ describe('requestAccessCode', () => {
 
   describe('opt-out no pedido anônimo (F5-05)', () => {
     const input = {
-      rawPhone: '19992496598',
+      rawPhone: '19991234567',
       publicCode: null,
       purpose: 'reset' as const,
       ipHash: IP,
@@ -259,7 +259,7 @@ describe('requestAccessCode', () => {
 
 describe('completeAccessCode', () => {
   const base = {
-    rawPhone: '19992496598',
+    rawPhone: '19991234567',
     publicCode: null,
     rawCode: '123 456',
     password: STRONG,
@@ -276,7 +276,7 @@ describe('completeAccessCode', () => {
     );
     expect(r.status).toBe('ok');
     expect(svc.completeCode).toHaveBeenCalledWith({
-      phones: ['5519992496598', '551992496598'],
+      phones: ['5519991234567', '551991234567'],
       publicCode: null,
       code: '123456',
       password: STRONG,
@@ -346,7 +346,7 @@ describe('signIn', () => {
   it('ok: sessão com todos os acessos em que a senha bateu', async () => {
     const svc = fakeService();
     const r = await signIn(
-      { rawPhone: '19992496598', password: STRONG, ipHash: IP },
+      { rawPhone: '19991234567', password: STRONG, ipHash: IP },
       deps(svc)
     );
     expect(r).toMatchObject({ status: 'ok', accessCount: 2 });
@@ -365,7 +365,7 @@ describe('signIn', () => {
     expect(
       (
         await signIn(
-          { rawPhone: '19992496598', password: 'a'.repeat(73), ipHash: IP },
+          { rawPhone: '19991234567', password: 'a'.repeat(73), ipHash: IP },
           deps(svc)
         )
       ).status
@@ -378,7 +378,7 @@ describe('signIn', () => {
     expect(
       (
         await signIn(
-          { rawPhone: '19992496598', password: STRONG, ipHash: IP },
+          { rawPhone: '19991234567', password: STRONG, ipHash: IP },
           deps(svc)
         )
       ).status
@@ -431,11 +431,11 @@ describe('sessão aberta', () => {
   });
 
   it('maskedPhoneOf mascara o telefone do acesso atual', async () => {
-    const db = fakeDb({ contacts: { phone: '+55 19 99249-6598' } });
+    const db = fakeDb({ contacts: { phone: '+55 19 99123-4567' } });
     const masked = await maskedPhoneOf(session, { db: () => db });
     expect(masked).not.toBeNull();
-    expect(masked).not.toContain('99249');
-    expect(masked).toContain('98');
+    expect(masked).not.toContain('99123');
+    expect(masked).toContain('67');
     expect(
       await maskedPhoneOf({ ...session, current: null }, { db: () => db })
     ).toBeNull();

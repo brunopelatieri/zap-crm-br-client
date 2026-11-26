@@ -359,7 +359,7 @@ describe('createCloudChannel — duas escritas, nenhuma transação (§5)', () =
     accountId: ACCOUNT,
     userId: 'user-1',
     name: 'WhatsApp Oficial 2',
-    identifier: '5519992496598',
+    identifier: '5519991234567',
     status: 'connected' as const,
     statusDetail: null,
     connectedAt: '2026-08-28T00:00:00.000Z',
@@ -384,7 +384,7 @@ describe('createCloudChannel — duas escritas, nenhuma transação (§5)', () =
     expect(state.channels[0]).toMatchObject({
       account_id: ACCOUNT,
       type: 'whatsapp_cloud',
-      identifier: '5519992496598',
+      identifier: '5519991234567',
       status: 'connected',
     });
     expect(state.channels[0]).not.toHaveProperty('is_default');
@@ -430,7 +430,7 @@ describe('createCloudChannel — adoção da credencial órfã', () => {
     accountId: ACCOUNT,
     userId: 'user-1',
     name: 'WhatsApp Oficial',
-    identifier: '5519992496598',
+    identifier: '5519991234567',
     status: 'connected' as const,
     statusDetail: null,
     connectedAt: '2026-08-28T00:00:00.000Z',
@@ -541,12 +541,12 @@ describe('reconcileCloudChannel — o diagnóstico alinha, mas não ressuscita',
     const db = makeDb(state);
 
     await reconcileCloudChannel(db, ACCOUNT, 'chan-cloud-1', {
-      identifier: '5519992496598',
+      identifier: '5519991234567',
       status: 'connected',
       statusDetail: null,
     });
 
-    expect(state.channels[0].identifier).toBe('5519992496598');
+    expect(state.channels[0].identifier).toBe('5519991234567');
     expect(state.channels[0].status).toBe('connected');
   });
 
@@ -592,7 +592,7 @@ describe('updateCloudChannelOnSave — salvar É o que reativa (D-12)', () => {
     const db = makeDb(state);
 
     await updateCloudChannelOnSave(db, ACCOUNT, 'chan-cloud-1', {
-      identifier: '5519992496598',
+      identifier: '5519991234567',
       status: 'connected',
       statusDetail: null,
       connectedAt: '2026-08-28T00:00:00.000Z',
@@ -604,7 +604,7 @@ describe('updateCloudChannelOnSave — salvar É o que reativa (D-12)', () => {
 
   it('resposta da Meta sem telefone não apaga o identifier atual', async () => {
     const state = makeState({
-      channels: [cloudChannel({ identifier: '5519992496598' })],
+      channels: [cloudChannel({ identifier: '5519991234567' })],
     });
     const db = makeDb(state);
 
@@ -615,7 +615,7 @@ describe('updateCloudChannelOnSave — salvar É o que reativa (D-12)', () => {
       connectedAt: null,
     });
 
-    expect(state.channels[0].identifier).toBe('5519992496598');
+    expect(state.channels[0].identifier).toBe('5519991234567');
   });
 
   it('erro sobe — reativar com o plano no teto precisa ser dito', async () => {
@@ -768,8 +768,8 @@ describe('removeCloudChannel — desativar, não apagar (D-12)', () => {
 
 describe('helpers', () => {
   it('identifierFromDisplayPhone guarda só os dígitos', () => {
-    expect(identifierFromDisplayPhone('+55 19 99249-6598')).toBe(
-      '5519992496598'
+    expect(identifierFromDisplayPhone('+55 19 99123-4567')).toBe(
+      '5519991234567'
     );
     expect(identifierFromDisplayPhone('')).toBeNull();
     expect(identifierFromDisplayPhone(undefined)).toBeNull();

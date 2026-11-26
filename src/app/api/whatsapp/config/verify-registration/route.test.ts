@@ -101,7 +101,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 const verifyPhoneNumber = vi.fn(async () => ({
   id: '892352847302912',
-  display_phone_number: '+55 19 99249-6598',
+  display_phone_number: '+55 19 99123-4567',
 }));
 
 // `importOriginal`: `MetaApiError`/`isMetaCredentialError` reais — é a
@@ -173,7 +173,7 @@ describe('verify-registration por canal (SPEC 064 F4)', () => {
     const body = await (await get()).json();
 
     expect(body.live).toBe(true);
-    expect(state.channels[0].identifier).toBe('5519992496598');
+    expect(state.channels[0].identifier).toBe('5519991234567');
     expect(state.channels[0].status).toBe('connected');
   });
 

@@ -301,7 +301,7 @@ export async function nextCloudChannelName(
 /**
  * O telefone de exibição do canal (D-9).
  *
- * `display_phone_number` chega da Meta formatado ("+55 19 99249-6598");
+ * `display_phone_number` chega da Meta formatado ("+55 19 99123-4567");
  * gravamos só os dígitos, o mesmo formato canônico que o resto do
  * sistema usa. Vazio vira `null` — melhor canal sem telefone do que
  * canal com string vazia que a tela tentaria formatar.

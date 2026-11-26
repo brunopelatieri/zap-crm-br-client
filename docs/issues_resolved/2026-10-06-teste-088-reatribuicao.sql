@@ -19,7 +19,7 @@ DECLARE
   v_uid         uuid := gen_random_uuid();
   -- conta "compartilhada" do teste: a do vn (dono: Bruno) se existir; senão a conta com mais membros
   v_acc         uuid := coalesce(
-                          (SELECT id FROM accounts WHERE id = '5e0564ad-a8f6-4dec-89a1-7e7bdc1775be'),
+                          (SELECT id FROM accounts WHERE id = '<ID_CONTA_TESTE>'),
                           (SELECT a.id FROM accounts a
                             ORDER BY (SELECT count(*) FROM profiles p WHERE p.account_id = a.id) DESC, a.created_at
                             LIMIT 1));

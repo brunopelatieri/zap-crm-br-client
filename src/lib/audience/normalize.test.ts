@@ -139,10 +139,10 @@ describe('normalizeAudience', () => {
   describe('validação SPEC 050 por padrão (D-2)', () => {
     it('acrescenta o DDI 55 a um número doméstico sem DDI, em vez de o confundir com DDI 19', () => {
       // Achado J (SPEC 052 §2.2): antes do D-2 este número virava
-      // "19992496598" — um telefone com DDI 19, que não existe.
-      const result = normalizeAudience([row(2, '19992496598')]);
+      // "19991234567" — um telefone com DDI 19, que não existe.
+      const result = normalizeAudience([row(2, '19991234567')]);
 
-      expect(result.rows[0].phone).toBe('5519992496598');
+      expect(result.rows[0].phone).toBe('5519991234567');
     });
 
     it('rejeita DDD que não existe na lista da Anatel', () => {

@@ -86,7 +86,7 @@ export async function ensureContactIdentity(params: {
     // `phone_normalized` (migração 022), não a coluna `phone` crua: nem
     // todo caminho de criação de contato sanitiza dígitos antes de
     // gravar (a importação por CSV, por exemplo, grava a célula da
-    // planilha como veio — "+55 (19) 99249-6598"). `phone` já chega
+    // planilha como veio — "+55 (19) 99123-4567"). `phone` já chega
     // aqui só-dígitos (o chamador sanitiza), então casar pela coluna
     // gerada é o que funciona independente de como o contato nasceu.
     const { data: contact } = await db
