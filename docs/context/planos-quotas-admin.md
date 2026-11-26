@@ -28,6 +28,7 @@
 11. **Pagamento manual:** o identificador externo vai **literal** (sem prefixo), senão o mesmo Pix aplica duas vezes; `console:<uuid>` nasce ao abrir o diálogo, não no clique.
 12. **Identidade de usuário (SPEC 078):** e-mail de cliente não pode virar o reservado do proprietário (`email_reserved_for_platform_owner` — se falhar é **incidente de segurança**); o proprietário não edita o próprio e-mail pelo console.
 13. **Cascata de limites sem "ilimitado" por acidente** (SPEC 069 §3.4): valor ausente/torto desce um nível até o padrão de código; `NULL` = "não configurado aqui". Limite fora de `registry.ts` é limite escondido.
+14. **Excluir conta ou usuário nunca por MCP nem por API de plataforma** ([SPEC 091](../spec-091-assistente-da-plataforma-e-mcp-do-proprietario.md) A-19, ratificada pelo mantenedor em 2026-11-26): nada de endpoint, escopo de chave ou ferramenta de exclusão de conta, usuário ou membro, com ou sem opt-in. A exclusão continua só pelo console e pela "Zona de risco" do titular. O resto da SPEC 091 é proposta.
 
 ## Exclusão da conta pelo titular (PRD 072 / SPEC 073)
 

@@ -34,6 +34,11 @@
 - Respostas duplicadas ao cliente: o `stand down` da regra 2 foi removido ou um fluxo também respondeu.
 - Custo inesperado: o limite por conta e o teto por conversa existem para proteger a chave do dono; não os contorne em campanha.
 
+## Decisões ratificadas, ainda sem código
+
+- **Fine-tuning (treinar modelo) está fora** do ZAP CRM BR, por decisão do mantenedor em 2026-11-26 ([SPEC 089](../spec-089-agentes-de-ia-openrouter-rag-ferramentas.md) D-19, motivo no §7). Não crie job de treino, tela de treino nem integração com API de fine-tuning; reabrir exige nova decisão do mantenedor. O campo de modelo continua aceitando o identificador de um modelo já treinado por fora.
+- O restante da SPEC 089 (OpenRouter, base de conhecimento ampliada, execução de ações, ajuste do agente) é **proposta**, não regra vigente: confira o Status da SPEC antes de implementar.
+
 ## Mais
 
 [`catalogo-specs.md`](./catalogo-specs.md) · variáveis `AI_*` em `src/lib/ai/defaults.ts`.

@@ -49,4 +49,5 @@ node -e "const s=o=>Array.isArray(o)?o.map(s):o&&typeof o==='object'?Object.from
 
 - Camada fina sobre a API pública: toda chamada autentica e é escopada por chave como qualquer cliente. Ferramentas em `mcp-server/src/tools/` (`read.ts`, `write.ts`, `broadcast.ts`).
 - **Somente leitura até opt-in** (escrita e disparo são ligados explicitamente; disparo exige `confirm`). Ferramenta nova que escreve respeita esse opt-in.
+- **Sem ferramenta de exclusão de conta ou de usuário**, em nenhum conjunto e com qualquer opt-in ([SPEC 091](../spec-091-assistente-da-plataforma-e-mcp-do-proprietario.md) A-19, ratificada em 2026-11-26). A ampliação do MCP (SPEC 090) e o MCP do proprietário (SPEC 091) são propostas: confira o Status de cada uma.
 - Endpoint novo que deva aparecer no MCP: ferramenta nova + [`docs/mcp.md`](../mcp.md) e [`mcp-server/README.md`](../../mcp-server/README.md).
