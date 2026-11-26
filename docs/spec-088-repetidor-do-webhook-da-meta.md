@@ -75,7 +75,7 @@ normalmente; o repetidor é uma saída a mais, em paralelo.
 | D-4  | **A chave é um segredo HMAC.** Cada entrega leva `X-Wacrm-Signature` (mesmo esquema de `sign.ts`); a chave nunca trafega. Alternativa descartada: chave estática enviada num cabeçalho (mais simples no n8n, porém trafega em toda requisição).       | **Ratificada** (mantenedor, 2026-11-23) |
 | D-5  | **Só `changes` com `metadata.phone_number_id`** de um número da conta são repetidos. Evento de WABA (template, conta) fica de fora: não é "de um número" e um WABA pode servir duas contas.                                                           | **Ratificada** (mantenedor, 2026-11-23) |
 | D-6  | **Número desativado** (SPEC 064 D-12) e número que não está no CRM não são repetidos.                                                                                                                                                                 | **Ratificada** (mantenedor, 2026-11-23) |
-| D-7  | **Semântica de entrega:** 1 tentativa, timeout de 5 s, sem seguir redirect; 15 falhas seguidas desligam o repetidor e a tela mostra o motivo.                                                                                                         | **Ratificada** (mantenedor, 2026-11-23) |
+| D-7  | **Semântica de entrega:** 1 tentativa, timeout de 5 s, sem seguir redirect; 15 falhas seguidas desligam o repetidor e a tela mostra quando desligou e após quantas falhas (o motivo da falha não é gravado).                                          | **Ratificada** (mantenedor, 2026-11-23) |
 | D-8  | **Quem gerencia:** admin ou acima, como as chaves de API. O cartão não aparece para os demais papéis.                                                                                                                                                 | **Ratificada** (mantenedor, 2026-11-23) |
 | D-9  | **Teste de conectividade** envia um payload de exemplo marcado com `X-Wacrm-Test: true`, funciona com o repetidor desligado, não conta como falha e devolve ao navegador só status HTTP e tempo (nunca o corpo da resposta).                          | **Ratificada** (mantenedor, 2026-11-23) |
 | D-10 | **Registro de atividade** (SPEC 075): ligar, desligar, trocar URL, gerar chave nova e remover entram no log da conta. É saída de dado pessoal para fora do CRM e merece rastro.                                                                       | **Ratificada** (mantenedor, 2026-11-23) |
@@ -132,14 +132,24 @@ oficial ativo dela.
 Corpo:
 
 - **POST inteiro da conta** (caso comum): a string `rawBody` que a rota
-  leu com `request.text()`, byte a byte.
-- **POST com eventos de mais de uma conta**: o mesmo objeto com `entry[]`
-  reduzido às entradas da conta e cada `changes[]` reduzido aos `changes`
-  da conta. Chaves de topo e o conteúdo de cada `change` ficam intactos;
-  entrada que fica sem `changes` é removida.
+  leu do corpo (`readTextWithLimit`, o mesmo texto que `request.text()`
+  daria), byte a byte.
+- **Corpo reduzido** (`filtered`): sai sempre que algum `change` do POST
+  não é repassável à conta, e não só quando há eventos de mais de uma
+  conta: número de outra conta, número da própria conta desativado ou fora
+  do CRM, `change` sem `metadata` (por exemplo, evento de template no mesmo
+  POST), número fora do escopo do App Secret ou `entry` malformada. O
+  objeto tem `entry[]` reduzido às entradas que têm `changes` da conta e
+  cada `changes[]` reduzido aos `changes` da conta. Chaves de topo e de cada
+  `entry` e o conteúdo de cada `change` ficam iguais, e a entrada que fica
+  sem `changes` é removida. O JSON é **regravado** com `JSON.stringify`:
+  espaços e escapes podem diferir do original da Meta, e a assinatura vale
+  sobre o corpo enviado.
 
-O consumidor não precisa distinguir os dois casos: em ambos o corpo é um
-webhook da Meta válido, só com dados da conta.
+O consumidor não precisa distinguir os dois casos para verificar a
+assinatura. Em ambos o corpo traz só `changes` de números da conta; o
+repetidor confere a assinatura da Meta e o número, e não valida o resto do
+conteúdo.
 
 ### 2.3 Semântica
 

@@ -904,12 +904,19 @@ request body** and compare in constant time; reject if `t` is more than
 a few minutes old (replay protection).
 
 ```js
-const [, t, v1] = header.match(/t=(\d+),v1=([0-9a-f]+)/);
-const expected = crypto
-  .createHmac('sha256', secret)
-  .update(`${t}.${rawBody}`)
-  .digest('hex');
-const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
+// rawBody: the bytes exactly as received (Buffer or string), before JSON.parse.
+const m = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(header ?? '');
+let ok = false;
+if (m) {
+  const [, t, v1] = m;
+  const fresh = Math.abs(Date.now() / 1000 - Number(t)) <= 300; // replay window
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${t}.`)
+    .update(rawBody)
+    .digest('hex');
+  ok = fresh && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
+}
 ```
 
 ### Delivery semantics
@@ -985,13 +992,19 @@ signature is not forwarded. Authenticate the call with
 **Body.** The Meta webhook, with no wacrm envelope:
 
 - Normal case: the whole POST, **byte for byte** as Meta sent it.
-- If one Meta POST mixes events of several accounts (rare), you receive the
-  same object with `entry[]` reduced to your entries and each `changes[]`
-  reduced to your changes (other top-level keys and the content of each
-  change are untouched; an entry left without changes is dropped).
+- If the POST also carries something that is not yours (another account, a
+  number of yours that is disabled or not in wacrm, an event with no
+  number), you receive the same object with `entry[]` reduced to the entries
+  that have your changes and each `changes[]` reduced to your changes. Other
+  top-level and per-entry keys and the content of each change stay the same,
+  but the JSON is **re-serialized**: whitespace and escapes may differ from
+  Meta's original. An entry left without changes is dropped. The signature
+  covers the body you receive.
 
-Either way it is a valid Meta webhook that contains only your data. Tell
-your numbers apart by `entry[].changes[].value.metadata.phone_number_id`.
+Either way it contains only changes for your numbers. wacrm checks Meta's
+signature and the number, not the rest of the content: treat it as external
+input. Tell your numbers apart by
+`entry[].changes[].value.metadata.phone_number_id`.
 Media arrives as an `id` only (no URL, no bytes): downloading it needs a
 Graph API token that the relay does not provide.
 
@@ -1006,7 +1019,8 @@ over the raw request body. Parse the JSON only after the check.
   followed (a `3xx` counts as a failure). Any non-`2xx`, timeout or network
   error is a failure.
 - A success resets the failure counter; after **15 consecutive failures**
-  the relay switches itself off and the dashboard shows when and why.
+  the relay switches itself off and the dashboard shows when and after how
+  many failures.
   Switching it back on is always manual and resets the counter.
 - No queue, no retry, **no ordering guarantee**: events that arrive while
   your target is down are lost.
