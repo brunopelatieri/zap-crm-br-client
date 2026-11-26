@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Chave inválida (formato certo, valor falso): 401 \"User not found.\"",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "max_tokens": 10,
+    "messages": [
+      {
+        "role": "user",
+        "content": "oi"
+      }
+    ]
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "error": {
+        "message": "User not found.",
+        "code": 401
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "402 por limite da chave (limit_source openrouter_key_limit), checado antes de gerar. Mesmo code 402 que saldo zerado.",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "openai/gpt-5.5-pro",
+    "max_tokens": 100000,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Diga oi."
+      }
+    ]
+  },
+  "response": {
+    "status": 402,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734147-22OuSK0hA6b79i3uwm3k"
+    },
+    "body": {
+      "error": {
+        "message": "This request requires more credits, or fewer max_tokens. You requested up to 100000 tokens, but can only afford 14991. To increase, visit https://openrouter.ai/workspaces/default/keys/REDACTED and adjust the key's total limit",
+        "code": 402,
+        "metadata": {
+          "limit_source": "openrouter_key_limit",
+          "remedy_hint": "Raise or remove this API key's usage limit at https://openrouter.ai/settings/keys, or use a key without a limit.",
+          "provider_name": null
+        }
+      },
+      "user_id": "user_REDACTED"
+    }
+  }
+}

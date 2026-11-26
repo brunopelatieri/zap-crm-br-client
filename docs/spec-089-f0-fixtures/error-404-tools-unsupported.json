@@ -1,0 +1,83 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Modelo sem suporte a ferramentas recebendo tools: 404, failed_routing_step \"Filter by Tool Compatibility\".",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "mistralai/pixtral-large-2502",
+    "max_tokens": 400,
+    "temperature": 0.2,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search_knowledge",
+          "description": "Search the business knowledge base for facts about prices, policies and opening hours. Use it before answering any factual question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query in Portuguese"
+              }
+            },
+            "required": ["query"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "add_contact_tags",
+          "description": "Add tags to the contact of the current conversation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["tags"]
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Você é a atendente virtual da Loja Exemplo no WhatsApp. Responda em português do Brasil, curto e cordial. Use as ferramentas para consultar fatos antes de responder."
+      },
+      {
+        "role": "user",
+        "content": "Oi! Quanto custa o plano Avançado e qual o prazo para devolução?"
+      }
+    ]
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734138-WhaDBW2cNqWdxwjjGC5d"
+    },
+    "body": {
+      "error": {
+        "message": "No endpoints found that support tool use. Try disabling \"search_knowledge\". To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection",
+        "code": 404,
+        "metadata": {
+          "routing_funnel": [
+            {
+              "step": "Initial Endpoints",
+              "endpoint_count": 1
+            }
+          ],
+          "failed_routing_step": "Filter by Tool Compatibility"
+        }
+      }
+    }
+  }
+}

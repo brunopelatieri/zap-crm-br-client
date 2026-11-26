@@ -1,0 +1,142 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Primeiro passo com tools: duas tool_calls paralelas, content null, finish_reason tool_calls.",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "max_tokens": 400,
+    "temperature": 0.2,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search_knowledge",
+          "description": "Search the business knowledge base for facts about prices, policies and opening hours. Use it before answering any factual question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query in Portuguese"
+              }
+            },
+            "required": ["query"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "add_contact_tags",
+          "description": "Add tags to the contact of the current conversation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["tags"]
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Você é a atendente virtual da Loja Exemplo no WhatsApp. Responda em português do Brasil, curto e cordial. Use as ferramentas para consultar fatos antes de responder."
+      },
+      {
+        "role": "user",
+        "content": "Oi! Quanto custa o plano Avançado e qual o prazo para devolução?"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734035-Y16Tj0gVRxTb6ttjnYEJ"
+    },
+    "body": {
+      "id": "gen-1795734035-Y16Tj0gVRxTb6ttjnYEJ",
+      "object": "chat.completion",
+      "created": 1795734035,
+      "model": "anthropic/claude-haiku-5.5",
+      "provider": "Claude Platform on AWS",
+      "system_fingerprint": null,
+      "service_tier": "default",
+      "choices": [
+        {
+          "index": 0,
+          "logprobs": null,
+          "finish_reason": "tool_calls",
+          "native_finish_reason": "tool_use",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "reasoning": null,
+            "tool_calls": [
+              {
+                "type": "function",
+                "index": 0,
+                "id": "toolu_01DWEqRDVEAWhhwiGMSVS8EG",
+                "function": {
+                  "name": "search_knowledge",
+                  "arguments": "{\"query\": \"preço plano Avançado\"}"
+                }
+              },
+              {
+                "type": "function",
+                "index": 1,
+                "id": "toolu_01PXWPLDAbi5gZ4tSUF4Q4Jy",
+                "function": {
+                  "name": "search_knowledge",
+                  "arguments": "{\"query\": \"prazo para devolução\"}"
+                }
+              }
+            ],
+            "reasoning_details": [
+              {
+                "type": "reasoning.text",
+                "signature": "CAQSkwUKEAgUGAI4AUIIdGhpbmtpbmcSDHVa4rh8JEj9hKBi3BoMxpc6Q03km6N4pWArIjD7fN/p2HXZlf6/xNq1ATL3V/sNX9ralf1xQAuUIfcH/AnmiEN7Re38GDQQhTo1peUqsAQJiieJj2KXylN+WUpK8xr5gb6s3KjODl3YmgedBkpSf3+GLyzE7S0xGlSmPvSJ4RxHR9iOEc1GhmWRkAYH22D3GboRO6DVD4WayMWqVWFdE0+R5odK1uR/qyI2YsGbMWtMdozWO7DJKvfGwzzncFQJg1fT7chIjCzE4RiixM0XdF2sJlHWAtuQ8j4phNdqPnW8dtvthEkFCwyCJyQR79KyBooRBjJa9pUAsEiB1XdxYO1CSMhU03gd8weBZcGWnVwYCr+F1lDeMtwuQi3LwSDQ1eVXGoQ67LckAtTsPdMRb76o1KbModm7B1I6PwIRGQuG/tCx8/GjxXU0MT8Ao2qVDZyJUaD6tEoODLyTaS9x409WKCpXH3vy7RJ8+Rk7tZ6FTmL/O+oeb8Zadb16u6D4wuFhiJd7uXmzuHIzS58jeCVfeQuRiryyMg/iaMR2S0BHeXHTaWhidRSl9sN+J70PyneilWT7qnBCAg+nW0w2fFYG/qEBFkkGCoXJvD1WSY1TB5Qvwtx2kMH9jXdTJ4f8y0kW0L2wDMKB6A03LqvfFTEYkqqJVwxzD151bYF2XGCmtSyPSOFmPIGYMsA94vF4SqWIhbGdzgwi+SsodfeoGRFODr+R4ut/soRTkVB8FN1qSwDqLtZKQJvGPzHwalvRApsQwzh2HhKN9Id1A/wWjD/9nJnY1wnor0DXaPV+IJ7+C9FcEk/tPO5B4ebsh1D2pqYjHnqY0ZVir/WuBI5SahgB.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Y2xhdWRlLW9uLWF3cyJ9",
+                "format": "anthropic-claude-v1",
+                "index": 0
+              }
+            ]
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 597,
+        "completion_tokens": 127,
+        "total_tokens": 724,
+        "cost": 0.0001232,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001232,
+          "upstream_inference_prompt_cost": 0.0000597,
+          "upstream_inference_completions_cost": 0.0000635
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 16,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      }
+    }
+  }
+}

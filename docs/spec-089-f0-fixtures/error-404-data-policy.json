@@ -1,0 +1,42 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "provider.data_collection=deny sem endpoint compatível: 404, failed_routing_step \"Filter by Data Policy\".",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "liquid/lfm-3-1.7b:free",
+    "max_tokens": 30,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Diga oi."
+      }
+    ],
+    "provider": {
+      "data_collection": "deny"
+    }
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734128-ZJ5TlCS4xc71jJY4D3zx"
+    },
+    "body": {
+      "error": {
+        "message": "No endpoints found matching your data policy (Free model training). Configure: https://openrouter.ai/settings/privacy",
+        "code": 404,
+        "metadata": {
+          "routing_funnel": [
+            {
+              "step": "Initial Endpoints",
+              "endpoint_count": 1
+            }
+          ],
+          "failed_routing_step": "Filter by Data Policy"
+        }
+      }
+    }
+  }
+}

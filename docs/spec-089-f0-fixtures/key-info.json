@@ -1,0 +1,70 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "GET /api/v1/key: valida a chave sem gastar crédito (200; 401 se inválida). label, creator_user_id e workspace_id removidos.",
+  "endpoint": "/api/v1/key",
+  "method": "GET",
+  "request": null,
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "data": {
+        "is_management_key": false,
+        "is_provisioning_key": false,
+        "limit": 2.5,
+        "limit_reset": null,
+        "limit_remaining": 2.498406902,
+        "include_byok_in_limit": false,
+        "budgets": [
+          {
+            "scope": "key_limit",
+            "guardrail_id": null,
+            "budget_id": null,
+            "limit_usd": 2.5,
+            "spend_usd": 0.001593098,
+            "remaining_usd": 2.498406902,
+            "reset_interval": null,
+            "resets_at": null,
+            "include_byok": false
+          }
+        ],
+        "effective_budget": {
+          "scope": "key_limit",
+          "guardrail_id": null,
+          "budget_id": null,
+          "limit_usd": 2.5,
+          "spend_usd": 0.001593098,
+          "remaining_usd": 2.498406902,
+          "reset_interval": null,
+          "resets_at": null,
+          "include_byok": false
+        },
+        "usage": 0.001593098,
+        "usage_daily": 0.001593098,
+        "usage_weekly": 0.001593098,
+        "usage_monthly": 0.001593098,
+        "byok_usage": 0,
+        "byok_usage_daily": 0,
+        "byok_usage_weekly": 0,
+        "byok_usage_monthly": 0,
+        "is_free_tier": false,
+        "expires_at": null,
+        "organization_id": null,
+        "allowed_data_regions": ["global"],
+        "free_model_daily_requests": {
+          "used": 2,
+          "limit": 50,
+          "remaining": 48
+        },
+        "rate_limit": {
+          "requests": -1,
+          "interval": "10s",
+          "note": "This field is deprecated and safe to ignore."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Identificador de modelo inexistente: 400 (não 404).",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "fornecedor/modelo-inexistente",
+    "max_tokens": 10,
+    "messages": [
+      {
+        "role": "user",
+        "content": "oi"
+      }
+    ]
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734148-93NLWE6MilKTPPoECRwx"
+    },
+    "body": {
+      "error": {
+        "message": "fornecedor/modelo-inexistente is not a valid model ID",
+        "code": 400
+      },
+      "user_id": "user_REDACTED"
+    }
+  }
+}

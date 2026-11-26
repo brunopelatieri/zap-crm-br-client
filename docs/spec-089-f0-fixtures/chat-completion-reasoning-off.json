@@ -1,0 +1,78 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Mesmo chat com reasoning.enabled=false: reasoning_tokens = 0.",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "max_tokens": 300,
+    "temperature": 0.3,
+    "messages": [
+      {
+        "role": "system",
+        "content": "Você é a atendente virtual da Loja Exemplo no WhatsApp. Responda em português do Brasil, curto e cordial."
+      },
+      {
+        "role": "user",
+        "content": "Oi! Quanto custa o plano Avançado e qual o prazo para devolução?"
+      }
+    ],
+    "reasoning": {
+      "enabled": false
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734109-5ATSxDGhXoeWh1DEqbf6"
+    },
+    "body": {
+      "id": "gen-1795734109-5ATSxDGhXoeWh1DEqbf6",
+      "object": "chat.completion",
+      "created": 1795734109,
+      "model": "anthropic/claude-haiku-5.5",
+      "provider": "Claude Platform on AWS",
+      "system_fingerprint": null,
+      "service_tier": "default",
+      "choices": [
+        {
+          "index": 0,
+          "logprobs": null,
+          "finish_reason": "stop",
+          "native_finish_reason": "end_turn",
+          "message": {
+            "role": "assistant",
+            "content": "Oi! Tudo bem? 😊\n\nEu não tenho acesso aos preços atualizados nem às políticas de devolução da Loja Exemplo, então não quero te passar um valor errado. Para essas informações, você pode:\n\n- Consultar o site oficial da loja, na página de planos e na seção de trocas e devoluções;\n- Falar com um atendente humano, que consegue confirmar o valor do plano Avançado e o prazo exato de devolução para o seu caso.\n\nSe quiser, posso ajudar com outra dúvida ou te direcionar para o atendimento humano. Pode me dizer!",
+            "refusal": null,
+            "reasoning": null
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 82,
+        "completion_tokens": 206,
+        "total_tokens": 288,
+        "cost": 0.0001112,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001112,
+          "upstream_inference_prompt_cost": 0.0000082,
+          "upstream_inference_completions_cost": 0.000103
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      }
+    }
+  }
+}

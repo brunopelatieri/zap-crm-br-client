@@ -1,0 +1,83 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Chat simples, modelo padrão proposto (anthropic/claude-haiku-5.5). usage.cost em USD; reasoning_tokens > 0 sem pedir raciocínio.",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "max_tokens": 300,
+    "temperature": 0.3,
+    "messages": [
+      {
+        "role": "system",
+        "content": "Você é a atendente virtual da Loja Exemplo no WhatsApp. Responda em português do Brasil, curto e cordial."
+      },
+      {
+        "role": "user",
+        "content": "Oi! Quanto custa o plano Avançado e qual o prazo para devolução?"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734015-r2DaIq1ZPKV1gvSypAFd"
+    },
+    "body": {
+      "id": "gen-1795734015-r2DaIq1ZPKV1gvSypAFd",
+      "object": "chat.completion",
+      "created": 1795734015,
+      "model": "anthropic/claude-haiku-5.5",
+      "provider": "Claude Platform on AWS",
+      "system_fingerprint": null,
+      "service_tier": "default",
+      "choices": [
+        {
+          "index": 0,
+          "logprobs": null,
+          "finish_reason": "stop",
+          "native_finish_reason": "end_turn",
+          "message": {
+            "role": "assistant",
+            "content": "Oi! Tudo bem? 😊\n\nNão tenho as informações atualizadas sobre o valor do plano Avançado nem sobre o prazo de devolução aqui no atendimento. Para não te passar um dado errado, o ideal é confirmar com a nossa equipe, que consegue te informar certinho.\n\nSe preferir, posso encaminhar sua dúvida para um atendente humano. Posso ajudar com mais alguma coisa enquanto isso?",
+            "refusal": null,
+            "reasoning": null,
+            "reasoning_details": [
+              {
+                "type": "reasoning.text",
+                "signature": "CAQS3QYKEAgUGAI4AUIIdGhpbmtpbmcSDPRZyT39r3OgfqYX/RoMnIZ/9CHEV6WnuNfJIjDnwQ+YEcypAR/h7CfShgmsm/OL55vsBeiihaO40fGNVfdyNIBBT3fKpmnQanSwdbAq+gVvJDXa7cH77uPf2D2bUbhHAUw2rd2JoCFjTMWc0RMNeL6qAbFz/xPCGeVzjsYGGYG00OLtue0W+mSeIBodBAZZBWPfLCpBQNzgOXMzn85l0oeS8QqxDFvOsvBXXL5/Wm3ciTKHbGlm3kY6enUMvBtwYG4FbbeftRG6GHAmmV7cIuObBIPYoA6q3/l5NwnJulqi1Kcr6TBbIOWYWy8uDF0K7gWD7Ptj7jBnFw9GKPifLI++x6ty97K1uER5k7kyiiNqHddb2m4kw+vABAwp4F5ajFVNzlPIEOeicWHQV6s2zktq0GRmW0eYDl31Df70QhkDorspgoETXAH/FgShGe68gC6hXtF1PYnukUb/wDxboJIt/mRmPT41KftKeYCGtcTXT5NOXwUa9Mieh7liuiUHOYswS18UUyi4STCFvun14YkpA2XXiFP3AmfnuFpFW+jo6Ys9QtF9ndaGR/KFLCO/dBMZdxNq9zMr0UZ/kzUgBNUVZU+FCZHY5NMsXMlDf8HHpvCopwkqt1jxjqkLmi9NvpwHh3WAYCZajiavzU63NjHqeR2dPZIQmQco9sVueAFcRl04C2OT4TVutIwEOKiCQ1kkekIrhPW/j8fTcqMz2RZbIp6jTiknxYMlcsow0N1CqG/jhHKfZivCwJ/3BrLxHv7ry25JOzLCBPbiEgqvZrvTCZvODuCQNUzv9M8fel67A/wrmihUUC9skRGpVKmzQDw4p7Dv7vQn4UnltI4Et2GedgpyNhmHjQ4dM5niZ0z5y0MX4DT2ZjZ4erVV3g9sbqhmdRGsYkphFaQrE952fTVR6lP5wjerpdyxyjha0bfKCl+KH41jIrsFqVK/2G2og4Zmq+RwhldBWLp1LE4GsK9bRd3eiMi1G64da3DWdeYShNi5rMjI5Hb4AcBlM8xYIdnp/LNCx2Rq/ETj3+Y/ipfagIdAW8lSTyTnrcSkVFcer+vXxYOfmkTTspdbn4JEEfJ6V5K//OHXXmE+b+2ez0aNaObw/DPnkYoYAQ==.eyJlbmRwb2ludF9zbHVnIjoiYW50aHJvcGljL2NsYXVkZS1oYWlrdS01LjUtMjAyNjEwMDd8Y2xhdWRlLW9uLWF3cyJ9",
+                "format": "anthropic-claude-v1",
+                "index": 0
+              }
+            ]
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 83,
+        "completion_tokens": 252,
+        "total_tokens": 335,
+        "cost": 0.0001343,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001343,
+          "upstream_inference_prompt_cost": 0.0000083,
+          "upstream_inference_completions_cost": 0.000126
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 95,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      }
+    }
+  }
+}

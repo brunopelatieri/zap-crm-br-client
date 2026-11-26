@@ -1,0 +1,316 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "GET https://openrouter.ai/api/v1/models (público, sem chave)",
+  "note": "Recorte de 3 de 477 modelos: dois com tools em supported_parameters e um sem (pixtral-large). Embeddings não aparecem aqui: ficam em /api/v1/embeddings/models.",
+  "response": {
+    "status": 200,
+    "body": {
+      "total_count": 477,
+      "data": [
+        {
+          "id": "mistralai/pixtral-large-2502",
+          "canonical_slug": "mistralai/pixtral-large-2502",
+          "hugging_face_id": null,
+          "name": "Mistral: Pixtral Large 2502",
+          "created": 1795135865,
+          "description": "Pixtral Large 2502 is the February 2025 version of Mistral AI's large multimodal model, following [Pixtral Large 2411](https://openrouter.ai/mistralai/pixtral-large-2411). It accepts text and image input, including documents, charts, and natural images,...",
+          "context_length": 128000,
+          "architecture": {
+            "modality": "text+image->text",
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text"],
+            "tokenizer": "Mistral",
+            "instruct_type": null
+          },
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.000006"
+          },
+          "top_provider": {
+            "context_length": 128000,
+            "max_completion_tokens": 102400,
+            "is_moderated": true
+          },
+          "per_request_limits": null,
+          "supported_parameters": [
+            "max_tokens",
+            "stop",
+            "temperature",
+            "top_k",
+            "top_p"
+          ],
+          "default_parameters": {},
+          "supported_voices": null,
+          "knowledge_cutoff": null,
+          "expiration_date": null,
+          "links": {
+            "details": "/api/v1/models/mistralai/pixtral-large-2502/endpoints"
+          },
+          "endpoints": [
+            "/api/v1/chat/completions",
+            "/api/v1/completions",
+            "/api/v1/messages",
+            "/api/v1/responses"
+          ]
+        },
+        {
+          "id": "anthropic/claude-haiku-5.5",
+          "canonical_slug": "anthropic/claude-haiku-5.5-20261007",
+          "hugging_face_id": null,
+          "name": "Anthropic: Claude Haiku 5.5",
+          "created": 1791397883,
+          "description": "Claude Haiku 5.5 is Anthropic's small, fast model for high-volume, cost-sensitive work such as summarization, subagents, and browser use. It succeeds Claude Haiku 4.5 with stronger coding, computer use, and...",
+          "context_length": 1000000,
+          "architecture": {
+            "modality": "text+image+file->text",
+            "input_modalities": ["text", "image", "file"],
+            "output_modalities": ["text"],
+            "tokenizer": "Claude",
+            "instruct_type": null
+          },
+          "pricing": {
+            "prompt": "0.0000001",
+            "completion": "0.0000005",
+            "web_search": "0.01",
+            "input_cache_read": "0.00000001",
+            "input_cache_write": "0.000000125",
+            "input_cache_write_1h": "0.0000002",
+            "overrides": [
+              {
+                "min_prompt_tokens": 100000,
+                "prompt": "0.0000005",
+                "completion": "0.0000025",
+                "input_cache_read": "0.00000005",
+                "input_cache_write": "0.000000625",
+                "input_cache_write_1h": "0.000001"
+              }
+            ]
+          },
+          "top_provider": {
+            "context_length": 1000000,
+            "max_completion_tokens": 128000,
+            "is_moderated": true
+          },
+          "per_request_limits": null,
+          "supported_parameters": [
+            "include_reasoning",
+            "max_completion_tokens",
+            "max_tokens",
+            "reasoning",
+            "reasoning_effort",
+            "response_format",
+            "stop",
+            "structured_outputs",
+            "tool_choice",
+            "tools",
+            "verbosity"
+          ],
+          "default_parameters": {},
+          "supported_voices": null,
+          "knowledge_cutoff": null,
+          "expiration_date": null,
+          "links": {
+            "details": "/api/v1/models/anthropic/claude-haiku-5.5-20261007/endpoints"
+          },
+          "endpoints": [
+            "/api/v1/chat/completions",
+            "/api/v1/completions",
+            "/api/v1/messages",
+            "/api/v1/responses"
+          ],
+          "benchmarks": {
+            "design_arena": [
+              {
+                "arena": "agents",
+                "category": "pdf",
+                "elo": 1194,
+                "win_rate": 53.9,
+                "rank": 23
+              },
+              {
+                "arena": "models",
+                "category": "3d",
+                "elo": 1304,
+                "win_rate": 54.6,
+                "rank": 18
+              },
+              {
+                "arena": "models",
+                "category": "asciiart",
+                "elo": 1207,
+                "win_rate": 48,
+                "rank": 25
+              },
+              {
+                "arena": "models",
+                "category": "codecategories",
+                "elo": 1336,
+                "win_rate": 50.7,
+                "rank": 24
+              },
+              {
+                "arena": "models",
+                "category": "dataviz",
+                "elo": 1275,
+                "win_rate": 50.6,
+                "rank": 26
+              },
+              {
+                "arena": "models",
+                "category": "gamedev",
+                "elo": 1312,
+                "win_rate": 52.8,
+                "rank": 16
+              },
+              {
+                "arena": "models",
+                "category": "svg",
+                "elo": 1259,
+                "win_rate": 45.2,
+                "rank": 28
+              },
+              {
+                "arena": "models",
+                "category": "uicomponent",
+                "elo": 1262,
+                "win_rate": 49.7,
+                "rank": 36
+              },
+              {
+                "arena": "models",
+                "category": "website",
+                "elo": 1304,
+                "win_rate": 48.6,
+                "rank": 43
+              }
+            ],
+            "artificial_analysis": {
+              "intelligence_index": 36.5,
+              "coding_index": null,
+              "agentic_index": null,
+              "finance_and_accounting_index": 43.6,
+              "strategy_and_ops_index": 39.1,
+              "legal_index": 38.7,
+              "healthcare_and_medical_index": 37.5,
+              "engineering_index": 42.6,
+              "economics_index": 42.7,
+              "cyber_index": null,
+              "openness_index": null,
+              "multilingual_index": null,
+              "decision_index": 76.5
+            }
+          },
+          "reasoning": {
+            "mandatory": false,
+            "supported_efforts": [
+              "max",
+              "xhigh",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "default_effort": "medium"
+          }
+        },
+        {
+          "id": "openai/gpt-4.1-nano",
+          "canonical_slug": "openai/gpt-4.1-nano-2025-04-14",
+          "hugging_face_id": "",
+          "name": "OpenAI: GPT-4.1 Nano",
+          "created": 1744651369,
+          "description": "For tasks that demand low latency, GPT‑4.1 nano is the fastest and cheapest model in the GPT-4.1 series. It delivers exceptional performance at a small size with its 1 million...",
+          "context_length": 1047576,
+          "architecture": {
+            "modality": "text+image+file->text",
+            "input_modalities": ["image", "text", "file"],
+            "output_modalities": ["text"],
+            "tokenizer": "GPT",
+            "instruct_type": null
+          },
+          "pricing": {
+            "prompt": "0.0000001",
+            "completion": "0.0000004",
+            "web_search": "0.01",
+            "input_cache_read": "0.00000003"
+          },
+          "top_provider": {
+            "context_length": 1047576,
+            "max_completion_tokens": 942818,
+            "is_moderated": false
+          },
+          "per_request_limits": null,
+          "supported_parameters": [
+            "max_completion_tokens",
+            "response_format",
+            "seed",
+            "structured_outputs",
+            "temperature",
+            "tool_choice",
+            "tools",
+            "top_p"
+          ],
+          "default_parameters": {},
+          "supported_voices": null,
+          "knowledge_cutoff": "2024-06-30",
+          "expiration_date": null,
+          "links": {
+            "details": "/api/v1/models/openai/gpt-4.1-nano-2025-04-14/endpoints"
+          },
+          "endpoints": [
+            "/api/v1/chat/completions",
+            "/api/v1/completions",
+            "/api/v1/messages",
+            "/api/v1/responses"
+          ],
+          "benchmarks": {
+            "design_arena": [
+              {
+                "arena": "models",
+                "category": "3d",
+                "elo": 890,
+                "win_rate": 46,
+                "rank": 132
+              },
+              {
+                "arena": "models",
+                "category": "codecategories",
+                "elo": 1004,
+                "win_rate": 47.3,
+                "rank": 139
+              },
+              {
+                "arena": "models",
+                "category": "dataviz",
+                "elo": 884,
+                "win_rate": 41.1,
+                "rank": 139
+              },
+              {
+                "arena": "models",
+                "category": "gamedev",
+                "elo": 942,
+                "win_rate": 49.6,
+                "rank": 137
+              },
+              {
+                "arena": "models",
+                "category": "uicomponent",
+                "elo": 901,
+                "win_rate": 43.9,
+                "rank": 138
+              },
+              {
+                "arena": "models",
+                "category": "website",
+                "elo": 1013,
+                "win_rate": 48.1,
+                "rank": 141
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "captured_at": "2026-11-26",
+  "source": "OpenRouter, chamada real (SPEC 089 F0)",
+  "note": "Valor inválido em provider.data_collection: 400 com mensagem de validação.",
+  "endpoint": "/api/v1/chat/completions",
+  "method": "POST",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "max_tokens": 60,
+    "temperature": 0.3,
+    "messages": [
+      {
+        "role": "system",
+        "content": "Você é a atendente virtual da Loja Exemplo no WhatsApp. Responda em português do Brasil, curto e cordial."
+      },
+      {
+        "role": "user",
+        "content": "Oi! Quanto custa o plano Avançado e qual o prazo para devolução?"
+      }
+    ],
+    "provider": {
+      "data_collection": "banana"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-generation-id": "gen-1795734093-49oP6xutdE3VFxHlhXSL"
+    },
+    "body": {
+      "error": {
+        "message": "provider.data_collection: Invalid option: expected one of \"deny\"|\"allow\"",
+        "code": 400
+      },
+      "user_id": "user_REDACTED"
+    }
+  }
+}
