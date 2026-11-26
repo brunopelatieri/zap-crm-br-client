@@ -5,6 +5,7 @@
 **Status:** **decisões I-1…I-19 ratificadas com o PRD em 2026-11-06**; aguarda a SPEC 085 (F1–F4) no código.
 **Número provisório:** migração **099** **já foi usada** pela área do contato (`099_contact_portal_session_ceiling.sql`, aplicada no `vn` em 2026-11-19): esta SPEC passa a **100 ou maior** (a SPEC 087 também previa 100: quem for aplicada depois toma o próximo livre). Conferir `ls supabase/migrations/` e [`status.md`](./context/status.md) antes de criar; onde o texto abaixo diz "099", leia "o número que a 086 receber". Nota da F4 da SPEC 085: `form_responses.deal_id` já existe (098) e liga a resposta ao negócio criado pela faixa; a coluna inversa `deals.source_form_response_id` (I-11) continua valendo para negócios criados por outros caminhos.
 **Modelo de trabalho por fase:** PRD 084 §10 (F6 e F7).
+**Nota (2026-11-26, SPEC 089 P-7):** o `compose.ts` (ponto único de montagem do turno de IA) nasce na [SPEC 089](./spec-089-agentes-de-ia-openrouter-rag-ferramentas.md), F1. Ao implementar I-14 e I-15, `leadProfile` e `offerableForms` entram como entradas do `compose.ts`, em vez de alterar `auto-reply.ts` e `draft/route.ts` separadamente; o restante do desenho não muda.
 
 ---
 
