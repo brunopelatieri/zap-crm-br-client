@@ -35,9 +35,20 @@
  *   `listCloudChannels` seleciona colunas nomeadas de propósito:
  *   `access_token` e `verify_token` NÃO estão entre elas, porque a lista
  *   alimenta a rota que a interface consome (§5/§6.1). Só
- *   `resolveCloudConfig` — o caminho de envio — devolve a linha inteira,
- *   e o `decrypt()` continua acontecendo em `channels/send.ts`, o único
- *   lugar da camada que toca `ENCRYPTION_KEY`.
+ *   `resolveCloudConfig` — o caminho de envio — devolve a credencial, e o
+ *   `decrypt()` continua acontecendo em `channels/send.ts`, o único lugar
+ *   da camada que toca `ENCRYPTION_KEY`.
+ *
+ * Credencial só por service role (SPEC 089, P-15, migração 112)
+ *
+ *   `access_token`, `verify_token` e `app_secret` NÃO são legíveis pelo
+ *   JWT de `authenticated` (a 112 só dá SELECT por coluna nas demais).
+ *   Por isso `resolveCloudConfig` lê a linha de credencial com o cliente
+ *   de service role, e o `db` recebido (que pode ser o cliente de
+ *   sessão, sujeito a RLS) só decide o ESCOPO: o canal é resolvido por ele
+ *   com `account_id` casado, e a credencial é lida só depois, para aquele
+ *   canal e aquela conta. Um `channel_id` de outra conta não passa da
+ *   primeira consulta — nunca chega ao service role.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -45,12 +56,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveDefaultChannelId } from '@/lib/channels/default-channel';
 import { ChannelNotConfiguredError } from '@/lib/channels/errors';
 import type { Channel, ChannelStatus } from '@/lib/channels/types';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 /**
- * Linha de `whatsapp_config`. Tipada de forma frouxa de propósito: o
- * `select('*')` é o mesmo dos chamadores originais, e o que muda entre
- * os projetos Supabase (a coluna `channel_id` só existe onde a 055 já
- * rodou) não pode virar erro de tipo.
+ * Linha de `whatsapp_config`. Tipada de forma frouxa de propósito: o que
+ * muda entre os projetos Supabase (a coluna `channel_id` só existe onde a
+ * 055 já rodou) não pode virar erro de tipo.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WhatsappConfigRow = any;
@@ -100,6 +111,17 @@ export interface CloudChannelSummary {
  */
 const CONFIG_SUMMARY_COLUMNS =
   'channel_id, phone_number_id, waba_id, app_id, registered_at, last_registration_error, subscribed_apps_at, broadcast_cooldown_days, messaging_limit_tier';
+
+/**
+ * Colunas lidas por `resolveCloudConfig`: a linha de credencial inteira,
+ * NOMEADA coluna a coluna (nunca `*`) — uma coluna futura de
+ * `whatsapp_config` não passa a trafegar pelo caminho de envio sem alguém
+ * decidir isso aqui. Contém os três segredos (`access_token`,
+ * `verify_token`, `app_secret`), por isso só é consultada com o cliente de
+ * service role.
+ */
+export const CONFIG_CREDENTIAL_COLUMNS =
+  'id, user_id, account_id, channel_id, phone_number_id, waba_id, app_id, access_token, verify_token, app_secret, status, connected_at, registered_at, subscribed_apps_at, last_registration_error, messaging_limit_tier, messaging_limit_checked_at, broadcast_cooldown_days, created_at, updated_at';
 
 /**
  * Todos os números oficiais da conta, **do padrão para o mais novo**.
@@ -201,7 +223,12 @@ export async function listCloudChannels(
 export async function resolveCloudConfig(
   db: SupabaseClient,
   accountId: string,
-  channelId?: string | null
+  channelId?: string | null,
+  /**
+   * Cliente que lê a linha de credencial. Padrão: service role (a 112 fecha
+   * os segredos para o JWT). Só testes passam outro.
+   */
+  credentialDb?: SupabaseClient
 ): Promise<{ channel: Channel; config: WhatsappConfigRow }> {
   // `|| null`, e não `?? null`: `''` chega aqui quando um chamador
   // repassa `searchParams.get('channel_id')` de um `?channel_id=` vazio,
@@ -245,9 +272,14 @@ export async function resolveCloudConfig(
     );
   }
 
-  const { data: config, error: configError } = await db
+  // O canal acima já foi validado contra `accountId` pelo `db` recebido; a
+  // credencial é lida pelo service role SEMPRE com os dois filtros, para
+  // que um id de outra conta nunca devolva linha.
+  const { data: config, error: configError } = await (
+    credentialDb ?? supabaseAdmin()
+  )
     .from('whatsapp_config')
-    .select('*')
+    .select(CONFIG_CREDENTIAL_COLUMNS)
     .eq('channel_id', wantedId)
     .eq('account_id', accountId)
     .maybeSingle();

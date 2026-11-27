@@ -614,7 +614,7 @@ export async function loadChannelBilling(
 
   let config;
   try {
-    ({ config } = await resolveCloudConfig(db, accountId, channelId));
+    ({ config } = await resolveCloudConfig(db, accountId, channelId, admin));
   } catch (err) {
     if (!(err instanceof ChannelNotConfiguredError)) throw err;
     if (err.reason === 'read_failed') throw err;

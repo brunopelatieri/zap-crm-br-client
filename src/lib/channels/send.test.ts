@@ -215,12 +215,14 @@ function makeDb(results: Record<string, FakeEntry> = {}) {
     return chain;
   }
 
-  return {
-    client: {
-      from: (t: string) => builder(t),
-    } as unknown as SupabaseClient,
-    ops,
-  };
+  const client = {
+    from: (t: string) => builder(t),
+  } as unknown as SupabaseClient;
+  // P-15: `resolveCloudConfig` lê a credencial pelo service role. Quando o
+  // cenário traz `whatsapp_config`, o fake de sessão também responde pelo
+  // admin — é o mesmo "banco" do teste.
+  if (resultMap.has('whatsapp_config.select')) adminState.client = client;
+  return { client, ops };
 }
 
 const CONFIG_ROW = {

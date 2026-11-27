@@ -48,6 +48,18 @@ Modelos para ler (não copiar): `supabase/migrations/044_messaging_limit_and_quo
 - Tabela e sequência novas não dão nada a `anon` depois da 091: leitura sem login exige `GRANT SELECT … TO anon` na própria migração.
 - Antes de afirmar algo sobre essa ACL, verifique no `vn`: `SELECT has_function_privilege('anon', 'public.is_account_member(uuid, account_role_enum)', 'EXECUTE');` (idem para as `can_*`). Fechar a ACL é migração própria, com confirmação.
 
+## Colunas cifradas ou secretas: GRANT por coluna, leitura só por service role (SPEC 089 P-14/P-15)
+
+Policy de `SELECT` com só `is_account_member` deixa **qualquer** membro (`viewer` inclusive) ler a linha inteira pelo JWT, e o texto cifrado (AES-256-GCM) não precisa sair do servidor. Padrão das migrações 107, 111 e 112:
+
+- `REVOKE SELECT ON TABLE … FROM authenticated;` e `GRANT SELECT (todas as colunas menos as secretas) ON … TO authenticated;`. `REVOKE ALL … FROM anon`. INSERT/UPDATE/DELETE seguem (a RLS de admin+ decide; gravar um segredo novo não exige `SELECT` na coluna).
+- O servidor lê o segredo só com `supabaseAdmin()`, **sempre** filtrando por `account_id` já validado (o service role não tem RLS). `resolveCloudConfig` (`whatsapp_config`) é o exemplo: o `db` recebido decide o escopo (canal da conta), a credencial vem do service role. A API devolve só indicador ("configurado"), nunca o valor.
+- `select('*')` com o cliente de sessão nessas tabelas passa a dar `42501` (de propósito): liste as colunas ou use service role.
+- Coluna **nova** não herda o `GRANT` por coluna: nasce ilegível (falha fechada). Coluna comum nova precisa de `GRANT SELECT (coluna) … TO authenticated` na migração que a cria; coluna secreta nova não precisa de nada.
+- Tabelas hoje cobertas: `ai_configs.api_key`/`embeddings_api_key` (111), `whatsapp_config.access_token`/`app_secret`/`verify_token` e `webhook_endpoints.secret` (112), `ai_custom_tools.headers_encrypted` (107). Tabelas com RLS ligada e **zero** policy (`evolution_instance_secrets`) e hashes aleatórios de 256 bits (`api_keys.key_hash`, `account_invitations.token_hash`) não entram.
+- **Ordem de deploy:** código novo primeiro, migração depois. O código novo funciona com o banco antigo; a migração com o código antigo derruba a rota (a 112 derrubaria o envio de WhatsApp). Dev e produção compartilham o mesmo banco.
+- Prova: `scripts/verify-1xx-…sql` (bloco que termina em `RAISE EXCEPTION`, rebaixa o admin a `viewer`/`agent` e simula o papel) e `get_advisors` (security).
+
 ## Verificação e diagnóstico
 
 - `scripts/verify-039-rls.sql`, `scripts/verify-040-media.sql`: conferências (não migração) para o SQL Editor do `vn`; a PARTE A só lê.

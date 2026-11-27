@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const adminState = vi.hoisted(() => ({ client: undefined as unknown }));
+vi.mock('@/lib/supabase/admin', () => ({
+  supabaseAdmin: () => adminState.client,
+}));
+
 import {
   createSupabaseMock,
   opArgs,
@@ -232,7 +237,10 @@ function makeDb(scenario: Scenario) {
     }
   };
 
-  return createSupabaseMock(handler);
+  // P-15: `resolveCloudConfig` lê a credencial pelo service role; nos testes ele e o `db` são o mesmo fake.
+  const client = createSupabaseMock(handler);
+  adminState.client = client.db;
+  return client;
 }
 
 function contact(

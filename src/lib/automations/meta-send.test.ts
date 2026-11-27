@@ -158,6 +158,8 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock('./admin-client', () => ({ supabaseAdmin: () => h.client }));
+// P-15: `resolveCloudConfig` lê a credencial pelo service role canônico.
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: () => h.client }));
 
 vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (v: string) => `plain:${v}`,

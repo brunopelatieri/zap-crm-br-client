@@ -188,6 +188,12 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => supabaseMock),
 }));
 
+// P-15: `resolveCloudConfig` lê a credencial pelo service role; aqui ele e a
+// sessão são o mesmo fake (que traz `whatsapp_config`).
+vi.mock('@/lib/supabase/admin', () => ({
+  supabaseAdmin: () => supabaseMock,
+}));
+
 vi.mock('@/lib/flows/admin-client', () => ({
   supabaseAdmin: () => ({
     from: () => {

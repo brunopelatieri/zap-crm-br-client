@@ -1551,10 +1551,19 @@ describe('contagem de números do WABA (barata no caso comum)', () => {
         return db.from(t);
       },
     } as unknown as SupabaseClient;
+    // P-15: a credencial é lida pelo `admin` (service role), então as duas
+    // pontas entram na contagem.
+    const spyAdmin = {
+      ...admin,
+      from: (t: string) => {
+        tables.push(t);
+        return admin.from(t);
+      },
+    } as unknown as SupabaseClient;
     await loadChannelBilling(spyDb, ACCOUNT, CHANNEL, {
       role: 'admin',
       now: NOW,
-      admin,
+      admin: spyAdmin,
     });
     return tables;
   }

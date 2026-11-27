@@ -123,24 +123,40 @@ function config(over: Record<string, unknown> = {}) {
  * instância QRCode — o cenário que a 072 tornou legal e que nenhuma
  * consulta por `account_id` sozinha sabe responder.
  */
+const TWO_NUMBER_ROWS = () => [
+  channel(),
+  channel({
+    id: 'ch-b',
+    name: 'Suporte',
+    identifier: '5511977776666',
+    is_default: false,
+    created_at: '2026-03-01T00:00:00.000Z',
+  }),
+  channel({
+    id: 'ch-qr',
+    type: 'whatsapp_qr',
+    name: 'Vendas WhatsApp comum',
+    is_default: true,
+    created_at: '2025-06-01T00:00:00.000Z',
+  }),
+];
+
+/** Resposta de `channels` do cenário de dois números (a consulta de escopo). */
+function channelsAnswer(op: RecordedOp): FakeResult {
+  const rows = TWO_NUMBER_ROWS();
+  const id = eqValue(op, 'id');
+  const account = eqValue(op, 'account_id');
+  const scoped = rows.filter((r) => r.account_id === account);
+  if (id !== undefined) {
+    return { data: scoped.find((r) => r.id === id) ?? null, error: null };
+  }
+  const type = eqValue(op, 'type');
+  const list = type ? scoped.filter((r) => r.type === type) : scoped;
+  return { data: list, error: null, count: list.length };
+}
+
 function twoNumberAccount() {
-  const rows = [
-    channel(),
-    channel({
-      id: 'ch-b',
-      name: 'Suporte',
-      identifier: '5511977776666',
-      is_default: false,
-      created_at: '2026-03-01T00:00:00.000Z',
-    }),
-    channel({
-      id: 'ch-qr',
-      type: 'whatsapp_qr',
-      name: 'Vendas WhatsApp comum',
-      is_default: true,
-      created_at: '2025-06-01T00:00:00.000Z',
-    }),
-  ];
+  const rows = TWO_NUMBER_ROWS();
   const configs = [
     config(),
     config({
@@ -206,7 +222,9 @@ describe('resolveCloudConfig — a regra do D-7', () => {
 
     const { channel: resolved, config: row } = await resolveCloudConfig(
       db.client,
-      'acct-1'
+      'acct-1',
+      undefined,
+      db.client
     );
 
     expect(resolved.id).toBe('ch-a');
@@ -221,7 +239,8 @@ describe('resolveCloudConfig — a regra do D-7', () => {
     const { channel: resolved, config: row } = await resolveCloudConfig(
       db.client,
       'acct-1',
-      'ch-b'
+      'ch-b',
+      db.client
     );
 
     expect(resolved.id).toBe('ch-b');
@@ -278,7 +297,7 @@ describe('resolveCloudConfig — a regra do D-7', () => {
     });
 
     await expect(
-      resolveCloudConfig(db.client, 'acct-1', 'ch-a')
+      resolveCloudConfig(db.client, 'acct-1', 'ch-a', db.client)
     ).rejects.toThrow(/has no WhatsApp credentials/);
   });
 
@@ -294,7 +313,7 @@ describe('resolveCloudConfig — a regra do D-7', () => {
     });
 
     await expect(
-      resolveCloudConfig(db.client, 'acct-1', 'ch-a')
+      resolveCloudConfig(db.client, 'acct-1', 'ch-a', db.client)
     ).rejects.toThrow(/has no access token/);
   });
 
@@ -351,8 +370,103 @@ describe('resolveCloudConfig — a regra do D-7', () => {
       }),
     });
 
-    const { channel: resolved } = await resolveCloudConfig(db.client, 'acct-1');
+    const { channel: resolved } = await resolveCloudConfig(
+      db.client,
+      'acct-1',
+      undefined,
+      db.client
+    );
     expect(resolved.id).toBe('ch-antigo');
+  });
+});
+
+describe('resolveCloudConfig — credencial só por service role (P-15, migração 112)', () => {
+  it('lê a linha de credencial pelo cliente de service role, não pelo da sessão', async () => {
+    const admin = twoNumberAccount();
+    // A sessão só responde `channels` (escopo); `whatsapp_config` dela
+    // devolveria 42501 — se o código ainda a usasse, o teste falharia.
+    const session = makeDb({
+      channels: channelsAnswer,
+      whatsapp_config: () => ({
+        data: null,
+        error: { code: '42501', message: 'permission denied' },
+      }),
+    });
+
+    const { config: row } = await resolveCloudConfig(
+      session.client,
+      'acct-1',
+      'ch-b',
+      admin.client
+    );
+
+    expect(row.access_token).toBe('cipher-b');
+    expect(session.ops.some((o) => o.table === 'whatsapp_config')).toBe(false);
+    expect(admin.ops.some((o) => o.table === 'whatsapp_config')).toBe(true);
+  });
+
+  it('a leitura da credencial casa channel_id E account_id e nomeia as colunas (sem *)', async () => {
+    const admin = twoNumberAccount();
+    const session = makeDb({ channels: channelsAnswer });
+
+    await resolveCloudConfig(session.client, 'acct-1', 'ch-a', admin.client);
+
+    const read = admin.ops.find((o) => o.table === 'whatsapp_config')!;
+    expect(read.filters).toContainEqual(['eq', 'channel_id', 'ch-a']);
+    expect(read.filters).toContainEqual(['eq', 'account_id', 'acct-1']);
+    const select = read.filters.find((f) => f[0] === 'select')![1] as string;
+    expect(select).not.toBe('*');
+    expect(select).not.toContain('*');
+    // Os três segredos estão na lista (é o caminho de envio que precisa deles).
+    expect(select).toContain('access_token');
+    expect(select).toContain('app_secret');
+    expect(select).toContain('verify_token');
+    // Toda coluna que o código de envio usa continua na lista.
+    for (const col of [
+      'id',
+      'account_id',
+      'channel_id',
+      'phone_number_id',
+      'waba_id',
+      'user_id',
+    ]) {
+      expect(select.split(', ')).toContain(col);
+    }
+  });
+
+  it('canal de OUTRA conta nunca chega ao cliente de service role', async () => {
+    // A sessão (RLS) não enxerga o canal da conta 1 sob a conta 2: erro na
+    // consulta de `channels`, e a credencial nem é pedida.
+    const admin = twoNumberAccount();
+    const session = makeDb({
+      channels: (op) => {
+        const account = eqValue(op, 'account_id');
+        return account === 'acct-1'
+          ? channelsAnswer(op)
+          : { data: null, error: null };
+      },
+    });
+
+    await expect(
+      resolveCloudConfig(session.client, 'acct-2', 'ch-a', admin.client)
+    ).rejects.toThrow(/does not exist in account acct-2/);
+    expect(admin.ops.some((o) => o.table === 'whatsapp_config')).toBe(false);
+  });
+
+  it('a credencial de uma conta não é devolvida para outra conta (filtro por account_id)', async () => {
+    // Mesmo que a camada de escopo falhasse (sessão que enxerga o canal),
+    // o service role só devolve a linha se `account_id` também casar.
+    const admin = twoNumberAccount();
+    const session = makeDb({
+      channels: () => ({ data: channel(), error: null }),
+    });
+
+    await expect(
+      // acct-2 pedindo o ch-a (que é da acct-1): a sessão "deixou passar".
+      resolveCloudConfig(session.client, 'acct-2', 'ch-a', admin.client)
+    ).rejects.toThrow(/has no WhatsApp credentials/);
+    const read = admin.ops.find((o) => o.table === 'whatsapp_config')!;
+    expect(read.filters).toContainEqual(['eq', 'account_id', 'acct-2']);
   });
 });
 

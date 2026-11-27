@@ -1,6 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const adminState = vi.hoisted(() => ({ client: undefined as unknown }));
+vi.mock('@/lib/supabase/admin', () => ({
+  supabaseAdmin: () => adminState.client,
+}));
+
 const cloudSendTemplate = vi.fn(async () => ({ providerMessageId: 'wamid.1' }));
 vi.mock('@/lib/channels/registry', async (importOriginal) => {
   const actual =
@@ -172,6 +177,9 @@ function fakeDb(opts: FakeDbOptions = {}): {
     },
   };
 
+  // P-15: `resolveCloudConfig` lê a credencial pelo service role; aqui ele e o
+  // `db` são o mesmo fake.
+  adminState.client = client;
   return { db: client as unknown as SupabaseClient, calls, recipientUpdates };
 }
 
