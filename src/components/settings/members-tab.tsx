@@ -392,7 +392,10 @@ export function MembersTab() {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-foreground truncate text-sm font-medium">
+                        <span
+                          className="text-foreground truncate text-sm font-medium"
+                          title={member.full_name || undefined}
+                        >
                           {member.full_name || t('unnamed')}
                         </span>
                         {isSelf && (
