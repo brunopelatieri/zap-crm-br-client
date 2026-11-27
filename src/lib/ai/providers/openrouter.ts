@@ -1,7 +1,7 @@
 import { AiError, type ProviderResult } from '../types';
 import { MAX_OUTPUT_TOKENS } from '../defaults';
 import {
-  mergeConsecutive,
+  normalizeTurnOrder,
   normalizeUsage,
   providerHttpError,
   toNetworkError,
@@ -64,7 +64,7 @@ export async function generateOpenRouter(
     model,
     messages: [
       { role: 'system', content: systemPrompt },
-      ...mergeConsecutive(messages),
+      ...normalizeTurnOrder(messages),
     ],
     max_tokens: MAX_OUTPUT_TOKENS,
   };

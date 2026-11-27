@@ -158,3 +158,32 @@ export function mergeConsecutive(messages: ChatMessage[]): ChatMessage[] {
   }
   return out;
 }
+
+/** Placeholder turns for conversations that do not start / end on the customer. */
+const NO_CUSTOMER_YET = '(The customer has not sent a message yet.)';
+const WRITE_FOLLOW_UP =
+  '(The customer has not replied yet. Write the next message the business should send.)';
+
+/**
+ * Shape a transcript for models behind OpenRouter. Claude models (the
+ * suggested default) reject a transcript that starts with an assistant
+ * turn, and the current ones reject a final assistant turn ("prefill")
+ * with an opaque 400 "Provider returned error" — found in production in
+ * the SPEC 089 F1 test: an inbox draft asked after the agent had the
+ * last word. So: merge same-role turns, drop leading assistant turns,
+ * and when the last turn is the business's, append a user nudge asking
+ * for the next message. Harmless for models that do not care.
+ */
+export function normalizeTurnOrder(messages: ChatMessage[]): ChatMessage[] {
+  const merged = mergeConsecutive(messages);
+  while (merged.length > 0 && merged[0].role === 'assistant') {
+    merged.shift();
+  }
+  if (merged.length === 0) {
+    return [{ role: 'user', content: NO_CUSTOMER_YET }];
+  }
+  if (merged[merged.length - 1].role === 'assistant') {
+    merged.push({ role: 'user', content: WRITE_FOLLOW_UP });
+  }
+  return merged;
+}

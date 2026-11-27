@@ -96,6 +96,49 @@ describe('generateOpenRouter', () => {
     expect(body).not.toHaveProperty('reasoning');
   });
 
+  it('never ends on an assistant turn (Claude via OpenRouter answers 400 to a prefill)', async () => {
+    fetchMock.mockResolvedValue(fixtureResponse('chat-completion.json'));
+    await generateOpenRouter({
+      ...ARGS,
+      messages: [
+        { role: 'user', content: 'Oi' },
+        { role: 'assistant', content: 'Ola!' },
+      ],
+    });
+    const msgs = sentBody().messages as { role: string; content: string }[];
+    expect(msgs.map((m) => m.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(msgs[msgs.length - 1].content).toContain('Write the next message');
+  });
+
+  it('drops leading assistant turns and survives an assistant-only transcript', async () => {
+    fetchMock.mockResolvedValue(fixtureResponse('chat-completion.json'));
+    await generateOpenRouter({
+      ...ARGS,
+      messages: [
+        { role: 'assistant', content: 'Bem-vindo!' },
+        { role: 'user', content: 'Oi' },
+      ],
+    });
+    expect(
+      (sentBody().messages as { role: string }[]).map((m) => m.role)
+    ).toEqual(['system', 'user']);
+
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(fixtureResponse('chat-completion.json'));
+    await generateOpenRouter({
+      ...ARGS,
+      messages: [{ role: 'assistant', content: 'Bem-vindo!' }],
+    });
+    const only = sentBody().messages as { role: string; content: string }[];
+    expect(only.map((m) => m.role)).toEqual(['system', 'user']);
+    expect(only[1].content).toContain('has not sent a message yet');
+  });
+
   it('asks for data_collection deny only when the privacy switch is on (D-5)', async () => {
     fetchMock.mockResolvedValue(fixtureResponse('chat-completion.json'));
     await generateOpenRouter({

@@ -56,8 +56,10 @@ export function AiModelSuggest({
   useEffect(() => {
     if (!open || disabled) return;
     const mine = ++seq.current;
+    // Show "searching" from the first keystroke, not only once the
+    // debounce fires, so the empty state never flashes in between.
+    setLoading(true);
     const timer = setTimeout(async () => {
-      setLoading(true);
       setFailed(false);
       try {
         const res = await fetch(
