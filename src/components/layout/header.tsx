@@ -50,6 +50,7 @@ interface HeaderProps {
 }
 
 import { useTranslations } from 'next-intl';
+import { truncateMemberName } from '@/lib/member-name';
 
 export function Header({ onOpenSidebar, showPlanLink = false }: HeaderProps) {
   const t = useTranslations('Header');
@@ -98,8 +99,11 @@ export function Header({ onOpenSidebar, showPlanLink = false }: HeaderProps) {
                 {initial}
               </AvatarFallback>
             </Avatar>
-            <span className="text-foreground hidden text-sm font-medium sm:inline">
-              {profile?.full_name ?? t('defaultUser')}
+            <span
+              className="text-foreground hidden max-w-44 truncate text-sm font-medium sm:inline"
+              title={profile?.full_name ?? undefined}
+            >
+              {truncateMemberName(profile?.full_name) || t('defaultUser')}
             </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -108,8 +112,11 @@ export function Header({ onOpenSidebar, showPlanLink = false }: HeaderProps) {
             className="bg-popover text-popover-foreground ring-border min-w-56"
           >
             <div className="px-2 py-1.5">
-              <p className="text-foreground truncate text-sm font-medium">
-                {profile?.full_name ?? t('defaultUser')}
+              <p
+                className="text-foreground truncate text-sm font-medium"
+                title={profile?.full_name ?? undefined}
+              >
+                {truncateMemberName(profile?.full_name) || t('defaultUser')}
               </p>
               <p className="text-muted-foreground truncate text-xs">
                 {profile?.email ?? ''}

@@ -668,7 +668,8 @@
       "claimFailed": "Não foi possível assumir esta conversa",
       "networkError": "Não foi possível conectar ao servidor",
       "viewingOthersInbox": "Vendo a carteira de {name}",
-      "backToMine": "Voltar às minhas conversas",
+      "backToMine": "Voltar",
+      "backToMineLong": "Voltar às minhas conversas",
       "viewerChatEmpty": "Conversas atribuídas a você aparecem aqui. Seu papel (Leitor) não recebe atribuições."
     },
     "tabs": {

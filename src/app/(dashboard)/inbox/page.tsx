@@ -38,6 +38,7 @@ import { ContactsDirectory } from '@/components/inbox/contacts-directory';
 import { AssignmentBoard } from '@/components/inbox/assignment-board/assignment-board';
 import { MessageThread } from '@/components/inbox/message-thread';
 import { ContactSidebar } from '@/components/inbox/contact-sidebar';
+import { ViewingAsBanner } from '@/components/inbox/viewing-as-banner';
 import { TagPickerProvider } from '@/components/inbox/tag-picker/tag-picker-context';
 import { DealPickerProvider } from '@/components/inbox/deal-picker/deal-picker-context';
 import { toast } from 'sonner';
@@ -1240,31 +1241,21 @@ export default function InboxPage() {
                       hasActiveConv ? 'hidden lg:flex' : 'flex'
                     )}
                   >
-                    {/* "Vendo a carteira de {nome}" (D7). Só quando o admin
-                  está de fato observando outra pessoa — nunca aparece
-                  para o caso comum (viewAsUserId nulo ou igual à
+                    {/* Faixa "vendo a carteira de {nome}" (D7). Só quando o
+                  admin está de fato observando outra pessoa — nunca
+                  aparece para o caso comum (viewAsUserId nulo ou igual à
                   própria sessão), então a maioria dos usuários nunca vê
                   esta faixa. */}
                     {activeTab === 'chat' &&
                       chatTarget &&
                       chatTarget !== userId && (
-                        <div className="border-primary/20 bg-primary/5 flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5 text-xs">
-                          <span className="text-foreground truncate">
-                            {t('viewingOthersInbox', {
-                              name:
-                                accountMembers.find(
-                                  (m) => m.user_id === chatTarget
-                                )?.full_name ?? tTabs('viewAsUnknownMember'),
-                            })}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleViewAsChange(null)}
-                            className="text-primary shrink-0 font-medium hover:underline"
-                          >
-                            {t('backToMine')}
-                          </button>
-                        </div>
+                        <ViewingAsBanner
+                          memberName={
+                            accountMembers.find((m) => m.user_id === chatTarget)
+                              ?.full_name || tTabs('viewAsUnknownMember')
+                          }
+                          onBack={() => handleViewAsChange(null)}
+                        />
                       )}
                     {/* `min-h-0 flex-1`: `ConversationList` é `h-full` por
                   dentro, o que só funciona porque este wrapper (e não o

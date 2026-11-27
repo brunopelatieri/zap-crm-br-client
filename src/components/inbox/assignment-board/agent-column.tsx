@@ -13,6 +13,7 @@ import { Inbox as InboxIcon, Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { PresenceDot } from '@/components/presence/presence-dot';
 import { presenceLabel, type PresenceStatus } from '@/lib/presence';
+import { truncateMemberName } from '@/lib/member-name';
 import { cn } from '@/lib/utils';
 import type { BoardAssignTarget } from '@/lib/inbox/assignment-board';
 import type { BoardCard, BoardColumnState } from './use-assignment-board';
@@ -75,8 +76,11 @@ export function AgentColumn({
             )}
           </span>
         )}
-        <span className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold">
-          {columnName}
+        <span
+          className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold"
+          title={columnName}
+        >
+          {isQueue ? columnName : truncateMemberName(columnName)}
         </span>
         <span className="bg-muted text-muted-foreground shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium">
           {total}

@@ -3,6 +3,7 @@
 import { Check, ChevronDown, Eye } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { truncateMemberName } from '@/lib/member-name';
 import type { Profile } from '@/types';
 import {
   DropdownMenu,
@@ -54,9 +55,10 @@ export function ViewAsSelector({
     ? members.find((m) => m.user_id === value)
     : undefined;
 
-  const triggerLabel = viewingOther
-    ? (observedMember?.full_name ?? t('viewAsUnknownMember'))
+  const triggerFullLabel = viewingOther
+    ? observedMember?.full_name || t('viewAsUnknownMember')
     : t('viewAsMe');
+  const triggerLabel = truncateMemberName(triggerFullLabel);
 
   return (
     <DropdownMenu>
@@ -69,7 +71,12 @@ export function ViewAsSelector({
         title={t('viewAsAriaLabel')}
       >
         <Eye className="h-3.5 w-3.5" />
-        <span className="max-w-32 truncate sm:max-w-48">{triggerLabel}</span>
+        <span
+          className="max-w-32 truncate sm:max-w-48"
+          title={triggerFullLabel}
+        >
+          {triggerLabel}
+        </span>
         <ChevronDown className="h-3 w-3" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="border-border bg-popover">
@@ -102,7 +109,12 @@ export function ViewAsSelector({
                     isSelected ? 'text-primary' : 'text-popover-foreground'
                   )}
                 >
-                  <span className="flex-1 truncate">{m.full_name}</span>
+                  <span
+                    className="max-w-64 flex-1 truncate"
+                    title={m.full_name}
+                  >
+                    {m.full_name}
+                  </span>
                   {isSelected && <Check className="ml-2 h-3 w-3 shrink-0" />}
                 </DropdownMenuItem>
               );

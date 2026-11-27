@@ -668,7 +668,8 @@
       "claimFailed": "Couldn't claim this conversation",
       "networkError": "Couldn't connect to the server",
       "viewingOthersInbox": "Viewing {name}'s conversations",
-      "backToMine": "Back to my conversations",
+      "backToMine": "Back to mine",
+      "backToMineLong": "Back to my conversations",
       "viewerChatEmpty": "Conversations assigned to you appear here. Your role (Viewer) doesn't receive assignments."
     },
     "tabs": {

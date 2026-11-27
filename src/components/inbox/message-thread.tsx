@@ -9,6 +9,7 @@ import { usePresence } from '@/hooks/use-presence';
 import { PresenceDot } from '@/components/presence/presence-dot';
 import { presenceLabel } from '@/lib/presence';
 import { cn } from '@/lib/utils';
+import { truncateMemberName } from '@/lib/member-name';
 import { formatPhoneForDisplay } from '@/lib/phone/br';
 import type {
   Conversation,
@@ -1022,9 +1023,9 @@ export function MessageThread({
         const assigned = profiles.find(
           (p) => p.user_id === conversation?.assigned_agent_id
         );
-        if (assigned?.full_name) return assigned.full_name;
+        if (assigned?.full_name) return truncateMemberName(assigned.full_name);
         const sender = profiles.find((p) => p.user_id === m.sender_id);
-        return sender?.full_name || t('assigned');
+        return truncateMemberName(sender?.full_name) || t('assigned');
       }
       return contactDisplayName || tBubble('customerFallback');
     },
@@ -1337,7 +1338,7 @@ export function MessageThread({
     ? profiles
     : profiles.filter((p) => p.user_id === user?.id);
   const assignLabel = assignedAgentId
-    ? (currentAssignee?.full_name ?? t('assigned'))
+    ? truncateMemberName(currentAssignee?.full_name) || t('assigned')
     : t('assign');
 
   return (
@@ -1554,7 +1555,10 @@ export function MessageThread({
                         )}
                         className="mr-2"
                       />
-                      <span className="flex-1">
+                      <span
+                        className="max-w-64 flex-1 truncate"
+                        title={p.full_name}
+                      >
                         {p.full_name}
                         {p.user_id === user?.id ? t('me') : ''}
                       </span>
@@ -1741,7 +1745,8 @@ export function MessageThread({
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
           <p className="text-amber-600 dark:text-amber-400">
             {t('assignedElsewhereWarning', {
-              name: currentAssignee?.full_name ?? t('assigned'),
+              name:
+                truncateMemberName(currentAssignee?.full_name) || t('assigned'),
             })}
           </p>
         </div>

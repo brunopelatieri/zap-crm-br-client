@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
+import { truncateMemberName } from '@/lib/member-name';
 import { useAuth } from '@/hooks/use-auth';
 import { useTotalUnread } from '@/hooks/use-total-unread';
 import { useUnreadNotifications } from '@/hooks/use-unread-notifications';
@@ -391,8 +392,11 @@ export function Sidebar({
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
-                <p className="text-foreground truncate text-sm font-medium">
-                  {profile?.full_name ?? t('defaultUser')}
+                <p
+                  className="text-foreground truncate text-sm font-medium"
+                  title={profile?.full_name ?? undefined}
+                >
+                  {truncateMemberName(profile?.full_name) || t('defaultUser')}
                 </p>
                 <p className="text-muted-foreground truncate text-xs">
                   {profile?.email ?? ''}

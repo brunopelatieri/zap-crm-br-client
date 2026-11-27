@@ -15,6 +15,7 @@ import type { SendState } from '@/lib/whatsapp/billing-monitor';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { truncateMemberName } from '@/lib/member-name';
 
 import { SECTION_META, type SettingsSection } from './settings-sections';
 import { SettingsChip, StatusDot } from './settings-chip';
@@ -179,7 +180,10 @@ export function SettingsOverview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, accountId, canManageMembers]);
 
-  const displayName = profile?.full_name || profile?.email || t('yourAccount');
+  const displayName =
+    truncateMemberName(profile?.full_name) ||
+    profile?.email ||
+    t('yourAccount');
   const initial = (profile?.full_name || profile?.email || 'U')
     .charAt(0)
     .toUpperCase();
