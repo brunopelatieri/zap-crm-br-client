@@ -3,8 +3,8 @@ import type { ChannelType } from '@/lib/channels/types';
 import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-channel';
 import { buildSystemPrompt } from './defaults';
 import { retrieveKnowledge } from './knowledge';
-import { latestUserMessage } from './query';
-import type { AiConfig, ChatMessage } from './types';
+import { buildRetrievalQuery } from './query';
+import type { AiConfig, ChatMessage, KnowledgeSource } from './types';
 
 // ============================================================
 // compose.ts — the single place that assembles one agent turn
@@ -13,9 +13,10 @@ import type { AiConfig, ChatMessage } from './types';
 // examples, tools — SPEC 086 I-14/I-15, SPEC 089 F4+) is added here once
 // instead of in each caller.
 //
-// F1 keeps the behaviour exactly as it was when the callers built the
-// prompt themselves: knowledge retrieval (best-effort) → channel type →
-// `buildSystemPrompt`.
+// Knowledge retrieval (best-effort, hybrid — SPEC 089 F3; the query is the
+// customer's last up-to-3 messages, D-13) → channel type →
+// `buildSystemPrompt`. The excerpts' sources (D-14) come back beside the
+// prompt and are never put in the customer-facing text.
 // ============================================================
 
 export type ComposeMode = 'auto_reply' | 'draft' | 'playground';
@@ -39,6 +40,8 @@ export interface ComposedTurn {
   messages: ChatMessage[];
   /** Knowledge excerpts that went into the prompt. */
   knowledge: string[];
+  /** Where each excerpt came from (same order as `knowledge`). */
+  sources: KnowledgeSource[];
   /** Channel the reply will go out on; undefined in the playground. */
   channelType: ChannelType | undefined;
 }
@@ -54,11 +57,20 @@ export async function composeAgentTurn(
   const { db, accountId, config, mode, messages, conversationId } = args;
 
   // Ground the reply in the account's knowledge base (best-effort).
-  const knowledge = await retrieveKnowledge(
+  const hits = await retrieveKnowledge(
     db,
     accountId,
     config,
-    latestUserMessage(messages)
+    buildRetrievalQuery(messages)
+  );
+  const knowledge = hits.map((h) => h.content);
+  const sources: KnowledgeSource[] = hits.map(
+    ({ chunkId, documentId, title, score }) => ({
+      chunkId,
+      documentId,
+      title,
+      score,
+    })
   );
 
   const channelType = conversationId
@@ -74,5 +86,5 @@ export async function composeAgentTurn(
     channelType,
   });
 
-  return { systemPrompt, messages, knowledge, channelType };
+  return { systemPrompt, messages, knowledge, sources, channelType };
 }

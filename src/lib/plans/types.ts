@@ -28,6 +28,10 @@ export const USAGE_QUOTA_KEYS = [
   'forms',
   'form_responses_month',
   'form_upload_mb',
+  // Base de conhecimento da IA (SPEC 089 D-20, migração 103): documentos
+  // por conta, contador `knowledge_documents` em `account_usage_counters`.
+  // Ausente = ilimitado.
+  'knowledge_documents',
 ] as const;
 
 export type UsageQuotaKey = (typeof USAGE_QUOTA_KEYS)[number];

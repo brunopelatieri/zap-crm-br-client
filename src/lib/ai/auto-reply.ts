@@ -2,6 +2,7 @@ import { supabaseAdmin } from './admin-client';
 import { loadAiConfig } from './config';
 import { buildConversationContext } from './context';
 import { composeAgentTurn } from './compose';
+import { documentIdsOf } from './sources';
 import { generateReply } from './generate';
 import { buildHandoffSummary } from './handoff';
 import { logAiUsage } from './usage';
@@ -141,6 +142,7 @@ export async function dispatchInboundToAiReply(
       provider: config.provider,
       model: config.model,
       usage,
+      knowledgeDocumentIds: documentIdsOf(turn.sources),
     });
 
     if (handoff || !text) {

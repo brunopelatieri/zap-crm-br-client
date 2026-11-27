@@ -30,6 +30,10 @@
 13. **Cascata de limites sem "ilimitado" por acidente** (SPEC 069 §3.4): valor ausente/torto desce um nível até o padrão de código; `NULL` = "não configurado aqui". Limite fora de `registry.ts` é limite escondido.
 14. **Excluir conta ou usuário nunca por MCP nem por API de plataforma** ([SPEC 091](../spec-091-assistente-da-plataforma-e-mcp-do-proprietario.md) A-19, ratificada pelo mantenedor em 2026-11-26): nada de endpoint, escopo de chave ou ferramenta de exclusão de conta, usuário ou membro, com ou sem opt-in. A exclusão continua só pelo console e pela "Zona de risco" do titular. O resto da SPEC 091 é proposta.
 
+## Quotas de uso por trigger (referência)
+
+Metadados do contador e do erro `QUOTA_EXCEEDED:<métrica>:<usado>:<limite>` em `src/lib/plans/errors.ts`. Quotas com trigger própria: `contacts` (067), `forms`, `form_responses_month` e `form_upload_mb` (098) e **`knowledge_documents`** (103, SPEC 089 D-20: documentos da base de conhecimento da IA; ausente = ilimitado; `AFTER INSERT OR DELETE` em `ai_knowledge_documents`, recontada por `recount_account_usage`). Métrica nova de uso = trigger + `USAGE_QUOTA_KEYS` + `usedByKey` em `account-plan.ts` + rótulo `Plan.quotaLabel.*` nos dois dicionários.
+
 ## Exclusão da conta pelo titular (PRD 072 / SPEC 073)
 
 Ordem canônica — **não troque**: guardas (papel `owner`, não ser a conta do proprietário, nome digitado idêntico, reautenticação) → leituras → `remove_account_member` por membro não-dono (client de **sessão**) → **`DELETE FROM accounts`** (uma instrução, sem retorno) → `auth.admin.deleteUser` do titular → Storage/VPS em melhor esforço → auditoria e evento. Após o `DELETE` o client de sessão está morto: o resto usa `supabaseAdmin()`. Sem carência nem desfazer ([SPEC 073](../spec-073-exclusao-da-conta-pelo-titular.md) §4, §7).

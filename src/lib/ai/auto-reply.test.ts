@@ -226,7 +226,19 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
   });
 
   it('grounds the reply in retrieved knowledge', async () => {
-    h.retrieveKnowledge.mockResolvedValue(['Returns accepted within 30 days.']);
+    h.retrieveKnowledge.mockResolvedValue([
+      {
+        chunkId: 'c1',
+        documentId: 'd1',
+        title: 'Returns',
+        heading: null,
+        content: 'Returns accepted within 30 days.',
+        distance: 0.31,
+        lexicalRank: 0.1,
+        score: 0.033,
+        origin: 'both',
+      },
+    ]);
     await dispatchInboundToAiReply(ARGS);
     expect(h.retrieveKnowledge).toHaveBeenCalled();
     const systemPrompt = h.generateReply.mock.calls[0][0]

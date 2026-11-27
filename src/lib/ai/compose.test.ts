@@ -15,6 +15,18 @@ import { composeAgentTurn } from './compose';
 import { buildSystemPrompt, HANDOFF_SENTINEL } from './defaults';
 
 const db = {} as SupabaseClient;
+
+const HIT = {
+  chunkId: 'chunk-1',
+  documentId: 'doc-1',
+  title: 'Shipping policy',
+  heading: 'Shipping',
+  content: 'Shipping takes 3 days.',
+  distance: 0.32,
+  lexicalRank: 0.06,
+  score: 2 / 61,
+  origin: 'both' as const,
+};
 const config = { systemPrompt: 'We sell shoes.', embeddingsTarget: null };
 
 beforeEach(() => {
@@ -23,8 +35,8 @@ beforeEach(() => {
 });
 
 describe('composeAgentTurn', () => {
-  it('queries the KB with the latest customer message and builds the same prompt the callers used to', async () => {
-    h.retrieveKnowledge.mockResolvedValue(['Shipping takes 3 days.']);
+  it("queries the KB with the customer's last messages (D-13) and builds the same prompt the callers used to", async () => {
+    h.retrieveKnowledge.mockResolvedValue([HIT]);
     const messages = [
       { role: 'user' as const, content: 'Hi' },
       { role: 'assistant' as const, content: 'Hello!' },
@@ -44,7 +56,7 @@ describe('composeAgentTurn', () => {
       db,
       'acct',
       config,
-      'How long is shipping?'
+      'Hi\nHow long is shipping?'
     );
     expect(h.resolveChannel).toHaveBeenCalledWith(db, 'acct', 'conv-1');
     expect(turn.systemPrompt).toBe(
@@ -57,6 +69,16 @@ describe('composeAgentTurn', () => {
     );
     expect(turn.messages).toBe(messages);
     expect(turn.knowledge).toEqual(['Shipping takes 3 days.']);
+    // D-14: the sources ride beside the prompt, never inside the reply.
+    expect(turn.sources).toEqual([
+      {
+        chunkId: 'chunk-1',
+        documentId: 'doc-1',
+        title: 'Shipping policy',
+        score: 2 / 61,
+      },
+    ]);
+    expect(turn.systemPrompt).not.toContain('Shipping policy');
   });
 
   it('draft mode gets the draft scaffold (no handoff protocol)', async () => {

@@ -96,7 +96,8 @@ export async function POST(request: Request) {
       systemPrompt: turn.systemPrompt,
       messages: turn.messages,
     });
-    return NextResponse.json({ reply: text, handoff });
+    // Sources (D-14): what grounded this turn, for the admin only.
+    return NextResponse.json({ reply: text, handoff, sources: turn.sources });
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

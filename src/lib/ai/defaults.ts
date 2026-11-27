@@ -33,6 +33,24 @@ export const HANDOFF_SENTINEL = '[[HANDOFF]]';
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024;
 
+/** Knowledge excerpts that go into one turn's prompt. */
+export const KNOWLEDGE_TOP_K = 5;
+
+/**
+ * Cosine-distance ceiling for the semantic half of the hybrid retrieval
+ * (SPEC 089 D-10): an excerpt farther than this and with no lexical match
+ * stays out of the prompt. Measured on 2026-11-27 with `text-embedding-3-small`
+ * on a SYNTHETIC base (10 documents, 19 excerpts, 26 questions): the best
+ * excerpt of a clearly answerable question sat at 0.30–0.51, and the best
+ * excerpt of an unanswerable one at 0.585–0.79 (the closest, "CNPJ" and
+ * "falar com o dono", at 0.585 and 0.589), so 0.55 sits in the gap with
+ * ~0.04 on each side. Questions that share a word with the base are rescued
+ * by the lexical half whatever their distance. Recheck on a real account:
+ * the "Test retrieval" screen shows each excerpt's distance and takes a
+ * one-off `max_distance` for exactly that (SPEC 089 P-6).
+ */
+export const KNOWLEDGE_MAX_DISTANCE = 0.55;
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 20;
 

@@ -160,6 +160,16 @@ describe('middleware — matcher exclui os webhooks inbound (Meta e Evolution)',
     expect(matches('/api/channels/evolution/webhook-logs')).toBe(true);
   });
 
+  it('exclui o envio de arquivo da base de conhecimento (SPEC 089 F2), só ele', () => {
+    // PDF de até 10 MB em multipart passa de 10 MB só pelo envelope; o
+    // clone do middleware o entregaria truncado, sem erro.
+    expect(matches('/api/ai/knowledge/upload')).toBe(false);
+    // O resto da base continua atrás do gate de sessão.
+    expect(matches('/api/ai/knowledge')).toBe(true);
+    expect(matches('/api/ai/knowledge/import-url')).toBe(true);
+    expect(matches('/api/ai/knowledge/uploads')).toBe(true);
+  });
+
   it('continua excluindo assets estáticos (comportamento anterior)', () => {
     expect(matches('/_next/static/chunk.js')).toBe(false);
     expect(matches('/favicon.ico')).toBe(false);

@@ -11,6 +11,8 @@ export interface LogAiUsageArgs {
   model: string;
   /** Provider usage; a no-op when null (nothing worth recording). */
   usage: AiUsage | null;
+  /** Knowledge documents whose excerpts went into the prompt (D-14). */
+  knowledgeDocumentIds?: string[];
 }
 
 /**
@@ -45,6 +47,11 @@ export async function logAiUsage(
       // database that has not received migration 102 yet.
       ...(args.usage.costUsd !== undefined
         ? { cost_usd: args.usage.costUsd }
+        : {}),
+      // Only when there are any: keeps the insert valid on a database
+      // that has not received migration 104 yet.
+      ...(args.knowledgeDocumentIds && args.knowledgeDocumentIds.length > 0
+        ? { knowledge_document_ids: args.knowledgeDocumentIds }
         : {}),
     });
     if (error) {

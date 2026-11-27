@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/select';
 import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
+import { AiKnowledgeSearch } from '@/components/agents/ai-knowledge-search';
 import { AiModelSuggest } from '@/components/agents/ai-model-suggest';
 import { AiPromptVersionsDialog } from '@/components/agents/ai-prompt-versions';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
@@ -635,6 +636,9 @@ export function AiConfig() {
           // semantic search is on even without a separate embeddings key.
           hasEmbeddingsKey={provider === 'openrouter' || hasOwnEmbeddingsKey}
         />
+
+        {/* SPEC 089 F3: runs the agent's retrieval on a typed question. */}
+        {canEdit && <AiKnowledgeSearch />}
 
         <div className="flex items-center justify-between">
           {configured ? (

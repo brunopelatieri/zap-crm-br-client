@@ -271,7 +271,8 @@
       "channels_whatsapp_cloud": "Números oficiais do WhatsApp",
       "forms": "Formulários",
       "form_responses_month": "Respostas de formulário por mês",
-      "form_upload_mb": "Uploads de formulários (MB)"
+      "form_upload_mb": "Uploads de formulários (MB)",
+      "knowledge_documents": "Documentos da base de conhecimento da IA"
     },
     "featureLabel": {
       "ai_enabled": "IA (rascunho / auto-resposta)",
@@ -3030,7 +3031,11 @@
       "composerPlaceholder": "Digite uma mensagem de cliente…",
       "notConfigured": "Nenhum agente configurado ainda — conclua a Configuração primeiro.",
       "replyFailed": "Não foi possível obter uma resposta.",
-      "agentUnreachable": "Não foi possível conectar ao agente."
+      "agentUnreachable": "Não foi possível conectar ao agente.",
+      "sources": "Fontes:",
+      "sourceExcerpts": "{count, plural, one {# trecho} other {# trechos}}",
+      "sourceUntitled": "Documento sem título",
+      "noSources": "Nenhum trecho da base de conhecimento foi usado nesta resposta."
     },
     "usage": {
       "title": "Uso de tokens",
@@ -3097,6 +3102,145 @@
       "unsavedWarning": "Há edições não salvas no campo do prompt. Restaurar substitui o prompt salvo; recarregue a tela depois para vê-lo.",
       "close": "Fechar",
       "versionLabel": "Versão de {date}"
+    },
+    "knowledge": {
+      "title": "Base de conhecimento",
+      "description": "Adicione perguntas frequentes, políticas, arquivos, páginas da web ou detalhes de produtos. O assistente busca os trechos relevantes ao redigir e ao responder sozinho, para responder em vez de passar para um humano.{searchType}",
+      "semanticSearchOn": " A busca semântica está ativa (embeddings disponíveis).",
+      "keywordSearchOn": " Usando busca por palavras — adicione uma chave de embeddings acima para ativar a busca semântica.",
+      "loading": "Carregando…",
+      "noDocs": "Nenhum documento ainda.",
+      "loadFailed": "Falha ao carregar a base de conhecimento",
+      "openFailed": "Falha ao abrir o documento",
+      "sources": {
+        "text": "Texto",
+        "file": "Arquivo",
+        "url": "Página da web",
+        "faq": "Perguntas e respostas"
+      },
+      "addSource": "Adicionar fonte",
+      "form": {
+        "title": "Título",
+        "titlePlaceholder": "Ex.: Política de trocas e devoluções",
+        "titleOptional": "Título (opcional)",
+        "titleOptionalHint": "Deixe em branco para usar o nome do arquivo ou o título da página.",
+        "content": "Conteúdo",
+        "contentPlaceholder": "Cole a resposta da pergunta frequente, o texto da política ou os detalhes do produto…",
+        "file": "Arquivo",
+        "fileHint": "PDF, DOCX, TXT, MD ou CSV, até 10 MB. Só o texto extraído é guardado — o arquivo original não fica salvo. PDFs digitalizados (só imagem) não são aceitos.",
+        "url": "Endereço da página",
+        "urlPlaceholder": "https://exemplo.com.br/trocas",
+        "urlHint": "Só uma página. O texto é importado uma vez (menus e scripts são removidos) e não se atualiza sozinho.",
+        "question": "Pergunta",
+        "answer": "Resposta",
+        "addPair": "Adicionar outro par",
+        "removePair": "Remover par",
+        "tags": "Etiquetas (opcional)",
+        "tagsPlaceholder": "Ex.: trocas, frete",
+        "tagsHint": "Separe por vírgulas. Até 20 etiquetas."
+      },
+      "actions": {
+        "cancel": "Cancelar",
+        "save": "Salvar",
+        "upload": "Enviar arquivo",
+        "import": "Importar página",
+        "edit": "Editar",
+        "delete": "Excluir",
+        "reindex": "Reindexar este documento",
+        "reindexAll": "Reindexar tudo",
+        "reindexAllTooltip": "Refaz o índice de todos os documentos (por exemplo, depois de adicionar uma chave de embeddings)"
+      },
+      "toast": {
+        "added": "Fonte adicionada. Ela está sendo indexada em segundo plano.",
+        "updated": "Documento atualizado.",
+        "updatedReindex": "Documento atualizado. Ele está sendo indexado de novo.",
+        "removed": "Documento removido.",
+        "removeFailed": "Falha ao remover.",
+        "saveFailed": "Falha ao salvar.",
+        "reindexQueued": "{count, plural, one {# documento na fila para reindexar.} other {# documentos na fila para reindexar.}}",
+        "reindexFailed": "Falha ao reindexar.",
+        "updateFailed": "Falha ao atualizar.",
+        "fileTooLarge": "O arquivo tem mais de 10 MB.",
+        "fileType": "Escolha um arquivo PDF, DOCX, TXT, MD ou CSV."
+      },
+      "status": {
+        "pending": "Na fila",
+        "indexing": "Indexando…",
+        "ready": "Pronto",
+        "error": "Erro"
+      },
+      "readyDetail": "{count, plural, one {# trecho} other {# trechos}} · {chars, number} caracteres",
+      "sourceLine": {
+        "file": "Arquivo: {name}",
+        "faq": "Perguntas e respostas"
+      },
+      "enabled": {
+        "label": "Usado pelo assistente",
+        "off": "Desligado"
+      },
+      "indexError": {
+        "empty_text": "Nenhum texto pôde ser indexado.",
+        "embeddings_failed": "A indexação semântica falhou; a busca por palavras continua funcionando.",
+        "embeddings_key_unreadable": "Indexado só para busca por palavras: a chave de embeddings não pôde ser descriptografada.",
+        "indexing_failed": "A indexação falhou.",
+        "indexing_stalled": "A indexação parou várias vezes.",
+        "unknown": "A indexação falhou.",
+        "detail": "({code})",
+        "retryHint": "Use “Reindexar este documento” para tentar de novo."
+      },
+      "errors": {
+        "unsupported_type": "Este tipo de arquivo não é aceito. Use PDF, DOCX, TXT, MD ou CSV.",
+        "file_too_large": "O arquivo tem mais de 10 MB.",
+        "file_corrupt": "Não foi possível ler o arquivo.",
+        "pdf_encrypted": "Este PDF tem senha. Remova a senha e tente de novo.",
+        "empty_text": "Nenhum texto legível foi encontrado. PDFs digitalizados (só imagem) não são aceitos.",
+        "text_too_long": "O texto tem mais de 500.000 caracteres.",
+        "invalid_url": "Este endereço não é válido. Use uma URL http ou https.",
+        "url_blocked": "Este endereço não é permitido (servidor interno, privado ou que não resolve).",
+        "url_unreachable": "Não foi possível acessar a página.",
+        "url_timeout": "A página demorou mais de 10 segundos para responder.",
+        "url_bad_status": "A página respondeu com erro.",
+        "url_unsupported_content_type": "Só páginas HTML e de texto simples podem ser importadas.",
+        "url_too_large": "A página tem mais de 2 MB.",
+        "url_too_many_redirects": "A página redireciona vezes demais.",
+        "faq_invalid": "Confira os pares: toda pergunta e toda resposta são obrigatórias, com no máximo 200 pares.",
+        "invalid_input": "Confira os campos e tente de novo.",
+        "duplicate_content": "Já existe um documento idêntico: “{title}”.",
+        "quota_exceeded": "O limite do seu plano, de {limit} documentos na base de conhecimento, foi atingido.",
+        "generic": "Algo deu errado. Tente de novo."
+      }
+    },
+    "knowledgeSearch": {
+      "title": "Testar recuperação",
+      "description": "Digite uma pergunta de cliente e veja quais trechos da sua base de conhecimento o agente receberia, em ordem. Não chama o modelo de IA.",
+      "queryLabel": "Pergunta do cliente",
+      "queryPlaceholder": "ex.: Quanto custa o plano premium?",
+      "distanceLabel": "Limite de distância (opcional)",
+      "distanceHint": "Trechos achados só pelo sentido e mais distantes que o limite ficam de fora (0 = idêntico, 2 = oposto). Mudar aqui vale só para este teste.",
+      "search": "Buscar",
+      "badDistance": "O limite de distância deve ser um número entre 0 e 2.",
+      "rateLimited": "Testes demais em sequência — aguarde um instante e tente de novo.",
+      "forbidden": "Só administradores podem testar a recuperação, e o recurso de IA precisa estar no seu plano.",
+      "failed": "Não foi possível executar a busca.",
+      "searchFailed": "A busca falhou no banco, então nada foi devolvido (isso não é \"sem resultado\"). Veja o log do servidor.",
+      "keyUnreadable": "A chave de embeddings não pôde ser lida, então só a busca por palavras rodou. Informe a chave de novo nas configurações de IA.",
+      "vectorOn": "Busca por sentido e por palavras",
+      "vectorOff": "Só busca por palavras (sem embeddings disponíveis)",
+      "vectorFailed": "Só busca por palavras (o embedding da pergunta falhou — confira a chave de embeddings)",
+      "words": "palavras: {words}",
+      "ceiling": "limite de distância {value}",
+      "noResults": "Nada encontrado. Para esta pergunta o agente responderia sem a base de conhecimento (ou passaria para uma pessoa).",
+      "baseEmpty": "Sua base de conhecimento ainda não tem trechos, então não havia o que buscar. Adicione um documento acima.",
+      "untitled": "Documento sem título",
+      "origin": {
+        "semantic": "Sentido",
+        "lexical": "Palavras",
+        "both": "Sentido + palavras"
+      },
+      "score": "pontuação {value}",
+      "distance": "distância {value}",
+      "showMore": "Ver mais",
+      "showLess": "Ver menos"
     }
   },
   "Currencies": {
@@ -3978,33 +4122,6 @@
       "saveFailed": "Falha ao salvar.",
       "removeSuccess": "Configuração de IA removida.",
       "removeFailed": "Falha ao remover."
-    },
-    "aiKnowledge": {
-      "loadFailed": "Falha ao carregar base de conhecimento",
-      "openFailed": "Falha ao abrir documento",
-      "titleContentRequired": "Título e conteúdo são obrigatórios.",
-      "saveSuccessNew": "Documento adicionado.",
-      "saveSuccessUpdate": "Documento atualizado.",
-      "saveFailed": "Falha ao salvar.",
-      "removeSuccess": "Documento removido.",
-      "removeFailed": "Falha ao remover.",
-      "reindexSuccess": "{count} documento(s) reindexado(s).",
-      "reindexFailed": "Falha ao reindexar.",
-      "title": "Base de conhecimento",
-      "description": "Adicione FAQs, políticas ou detalhes de produtos. O assistente busca os trechos relevantes ao gerar rascunhos e respostas automáticas, para poder responder em vez de transferir.{searchType}",
-      "semanticSearchOn": " Busca semântica ativada (chave de embeddings definida).",
-      "keywordSearchOn": " Usando busca por palavra-chave — adicione uma chave de embeddings acima para busca semântica.",
-      "noDocs": "Ainda sem documentos.",
-      "editDocTitle": "Título",
-      "editDocTitlePlaceholder": "ex.: Política de trocas e devoluções",
-      "editDocContent": "Conteúdo",
-      "editDocContentPlaceholder": "Cole a resposta da FAQ, texto da política ou detalhes do produto…",
-      "cancel": "Cancelar",
-      "saveDoc": "Salvar documento",
-      "addDoc": "Adicionar documento",
-      "reindex": "Reindexar",
-      "reindexTooltip": "Reprocessar embeddings de todos os documentos (ex.: após adicionar uma chave de embeddings)",
-      "loading": "Carregando…"
     },
     "danger": {
       "title": "Zona de risco",

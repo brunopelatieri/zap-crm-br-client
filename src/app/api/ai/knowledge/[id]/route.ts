@@ -10,14 +10,30 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
-import { loadEmbeddingsTarget } from '@/lib/ai/config';
-import { ingestDocument } from '@/lib/ai/knowledge';
-import { AiError } from '@/lib/ai/types';
+import {
+  cleanContent,
+  cleanTitle,
+  normalizeTags,
+} from '@/lib/ai/ingest/documents';
+import { IngestError } from '@/lib/ai/ingest/errors';
+import {
+  buildFaqText,
+  normalizeFaqPairs,
+  parseFaqText,
+} from '@/lib/ai/ingest/faq';
+import { hashContent } from '@/lib/ai/ingest/indexer';
+import {
+  ingestErrorResponse,
+  scheduleIndexing,
+} from '@/lib/ai/ingest/route-helpers';
+
+export const maxDuration = 300;
 
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * GET /api/ai/knowledge/[id] — full document (any member).
+ * GET /api/ai/knowledge/[id] — full document (any member). `faq`
+ * documents also return their `pairs`.
  */
 export async function GET(_request: Request, { params }: Params) {
   try {
@@ -27,7 +43,9 @@ export async function GET(_request: Request, { params }: Params) {
     const { id } = await params;
     const { data, error } = await supabase
       .from('ai_knowledge_documents')
-      .select('id, title, content, updated_at')
+      .select(
+        'id, title, content, source_type, source_name, source_url, mime_type, status, index_error, chunk_count, char_count, is_enabled, tags, indexed_at, updated_at'
+      )
       .eq('account_id', accountId)
       .eq('id', id)
       .maybeSingle();
@@ -40,15 +58,24 @@ export async function GET(_request: Request, { params }: Params) {
     }
     if (!data)
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...data,
+      pairs:
+        data.source_type === 'faq' ? parseFaqText(data.content) : undefined,
+    });
   } catch (err) {
     return toErrorResponse(err);
   }
 }
 
 /**
- * PATCH /api/ai/knowledge/[id]  (admin+) — update title/content and
- * re-index when the content changed.
+ * PATCH /api/ai/knowledge/[id]  (admin+)
+ *
+ * Any of: `title`, `content` (or `pairs` on a `faq` document), `tags`,
+ * `is_enabled`. Tags and the enabled switch take effect at once and never
+ * re-index. A changed title or text sets the document back to `pending`
+ * (the title is prefixed to every chunk, D-12) unless the content hash
+ * says nothing changed (idempotence, §5.2); indexing runs in `after()`.
  */
 export async function PATCH(request: Request, { params }: Params) {
   try {
@@ -60,89 +87,121 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const { id } = await params;
     const body = await request.json().catch(() => null);
-    const title =
-      typeof body?.title === 'string' ? body.title.trim() : undefined;
-    const content =
-      typeof body?.content === 'string' ? body.content.trim() : undefined;
-    if (title === undefined && content === undefined) {
+    if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
     }
-    if (title !== undefined && !title) {
-      return NextResponse.json(
-        { error: 'title cannot be empty' },
-        { status: 400 }
-      );
-    }
-    if (content !== undefined && !content) {
-      return NextResponse.json(
-        { error: 'content cannot be empty' },
-        { status: 400 }
-      );
-    }
 
-    const update: Record<string, string> = {};
-    if (title !== undefined) update.title = title;
-    if (content !== undefined) update.content = content;
-
-    const { data: updated, error } = await supabase
+    const { data: current, error: loadErr } = await supabase
       .from('ai_knowledge_documents')
-      .update(update)
+      .select('id, title, source_type, content_hash')
       .eq('account_id', accountId)
       .eq('id', id)
-      .select('id')
       .maybeSingle();
-    if (error) {
-      console.error('[ai/knowledge/[id] PATCH] error:', error);
+    if (loadErr) {
+      console.error('[ai/knowledge/[id] PATCH] load error:', loadErr);
       return NextResponse.json(
         { error: 'Failed to update document' },
         { status: 500 }
       );
     }
-    if (!updated)
+    if (!current)
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    if (content !== undefined) {
-      const { target: embeddingsTarget, corrupt } = await loadEmbeddingsTarget(
-        supabase,
-        accountId
-      );
-      try {
-        await ingestDocument(
-          supabase,
-          accountId,
-          { embeddingsTarget },
-          id,
-          content
-        );
-      } catch (err) {
-        const message =
-          err instanceof AiError ? err.message : 'indexing failed';
-        console.error('[ai/knowledge/[id] PATCH] ingest error:', err);
+    try {
+      const update: Record<string, unknown> = {};
+      let reindex = false;
+
+      if (body.title !== undefined) {
+        const title = cleanTitle(body.title);
+        if (!title) {
+          return NextResponse.json(
+            { error: 'title cannot be empty', code: 'invalid_input' },
+            { status: 400 }
+          );
+        }
+        if (title !== current.title) {
+          update.title = title;
+          reindex = true;
+        }
+      }
+
+      const isFaq = current.source_type === 'faq';
+      if (body.pairs !== undefined && !isFaq) {
         return NextResponse.json(
           {
-            success: true,
-            warning: `Updated, but semantic indexing failed (${message}). Lexical search still works; use Reindex to retry.`,
+            error: 'pairs only apply to question/answer documents',
+            code: 'invalid_input',
           },
-          { status: 200 }
+          { status: 400 }
         );
       }
-      if (corrupt) {
-        return NextResponse.json({
-          success: true,
-          warning:
-            'Updated with keyword search only — your embeddings key could not be decrypted (check ENCRYPTION_KEY, then re-enter the key).',
-        });
+      if (body.content !== undefined || body.pairs !== undefined) {
+        const content = isFaq
+          ? buildFaqText(normalizeFaqPairs(body.pairs))
+          : cleanContent(body.content);
+        const hash = hashContent(content);
+        if (hash !== current.content_hash) {
+          update.content = content;
+          update.content_hash = hash;
+          update.char_count = content.length;
+          reindex = true;
+        }
       }
-    }
 
-    return NextResponse.json({ success: true });
+      if (body.tags !== undefined) update.tags = normalizeTags(body.tags);
+      if (body.is_enabled !== undefined) {
+        if (typeof body.is_enabled !== 'boolean') {
+          return NextResponse.json(
+            { error: 'is_enabled must be a boolean', code: 'invalid_input' },
+            { status: 400 }
+          );
+        }
+        update.is_enabled = body.is_enabled;
+      }
+
+      if (Object.keys(update).length === 0) {
+        // Nada mudou (por exemplo, o mesmo texto de novo): não reindexa.
+        return NextResponse.json({ success: true, reindexed: false });
+      }
+
+      if (reindex) {
+        update.status = 'pending';
+        update.index_attempts = 0;
+        update.index_error = null;
+        update.index_started_at = null;
+      }
+
+      const { data: updated, error } = await supabase
+        .from('ai_knowledge_documents')
+        .update(update)
+        .eq('account_id', accountId)
+        .eq('id', id)
+        .select('id')
+        .maybeSingle();
+      if (error) {
+        console.error('[ai/knowledge/[id] PATCH] error:', error);
+        return NextResponse.json(
+          { error: 'Failed to update document' },
+          { status: 500 }
+        );
+      }
+      if (!updated)
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+      if (reindex) scheduleIndexing(accountId, [id]);
+      return NextResponse.json({ success: true, reindexed: reindex });
+    } catch (err) {
+      if (err instanceof IngestError) return ingestErrorResponse(err);
+      throw err;
+    }
   } catch (err) {
     return toErrorResponse(err);
   }
 }
 
 /**
- * DELETE /api/ai/knowledge/[id]  (admin+) — chunks cascade.
+ * DELETE /api/ai/knowledge/[id]  (admin+) — chunks cascade; the plan
+ * counter is released by the trigger (103).
  */
 export async function DELETE(_request: Request, { params }: Params) {
   try {

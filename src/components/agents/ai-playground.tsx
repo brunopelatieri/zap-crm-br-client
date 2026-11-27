@@ -10,6 +10,7 @@ import {
   Loader2,
   UserCircle2,
   ArrowRight,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,28 @@ interface Turn {
   content: string;
   /** assistant-only: the agent signalled a human handoff on this turn. */
   handoff?: boolean;
+  /** assistant-only: knowledge-base excerpts that grounded this turn
+   *  (SPEC 089 D-14). Admin-only view; never part of the customer text. */
+  sources?: PlaygroundSource[];
+}
+
+interface PlaygroundSource {
+  chunkId: string;
+  documentId: string | null;
+  title: string | null;
+  score: number;
+}
+
+/** One line per document, with how many of its excerpts were used. */
+function groupSources(sources: PlaygroundSource[]) {
+  const groups = new Map<string, { title: string | null; count: number }>();
+  for (const s of sources) {
+    const key = s.documentId ?? s.chunkId;
+    const g = groups.get(key);
+    if (g) g.count += 1;
+    else groups.set(key, { title: s.title, count: 1 });
+  }
+  return Array.from(groups.values());
 }
 
 export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
@@ -70,6 +93,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
               ? data.reply
               : '',
           handoff: Boolean(data.handoff),
+          sources: Array.isArray(data.sources) ? data.sources : [],
         },
       ]);
     } catch {
@@ -151,6 +175,30 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
             >
               {turn.content && (
                 <p className="whitespace-pre-wrap">{turn.content}</p>
+              )}
+              {turn.role === 'assistant' && turn.sources && (
+                <div
+                  className={cn(
+                    'text-muted-foreground flex items-start gap-1 text-xs',
+                    turn.content && 'border-border/50 mt-1.5 border-t pt-1.5'
+                  )}
+                  data-testid="playground-sources"
+                >
+                  <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {turn.sources.length === 0 ? (
+                    <span>{t('noSources')}</span>
+                  ) : (
+                    <span>
+                      {t('sources')}{' '}
+                      {groupSources(turn.sources)
+                        .map(
+                          (g) =>
+                            `${g.title ?? t('sourceUntitled')} (${t('sourceExcerpts', { count: g.count })})`
+                        )
+                        .join(' · ')}
+                    </span>
+                  )}
+                </div>
               )}
               {turn.role === 'assistant' && turn.handoff && (
                 <p

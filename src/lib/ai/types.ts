@@ -15,6 +15,37 @@ export const AI_PROVIDERS: readonly AiProvider[] = [
   'openrouter',
 ];
 
+/**
+ * Where a retrieved excerpt came from (SPEC 089 F3): the vector search, the
+ * lexical search, or both (the strongest signal).
+ */
+export type KnowledgeHitOrigin = 'semantic' | 'lexical' | 'both';
+
+/**
+ * What the retrieval reports about an excerpt that went into the prompt
+ * (SPEC 089 D-14). `documentId` / `title` are null only on the legacy
+ * fallback path (the old RPCs do not return them). Never sent to the
+ * customer.
+ */
+export interface KnowledgeSource {
+  chunkId: string;
+  documentId: string | null;
+  title: string | null;
+  /** Sum of the reciprocal-rank-fusion contributions (0 on the legacy path). */
+  score: number;
+}
+
+/** A retrieved excerpt with everything the "Test retrieval" screen shows. */
+export interface KnowledgeHit extends KnowledgeSource {
+  content: string;
+  heading: string | null;
+  /** Cosine distance (0–2); null when the vector search did not see it. */
+  distance: number | null;
+  /** Raw `ts_rank`; null when the lexical search did not match it. */
+  lexicalRank: number | null;
+  origin: KnowledgeHitOrigin;
+}
+
 /** Who serves the knowledge-base embeddings (SPEC 089 D-3). */
 export type EmbeddingsProvider = 'openai' | 'openrouter';
 

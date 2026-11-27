@@ -173,6 +173,8 @@ async function computeUsage(
     FORMS_METRIC,
     monthMetricKey(new Date()),
     FORM_UPLOAD_BYTES_METRIC,
+    // SPEC 089 D-20: documentos da base de conhecimento (trigger da 103).
+    'knowledge_documents',
   ];
 
   const [
@@ -246,6 +248,7 @@ async function computeUsage(
     form_upload_mb: bytesToMbCeil(
       formCounterByMetric.get(FORM_UPLOAD_BYTES_METRIC) ?? 0
     ),
+    knowledge_documents: formCounterByMetric.get('knowledge_documents') ?? 0,
   };
 
   // USAGE_QUOTA_KEYS, não QUOTA_KEYS: as chaves de segurança da SPEC

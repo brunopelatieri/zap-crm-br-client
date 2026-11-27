@@ -8,9 +8,10 @@ import { runMessageRetention } from '@/lib/retention/sweep';
 import { runPlanLifecycle } from '@/lib/plans/lifecycle';
 import { deliverPending } from '@/lib/notifications/dispatch';
 import { runFormsSweep, shouldLogFormsSweep } from '@/lib/forms/sweep';
+import { sweepKnowledgeIndexing } from '@/lib/ai/ingest/indexer';
 
 /**
- * Sete fases, um único agendamento:
+ * Oito fases, um único agendamento:
  *
  *   1. **Drenar** as `automation_pending_executions` vencidas (o step
  *      `wait`). Comportamento original desta rota.
@@ -28,6 +29,12 @@ import { runFormsSweep, shouldLogFormsSweep } from '@/lib/forms/sweep';
  *      as respostas `partial` paradas há mais de 24 h e remove do bucket
  *      `form-uploads` os objetos órfãos (sem resposta) ou de respostas
  *      `abandoned` há mais de 7 dias. A contagem sai no log da fase.
+ *   8. **Retomar a indexação da base de conhecimento da IA** (SPEC 089 D-9,
+ *      F2): documentos `pending` (parados há mais de 2 min, dando tempo ao
+ *      `after()` da rota que os criou) e `indexing` parado há mais de 10 min
+ *      (processo reiniciado no meio). No máximo 5 documentos por ciclo; a
+ *      terceira falha vira `error`, com botão de reindexar na tela. Sem
+ *      agendador novo nem ação do operador: é fase desta rota.
  *
  * Por que a varredura mora AQUI e não numa rota nova (§5.5.1, e o mesmo
  * argumento vale para a fase 3 — SPEC 046 §6.1 —, para a fase 4 —
@@ -225,6 +232,18 @@ export async function GET(request: Request) {
       console.log(
         '[automations-cron] forms sweep:',
         JSON.stringify(formsResult)
+      );
+    }
+
+    // Fase 8 (SPEC 089 D-9) — indexação da base de conhecimento. Sem
+    // interruptor de `.env`: sem documento `pending` custa uma consulta
+    // indexada. Roda por último: gasta chamadas de embeddings, e as fases
+    // de mensagem e de plano não esperam por ela. Não lança.
+    const knowledgeResult = await sweepKnowledgeIndexing(admin, new Date());
+    if (knowledgeResult.candidates > 0) {
+      console.log(
+        '[automations-cron] knowledge indexing:',
+        JSON.stringify(knowledgeResult)
       );
     }
   });

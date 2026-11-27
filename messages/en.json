@@ -271,7 +271,8 @@
       "channels_whatsapp_cloud": "Official WhatsApp numbers",
       "forms": "Forms",
       "form_responses_month": "Form responses per month",
-      "form_upload_mb": "Form uploads (MB)"
+      "form_upload_mb": "Form uploads (MB)",
+      "knowledge_documents": "AI knowledge documents"
     },
     "featureLabel": {
       "ai_enabled": "AI (draft / auto-reply)",
@@ -3030,7 +3031,11 @@
       "composerPlaceholder": "Type a customer message…",
       "notConfigured": "No agent configured yet — finish Setup first.",
       "replyFailed": "Couldn't get a reply.",
-      "agentUnreachable": "Couldn't reach the agent."
+      "agentUnreachable": "Couldn't reach the agent.",
+      "sources": "Sources:",
+      "sourceExcerpts": "{count, plural, one {# excerpt} other {# excerpts}}",
+      "sourceUntitled": "Untitled document",
+      "noSources": "No knowledge-base excerpt was used for this reply."
     },
     "usage": {
       "title": "Token usage",
@@ -3097,6 +3102,145 @@
       "unsavedWarning": "You have unsaved edits in the prompt field. Restoring replaces the saved prompt; reload the screen afterwards to see it.",
       "close": "Close",
       "versionLabel": "Version of {date}"
+    },
+    "knowledge": {
+      "title": "Knowledge base",
+      "description": "Add FAQs, policies, files, web pages or product details. The assistant retrieves the relevant pieces when drafting and auto-replying, so it can answer instead of handing off.{searchType}",
+      "semanticSearchOn": " Semantic search is on (embeddings available).",
+      "keywordSearchOn": " Using keyword search — add an embeddings key above for semantic search.",
+      "loading": "Loading…",
+      "noDocs": "No documents yet.",
+      "loadFailed": "Failed to load knowledge base",
+      "openFailed": "Failed to open document",
+      "sources": {
+        "text": "Text",
+        "file": "File",
+        "url": "Web page",
+        "faq": "Questions & answers"
+      },
+      "addSource": "Add source",
+      "form": {
+        "title": "Title",
+        "titlePlaceholder": "e.g. Returns & refunds policy",
+        "titleOptional": "Title (optional)",
+        "titleOptionalHint": "Leave empty to use the file name or the page title.",
+        "content": "Content",
+        "contentPlaceholder": "Paste the FAQ answer, policy text, or product details…",
+        "file": "File",
+        "fileHint": "PDF, DOCX, TXT, MD or CSV, up to 10 MB. Only the extracted text is stored — the original file is not kept. Scanned PDFs (images only) are not supported.",
+        "url": "Page address",
+        "urlPlaceholder": "https://example.com/returns",
+        "urlHint": "One page only. The text is imported once (navigation and scripts are removed) — it does not update by itself.",
+        "question": "Question",
+        "answer": "Answer",
+        "addPair": "Add another pair",
+        "removePair": "Remove pair",
+        "tags": "Tags (optional)",
+        "tagsPlaceholder": "e.g. returns, shipping",
+        "tagsHint": "Separate with commas. Up to 20 tags."
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "save": "Save",
+        "upload": "Upload file",
+        "import": "Import page",
+        "edit": "Edit",
+        "delete": "Delete",
+        "reindex": "Reindex this document",
+        "reindexAll": "Reindex all",
+        "reindexAllTooltip": "Rebuild the index of every document (e.g. after adding an embeddings key)"
+      },
+      "toast": {
+        "added": "Source added. It is being indexed in the background.",
+        "updated": "Document updated.",
+        "updatedReindex": "Document updated. It is being indexed again.",
+        "removed": "Document removed.",
+        "removeFailed": "Failed to remove.",
+        "saveFailed": "Failed to save.",
+        "reindexQueued": "{count, plural, one {# document queued for reindexing.} other {# documents queued for reindexing.}}",
+        "reindexFailed": "Reindex failed.",
+        "updateFailed": "Failed to update.",
+        "fileTooLarge": "The file is larger than 10 MB.",
+        "fileType": "Choose a PDF, DOCX, TXT, MD or CSV file."
+      },
+      "status": {
+        "pending": "Waiting",
+        "indexing": "Indexing…",
+        "ready": "Ready",
+        "error": "Error"
+      },
+      "readyDetail": "{count, plural, one {# chunk} other {# chunks}} · {chars, number} characters",
+      "sourceLine": {
+        "file": "File: {name}",
+        "faq": "Questions and answers"
+      },
+      "enabled": {
+        "label": "Used by the assistant",
+        "off": "Off"
+      },
+      "indexError": {
+        "empty_text": "No text could be indexed.",
+        "embeddings_failed": "Semantic indexing failed; keyword search still works.",
+        "embeddings_key_unreadable": "Indexed for keyword search only: the embeddings key could not be decrypted.",
+        "indexing_failed": "Indexing failed.",
+        "indexing_stalled": "Indexing stopped repeatedly.",
+        "unknown": "Indexing failed.",
+        "detail": "({code})",
+        "retryHint": "Use “Reindex this document” to try again."
+      },
+      "errors": {
+        "unsupported_type": "This file type is not supported. Use PDF, DOCX, TXT, MD or CSV.",
+        "file_too_large": "The file is larger than 10 MB.",
+        "file_corrupt": "The file could not be read.",
+        "pdf_encrypted": "This PDF is password-protected. Remove the password and try again.",
+        "empty_text": "No readable text was found. Scanned PDFs (images only) are not supported.",
+        "text_too_long": "The text is over 500,000 characters.",
+        "invalid_url": "This address is not valid. Use an http or https URL.",
+        "url_blocked": "This address is not allowed (internal, private or unresolvable host).",
+        "url_unreachable": "Could not reach the page.",
+        "url_timeout": "The page took more than 10 seconds to respond.",
+        "url_bad_status": "The page returned an error.",
+        "url_unsupported_content_type": "Only HTML and plain-text pages can be imported.",
+        "url_too_large": "The page is larger than 2 MB.",
+        "url_too_many_redirects": "The page redirects too many times.",
+        "faq_invalid": "Check the pairs: every question and answer is required, with at most 200 pairs.",
+        "invalid_input": "Check the fields and try again.",
+        "duplicate_content": "An identical document already exists: “{title}”.",
+        "quota_exceeded": "Your plan’s limit of {limit} knowledge documents has been reached.",
+        "generic": "Something went wrong. Try again."
+      }
+    },
+    "knowledgeSearch": {
+      "title": "Test retrieval",
+      "description": "Type a customer question and see which excerpts of your knowledge base the agent would receive, ranked. It does not call the AI model.",
+      "queryLabel": "Customer question",
+      "queryPlaceholder": "e.g. How much does the premium plan cost?",
+      "distanceLabel": "Distance limit (optional)",
+      "distanceHint": "Excerpts found only by meaning and farther than the limit are left out (0 = identical, 2 = opposite). Changing it here affects this test only.",
+      "search": "Search",
+      "badDistance": "The distance limit must be a number between 0 and 2.",
+      "rateLimited": "Too many tests in a row — wait a moment and try again.",
+      "forbidden": "Only admins can test retrieval, and the AI feature must be in your plan.",
+      "failed": "Could not run the search.",
+      "searchFailed": "The search failed in the database, so nothing was returned (this is not \"no match\"). Check the server log.",
+      "keyUnreadable": "The embeddings key could not be read, so only the word search ran. Re-enter the key in the AI settings.",
+      "vectorOn": "Meaning search and word search",
+      "vectorOff": "Word search only (no embeddings available)",
+      "vectorFailed": "Word search only (the query embedding failed — check the embeddings key)",
+      "words": "words: {words}",
+      "ceiling": "distance limit {value}",
+      "noResults": "Nothing found. For this question the agent would answer without the knowledge base (or hand off to a person).",
+      "baseEmpty": "Your knowledge base has no excerpts yet, so there was nothing to search. Add a document above.",
+      "untitled": "Untitled document",
+      "origin": {
+        "semantic": "Meaning",
+        "lexical": "Words",
+        "both": "Meaning + words"
+      },
+      "score": "score {value}",
+      "distance": "distance {value}",
+      "showMore": "Show more",
+      "showLess": "Show less"
     }
   },
   "Currencies": {
@@ -3978,33 +4122,6 @@
       "saveFailed": "Failed to save.",
       "removeSuccess": "AI configuration removed.",
       "removeFailed": "Failed to remove."
-    },
-    "aiKnowledge": {
-      "loadFailed": "Failed to load knowledge base",
-      "openFailed": "Failed to open document",
-      "titleContentRequired": "Title and content are required.",
-      "saveSuccessNew": "Document added.",
-      "saveSuccessUpdate": "Document updated.",
-      "saveFailed": "Failed to save.",
-      "removeSuccess": "Document removed.",
-      "removeFailed": "Failed to remove.",
-      "reindexSuccess": "Reindexed {count} document(s).",
-      "reindexFailed": "Reindex failed.",
-      "title": "Knowledge base",
-      "description": "Add FAQs, policies, or product details. The assistant retrieves the relevant pieces when drafting and auto-replying, so it can answer instead of handing off.{searchType}",
-      "semanticSearchOn": " Semantic search is on (embeddings key set).",
-      "keywordSearchOn": " Using keyword search — add an embeddings key above for semantic search.",
-      "noDocs": "No documents yet.",
-      "editDocTitle": "Title",
-      "editDocTitlePlaceholder": "e.g. Returns & refunds policy",
-      "editDocContent": "Content",
-      "editDocContentPlaceholder": "Paste the FAQ answer, policy text, or product details…",
-      "cancel": "Cancel",
-      "saveDoc": "Save document",
-      "addDoc": "Add document",
-      "reindex": "Reindex",
-      "reindexTooltip": "Re-embed all documents (e.g. after adding an embeddings key)",
-      "loading": "Loading…"
     },
     "danger": {
       "title": "Danger zone",

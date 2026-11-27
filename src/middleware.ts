@@ -214,10 +214,15 @@ export const config = {
     // refresh de sessão do Supabase por nada, já que não é uma rota
     // autenticada.
     //
+    // `api/ai/knowledge/upload` (SPEC 089 F2): envio de PDF/DOCX de até 10 MB
+    // em multipart. O corpo passa de 10 MB só pelo envelope e o clone do
+    // middleware o entregaria TRUNCADO, sem erro. A rota confere a sessão
+    // sozinha (`requireRole`), então não perde o gate.
+    //
     // `opus`: mesmo raciocínio para o worker do encoder Opus em
     // public/opus/ (opus-recorder, gravação de voz) — vendorizado do
     // mesmo jeito que a Emojibase, mas tinha ficado fora dessa exclusão
     // até este achado de code review na SPEC 066.
-    '/((?!_next/static|_next/image|favicon.ico|emojibase(?:/|$)|opus(?:/|$)|api/whatsapp/webhook(?:/|$)|api/channels/evolution/webhook(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|emojibase(?:/|$)|opus(?:/|$)|api/whatsapp/webhook(?:/|$)|api/channels/evolution/webhook(?:/|$)|api/ai/knowledge/upload(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

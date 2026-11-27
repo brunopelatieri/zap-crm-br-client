@@ -32,6 +32,29 @@ describe('logAiUsage', () => {
     });
   });
 
+  it('records the knowledge documents behind the turn (D-14), only when there are any', async () => {
+    const { db, insert } = fakeDb();
+    const base = {
+      accountId: 'acct-1',
+      conversationId: 'conv-1',
+      mode: 'draft' as const,
+      provider: 'openai' as const,
+      model: 'gpt-x',
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    };
+    await logAiUsage(db, { ...base, knowledgeDocumentIds: ['d1', 'd2'] });
+    expect(insert.mock.calls[0][0].knowledge_document_ids).toEqual([
+      'd1',
+      'd2',
+    ]);
+
+    await logAiUsage(db, { ...base, knowledgeDocumentIds: [] });
+    // Empty: the column is left out, so the insert is valid before 104.
+    expect(insert.mock.calls[1][0]).not.toHaveProperty(
+      'knowledge_document_ids'
+    );
+  });
+
   it('is a no-op when the provider reported no usage', async () => {
     const { db, from } = fakeDb();
     await logAiUsage(db, {

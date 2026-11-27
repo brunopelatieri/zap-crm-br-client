@@ -10,14 +10,29 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
-import { loadEmbeddingsTarget } from '@/lib/ai/config';
-import { ingestDocument } from '@/lib/ai/knowledge';
-import { AiError } from '@/lib/ai/types';
+import {
+  cleanContent,
+  cleanTitle,
+  createKnowledgeDocument,
+  normalizeTags,
+} from '@/lib/ai/ingest/documents';
+import { IngestError } from '@/lib/ai/ingest/errors';
+import { buildFaqText, normalizeFaqPairs } from '@/lib/ai/ingest/faq';
+import {
+  createResultResponse,
+  ingestErrorResponse,
+  scheduleIndexing,
+} from '@/lib/ai/ingest/route-helpers';
+
+// `after()` indexa fora da requisição, dentro deste teto (D-9).
+export const maxDuration = 300;
 
 /**
  * GET /api/ai/knowledge
  *
- * List the account's knowledge-base documents (any member).
+ * List the account's knowledge-base documents (any member), with the
+ * indexing state, source, tags and enabled switch. The body (`content`)
+ * is not listed — GET /api/ai/knowledge/[id] returns it.
  */
 export async function GET() {
   try {
@@ -26,7 +41,9 @@ export async function GET() {
     await requireAiFeature(accountId);
     const { data, error } = await supabase
       .from('ai_knowledge_documents')
-      .select('id, title, updated_at')
+      .select(
+        'id, title, source_type, source_name, source_url, mime_type, status, index_error, chunk_count, char_count, is_enabled, tags, indexed_at, updated_at'
+      )
       .eq('account_id', accountId)
       .order('updated_at', { ascending: false });
     if (error) {
@@ -45,8 +62,12 @@ export async function GET() {
 /**
  * POST /api/ai/knowledge  (admin+)
  *
- * Create a document, then chunk + (optionally) embed it. If indexing
- * fails the document is still saved so the admin can retry via reindex.
+ * Two shapes (SPEC 089 D-7):
+ *   { title, content, tags? }                       pasted text
+ *   { source: 'faq', title, pairs: [{question, answer}], tags? }
+ *
+ * The document is saved as `pending` and the response returns at once;
+ * chunking + embedding run in `after()` (D-9), retried by the cron sweep.
  */
 export async function POST(request: Request) {
   try {
@@ -57,63 +78,38 @@ export async function POST(request: Request) {
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = await request.json().catch(() => null);
-    const title = typeof body?.title === 'string' ? body.title.trim() : '';
-    const content =
-      typeof body?.content === 'string' ? body.content.trim() : '';
-    if (!title || !content) {
+    const title = cleanTitle(body?.title);
+    if (!title) {
       return NextResponse.json(
-        { error: 'title and content are required' },
+        { error: 'title and content are required', code: 'invalid_input' },
         { status: 400 }
       );
     }
 
-    const { data: doc, error } = await supabase
-      .from('ai_knowledge_documents')
-      .insert({ account_id: accountId, created_by: userId, title, content })
-      .select('id')
-      .single();
-    if (error || !doc) {
-      console.error('[ai/knowledge POST] insert error:', error);
-      return NextResponse.json(
-        { error: 'Failed to save document' },
-        { status: 500 }
-      );
-    }
-
-    const { target: embeddingsTarget, corrupt } = await loadEmbeddingsTarget(
-      supabase,
-      accountId
-    );
     try {
-      await ingestDocument(
+      const tags = normalizeTags(body?.tags);
+      const isFaq = body?.source === 'faq';
+      const content = isFaq
+        ? buildFaqText(normalizeFaqPairs(body?.pairs))
+        : cleanContent(body?.content);
+
+      const result = await createKnowledgeDocument(
         supabase,
         accountId,
-        { embeddingsTarget },
-        doc.id,
-        content
-      );
-    } catch (err) {
-      const message = err instanceof AiError ? err.message : 'indexing failed';
-      console.error('[ai/knowledge POST] ingest error:', err);
-      return NextResponse.json(
+        userId,
         {
-          success: true,
-          id: doc.id,
-          warning: `Saved, but semantic indexing failed (${message}). Lexical search still works; use Reindex to retry.`,
-        },
-        { status: 200 }
+          title,
+          content,
+          sourceType: isFaq ? 'faq' : 'text',
+          tags,
+        }
       );
+      if (result.ok) scheduleIndexing(accountId, [result.id]);
+      return createResultResponse(result);
+    } catch (err) {
+      if (err instanceof IngestError) return ingestErrorResponse(err);
+      throw err;
     }
-
-    if (corrupt) {
-      return NextResponse.json({
-        success: true,
-        id: doc.id,
-        warning:
-          'Saved with keyword search only — your embeddings key could not be decrypted (check ENCRYPTION_KEY, then re-enter the key).',
-      });
-    }
-    return NextResponse.json({ success: true, id: doc.id });
   } catch (err) {
     return toErrorResponse(err);
   }

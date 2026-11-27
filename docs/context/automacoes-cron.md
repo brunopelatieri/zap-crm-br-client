@@ -24,7 +24,7 @@
 
 ## O que roda pela `/api/automations/cron`
 
-Uma rota, várias fases (lista e SPEC de cada uma no comentário do topo de `src/app/api/automations/cron/route.ts`): retomar passos `wait` vencidos, varrer janelas de 24h (SPEC 045), gatilho `time_based` (SPEC 046), retenção de mensagens (SPEC 060), ciclo de plano (SPEC 062) e reentrega da outbox de notificações (SPEC 063). As rotas `messages/retention` e `plans/lifecycle` são portas **opcionais** para horário próprio — o trabalho já acontece aqui.
+Uma rota, várias fases (lista e SPEC de cada uma no comentário do topo de `src/app/api/automations/cron/route.ts`): retomar passos `wait` vencidos, varrer janelas de 24h (SPEC 045), gatilho `time_based` (SPEC 046), retenção de mensagens (SPEC 060), ciclo de plano (SPEC 062), reentrega da outbox de notificações (SPEC 063), varredura dos formulários (SPEC 085) e **retomada da indexação da base de conhecimento da IA** (SPEC 089 F2: `pending` e `indexing` parado há mais de 10 min, 5 por ciclo, 3 tentativas; `src/lib/ai/ingest/indexer.ts`). As rotas `messages/retention` e `plans/lifecycle` são portas **opcionais** para horário próprio — o trabalho já acontece aqui.
 
 Já `contacts/check` e `contacts/harvest` (SPEC 069) **não** têm porta padrão: sem o job delas a fila de checagem só cresce e a captação nunca roda (o `harvest` ainda confere a própria janela de madrugada no código — ver o cabeçalho do bloco em `cron-jobs.sql` sobre fuso).
 

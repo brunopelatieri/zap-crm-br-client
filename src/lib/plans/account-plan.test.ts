@@ -226,6 +226,8 @@ describe('getAccountPlan — uso de formulários (SPEC 085 §5.3)', () => {
         // Mês passado NÃO entra no balde do mês.
         'form_responses:2000-01': 999,
         [FORM_UPLOAD_BYTES_METRIC]: BYTES_PER_MB + 1,
+        // SPEC 089 D-20: documentos da base de conhecimento da IA.
+        knowledge_documents: 4,
       },
     });
     const snapshot = await getAccountPlan('acct-1', client);
@@ -234,6 +236,7 @@ describe('getAccountPlan — uso de formulários (SPEC 085 §5.3)', () => {
     expect(bucket(snapshot, 'forms').used).toBe(2);
     expect(bucket(snapshot, 'form_responses_month').used).toBe(15);
     expect(bucket(snapshot, 'form_upload_mb').used).toBe(2);
+    expect(bucket(snapshot, 'knowledge_documents').used).toBe(4);
 
     const batch = queries.find((q) =>
       q.filters.some(([k]) => k === 'in:metric')
@@ -242,7 +245,7 @@ describe('getAccountPlan — uso de formulários (SPEC 085 §5.3)', () => {
     expect(batch.filters).toContainEqual(['account_id', 'acct-1']);
     expect(batch.filters).toContainEqual([
       'in:metric',
-      [FORMS_METRIC, monthKey, FORM_UPLOAD_BYTES_METRIC],
+      [FORMS_METRIC, monthKey, FORM_UPLOAD_BYTES_METRIC, 'knowledge_documents'],
     ]);
   });
 
@@ -252,5 +255,6 @@ describe('getAccountPlan — uso de formulários (SPEC 085 §5.3)', () => {
     expect(bucket(snapshot, 'forms').used).toBe(0);
     expect(bucket(snapshot, 'form_responses_month').used).toBe(0);
     expect(bucket(snapshot, 'form_upload_mb').used).toBe(0);
+    expect(bucket(snapshot, 'knowledge_documents').used).toBe(0);
   });
 });

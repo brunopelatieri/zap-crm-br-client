@@ -9,6 +9,7 @@ import {
 import { loadAiConfig } from '@/lib/ai/config';
 import { buildConversationContext } from '@/lib/ai/context';
 import { composeAgentTurn } from '@/lib/ai/compose';
+import { documentIdsOf } from '@/lib/ai/sources';
 import { generateReply } from '@/lib/ai/generate';
 import { logAiUsage } from '@/lib/ai/usage';
 import { supabaseAdmin } from '@/lib/ai/admin-client';
@@ -134,6 +135,7 @@ export async function POST(request: Request) {
         provider: config.provider,
         model: config.model,
         usage,
+        knowledgeDocumentIds: documentIdsOf(turn.sources),
       });
     } catch (logErr) {
       console.error('[ai/draft] usage log skipped:', logErr);
