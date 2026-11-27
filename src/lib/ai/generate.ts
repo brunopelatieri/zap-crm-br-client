@@ -8,6 +8,7 @@ import {
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults';
 import { generateOpenAi } from './providers/openai';
 import { generateAnthropic } from './providers/anthropic';
+import { generateOpenRouter } from './providers/openrouter';
 
 export interface GenerateArgs {
   config: AiConfig;
@@ -33,6 +34,7 @@ export async function generateReply(
     systemPrompt,
     messages,
     timeoutMs,
+    providerOptions: config.providerOptions,
   };
 
   let result: { text: string; usage: AiUsage | null };
@@ -42,6 +44,9 @@ export async function generateReply(
       break;
     case 'anthropic':
       result = await generateAnthropic(providerArgs);
+      break;
+    case 'openrouter':
+      result = await generateOpenRouter(providerArgs);
       break;
     default:
       throw new AiError(`Unsupported AI provider: ${config.provider}`, {

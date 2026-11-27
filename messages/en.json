@@ -3015,7 +3015,8 @@
       "description": "Your bring-your-own-key AI agent — set it up, then test it in the playground before it replies to customers in the inbox.",
       "tabPlayground": "Playground",
       "tabSetup": "Setup",
-      "tabUsage": "Usage"
+      "tabUsage": "Usage",
+      "notInPlan": "The AI agent is not included in your current plan. Ask the account owner to upgrade the plan to use it."
     },
     "playground": {
       "title": "Playground",
@@ -3046,7 +3047,56 @@
       "tokensCategory": "Tokens",
       "byModel": "By model",
       "modelUsage": "{tokens} tok · {calls} {calls, plural, =1 {call} other {calls}}",
-      "truncatedNote": "Showing a partial window — usage is high enough that only the most recent records are summarized here."
+      "truncatedNote": "Showing a partial window — usage is high enough that only the most recent records are summarized here.",
+      "cost": "Cost",
+      "costNote": "Cost is reported by OpenRouter only; calls on other providers have no cost here."
+    },
+    "config": {
+      "providerOpenrouter": "OpenRouter",
+      "openrouterIntro": "OpenRouter gives one key access to many models (Claude, GPT, Gemini, open models). The same key also embeds your knowledge base.",
+      "openrouterKeyPlaceholder": "sk-or-...",
+      "defaultModelHint": "Suggested default: {model}.",
+      "modelSearchHint": "Search the OpenRouter catalog below, or type any model id — the field stays free text.",
+      "modelsLoading": "Searching models…",
+      "modelsFailed": "Could not load the model catalog. You can still type a model id.",
+      "modelsNone": "No model in the catalog matches. You can still use what you typed.",
+      "toolsBadge": "tools",
+      "noToolsBadge": "no tools",
+      "modelMeta": "{context} context · {prompt} in / {completion} out per 1M tokens",
+      "embeddingsProvider": "Embeddings provider",
+      "embeddingsProviderOpenai": "OpenAI",
+      "embeddingsProviderOpenrouter": "OpenRouter",
+      "embeddingsOpenrouterReuse": "Semantic search is on without a separate key: OpenRouter embeds with the same key as the chat. Enter an embeddings key only to use a different one.",
+      "embeddingsKeyPlaceholderOpenrouter": "sk-or-... (OpenRouter)",
+      "privacyTitle": "Privacy on OpenRouter",
+      "privacyNotice": "With OpenRouter, your conversation text and the knowledge-base excerpts pass through OpenRouter and then reach the model provider it routes to. Check the data policy of the model you pick.",
+      "privacySwitch": "Only use providers that do not retain data for training",
+      "privacySwitchDesc": "Sends data_collection: deny with each chat request. Off by default: some models (especially free ones) have no provider that qualifies, and the request then fails with a routing error. Applies to chat only; embeddings are not filtered.",
+      "historyButton": "Version history"
+    },
+    "promptVersions": {
+      "title": "Prompt version history",
+      "description": "Every save that changes the business context creates a version. Compare two versions and restore an older one — restoring is itself recorded as a new version.",
+      "loadFailed": "Failed to load the version history.",
+      "empty": "No versions yet. The first one is created the next time you save a changed prompt.",
+      "sourcePanel": "Panel",
+      "sourceApi": "API",
+      "emptyPrompt": "(empty prompt)",
+      "restoreNote": "Restore of an earlier version",
+      "selected": "Selected version",
+      "compareWith": "Compare with",
+      "compareCurrent": "Current prompt",
+      "compareOlder": "Previous version",
+      "noDifferences": "No differences.",
+      "restore": "Restore this version",
+      "restoring": "Restoring…",
+      "restored": "Prompt restored.",
+      "restoredNoChange": "This version is already the current prompt.",
+      "restoreFailed": "Failed to restore the version.",
+      "pickOne": "Pick a version on the left to compare it.",
+      "unsavedWarning": "You have unsaved edits in the prompt field. Restoring replaces the saved prompt; reload the screen afterwards to see it.",
+      "close": "Close",
+      "versionLabel": "Version of {date}"
     }
   },
   "Currencies": {
@@ -3891,7 +3941,7 @@
     },
     "aiConfig": {
       "title": "Agent setup",
-      "description": "Bring your own OpenAI or Anthropic key. wacrm calls the provider directly with your key — no per-seat AI fees, and your data stays yours. This powers AI-drafted replies in the inbox, the auto-reply bot, and the Playground.",
+      "description": "Bring your own OpenAI, Anthropic or OpenRouter key. wacrm calls the provider directly with your key — no per-seat AI fees, and your data stays yours. This powers AI-drafted replies in the inbox, the auto-reply bot, and the Playground.",
       "adminOnlyConfig": "Only admins and owners can change the AI configuration.",
       "loadFailed": "Failed to load AI configuration",
       "providerAndKey": "Provider & key",

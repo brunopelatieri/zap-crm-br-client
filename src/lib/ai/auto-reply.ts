@@ -1,17 +1,15 @@
 import { supabaseAdmin } from './admin-client';
 import { loadAiConfig } from './config';
 import { buildConversationContext } from './context';
-import { retrieveKnowledge } from './knowledge';
+import { composeAgentTurn } from './compose';
 import { generateReply } from './generate';
-import { buildSystemPrompt } from './defaults';
 import { buildHandoffSummary } from './handoff';
 import { logAiUsage } from './usage';
-import { latestUserMessage } from './query';
 import { engineSendText } from '@/lib/flows/meta-send';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
 import { isAssignableMember } from '@/lib/inbox/assignment';
 import { isAccountBlocked } from '@/lib/platform/blocked';
-import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-channel';
+import { hasAiFeature } from './plan-gate';
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -57,6 +55,11 @@ export async function dispatchInboundToAiReply(
     // checagem da função: mais barata que carregar a config de IA e
     // evita gastar token de LLM por uma conta que não pode responder.
     if (await isAccountBlocked(db, accountId)) return;
+
+    // SPEC 089 D-20: `ai_enabled` em modo estrito. Plano sem a chave = IA
+    // desligada para a conta; checado antes de carregar a config e de
+    // gastar token.
+    if (!(await hasAiFeature(accountId, db))) return;
 
     const config = await loadAiConfig(db, accountId);
     if (!config || !config.autoReplyEnabled) return;
@@ -109,30 +112,21 @@ export async function dispatchInboundToAiReply(
       return;
     }
 
-    // Ground the reply in the account's knowledge base (best-effort).
-    const knowledge = await retrieveKnowledge(
+    // One assembly point for the turn: knowledge (best-effort), channel
+    // and system prompt (SPEC 089 P-7).
+    const turn = await composeAgentTurn({
       db,
       accountId,
       config,
-      latestUserMessage(messages)
-    );
-
-    const channelType = await resolveChannelTypeForConversation(
-      db,
-      accountId,
-      conversationId
-    );
-    const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
       mode: 'auto_reply',
-      knowledge,
-      channelType,
+      messages,
+      conversationId,
     });
 
     const { text, handoff, usage } = await generateReply({
       config,
-      systemPrompt,
-      messages,
+      systemPrompt: turn.systemPrompt,
+      messages: turn.messages,
     });
 
     // Record token spend on the account's BYO key. Fire-and-forget so it

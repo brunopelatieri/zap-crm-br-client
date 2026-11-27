@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   retrieveKnowledge: vi.fn(),
   generateReply: vi.fn(),
   engineSendText: vi.fn(),
+  hasAiFeature: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
@@ -40,6 +41,7 @@ vi.mock('./context', () => ({
 }));
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }));
 vi.mock('./generate', () => ({ generateReply: h.generateReply }));
+vi.mock('./plan-gate', () => ({ hasAiFeature: h.hasAiFeature }));
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }));
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
@@ -148,7 +150,8 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyEnabled: true,
     autoReplyMaxPerConversation: 3,
     handoffAgentId: null,
-    embeddingsApiKey: null,
+    embeddingsTarget: null,
+    providerOptions: { denyDataCollection: false },
     ...overrides,
   };
 }
@@ -169,6 +172,7 @@ beforeEach(() => {
   h.state.conversationChannelId = null;
   h.state.channelType = null;
   h.state.accountBlockedAt = null;
+  h.hasAiFeature.mockReset().mockResolvedValue(true);
   h.loadAiConfig.mockResolvedValue(aiConfig());
   h.buildConversationContext.mockResolvedValue([
     { role: 'user', content: 'hi' },
@@ -201,6 +205,24 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled();
     expect(h.loadAiConfig).not.toHaveBeenCalled();
     expect(h.state.rpcCalls).toEqual([]);
+  });
+
+  // SPEC 089 D-20: `ai_enabled` em modo estrito. Plano sem a chave = o
+  // robô não responde, e a checagem vem antes de carregar a config.
+  it('não responde quando o plano não tem ai_enabled (D-20), sem carregar a config', async () => {
+    h.hasAiFeature.mockResolvedValue(false);
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.hasAiFeature).toHaveBeenCalledWith('acct-1', expect.anything());
+    expect(h.loadAiConfig).not.toHaveBeenCalled();
+    expect(h.generateReply).not.toHaveBeenCalled();
+    expect(h.engineSendText).not.toHaveBeenCalled();
+    expect(h.state.rpcCalls).toEqual([]);
+  });
+
+  it('a conta bloqueada é checada antes do plano (primeira checagem)', async () => {
+    h.state.accountBlockedAt = '2026-08-27T00:00:00Z';
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.hasAiFeature).not.toHaveBeenCalled();
   });
 
   it('grounds the reply in retrieved knowledge', async () => {

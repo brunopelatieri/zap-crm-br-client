@@ -18,6 +18,8 @@ function okEmbeddings(count: number, shuffle = false): Response {
 beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
 afterEach(() => vi.unstubAllGlobals());
 
+const T = { provider: 'openai' as const, apiKey: 'sk-x' };
+
 describe('toVectorLiteral', () => {
   it('formats a pgvector literal', () => {
     expect(toVectorLiteral([0.1, 0.2, 0.3])).toBe('[0.1,0.2,0.3]');
@@ -28,7 +30,7 @@ describe('embedTexts', () => {
   it('returns [] and makes no request for empty input', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    expect(await embedTexts('sk-x', [])).toEqual([]);
+    expect(await embedTexts(T, [])).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -39,7 +41,7 @@ describe('embedTexts', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const out = await embedTexts('sk-x', ['a', 'b', 'c']);
+    const out = await embedTexts(T, ['a', 'b', 'c']);
     expect(out).toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0];
@@ -58,7 +60,7 @@ describe('embedTexts', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const inputs = Array.from({ length: 100 }, (_, i) => `t${i}`);
-    const out = await embedTexts('sk-x', inputs);
+    const out = await embedTexts(T, inputs);
     expect(out).toHaveLength(100);
     expect(fetchMock).toHaveBeenCalledTimes(2); // 96 + 4
   });
@@ -71,7 +73,7 @@ describe('embedTexts', () => {
         return okEmbeddings(n, true);
       })
     );
-    const out = await embedTexts('sk-x', ['a', 'b', 'c']);
+    const out = await embedTexts(T, ['a', 'b', 'c']);
     expect(out[0]).toEqual([0, 0.5]); // index 0 first despite shuffle
     expect(out[2]).toEqual([2, 2.5]);
   });
@@ -85,7 +87,7 @@ describe('embedTexts', () => {
         json: async () => ({ error: { message: 'bad key' } }),
       } as unknown as Response)
     );
-    await expect(embedTexts('sk-x', ['a'])).rejects.toMatchObject({
+    await expect(embedTexts(T, ['a'])).rejects.toMatchObject({
       code: 'invalid_key',
     });
   });
@@ -101,9 +103,7 @@ describe('embedTexts', () => {
         }),
       } as unknown as Response)
     );
-    await expect(embedTexts('sk-x', ['a', 'b'])).rejects.toBeInstanceOf(
-      AiError
-    );
+    await expect(embedTexts(T, ['a', 'b'])).rejects.toBeInstanceOf(AiError);
   });
 
   it('throws on a malformed response (count mismatch)', async () => {
@@ -115,8 +115,6 @@ describe('embedTexts', () => {
         json: async () => ({ data: [] }),
       } as unknown as Response)
     );
-    await expect(embedTexts('sk-x', ['a', 'b'])).rejects.toBeInstanceOf(
-      AiError
-    );
+    await expect(embedTexts(T, ['a', 'b'])).rejects.toBeInstanceOf(AiError);
   });
 });

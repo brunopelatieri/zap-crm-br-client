@@ -34,6 +34,8 @@ interface UsageResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    /** USD; null when no call reported a cost (only OpenRouter does). */
+    cost_usd: number | null;
   };
   by_mode: {
     auto_reply: { calls: number; tokens: number };
@@ -44,6 +46,7 @@ interface UsageResponse {
     provider: string;
     calls: number;
     tokens: number;
+    cost_usd: number | null;
   }[];
   daily: { date: string; tokens: number; calls: number }[];
 }
@@ -57,7 +60,16 @@ const WINDOWS = [7, 30, 90] as const;
  */
 export function AiUsageCard() {
   const t = useTranslations('Agents.usage');
-  const dateFnsLocale = getDateFnsLocale(useLocale());
+  const locale = useLocale();
+  const dateFnsLocale = getDateFnsLocale(locale);
+  // Calls cost fractions of a cent: show enough decimals to be useful.
+  const formatCost = (usd: number) =>
+    new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    }).format(usd);
   const { accountId, accountRole, profileLoading } = useAuth();
   const canView = accountRole ? canEditSettings(accountRole) : false;
 
@@ -108,6 +120,7 @@ export function AiUsageCard() {
       [tokensCategory]: d.tokens,
     })) ?? [];
   const hasSpend = (data?.totals.total_tokens ?? 0) > 0;
+  const totalCost = data?.totals.cost_usd ?? null;
 
   return (
     <Card>
@@ -147,12 +160,19 @@ export function AiUsageCard() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div
+              className={`grid grid-cols-2 gap-3 ${
+                totalCost !== null ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
+              }`}
+            >
               <Stat
                 label={t('totalTokens')}
                 value={formatCompactNumber(data.totals.total_tokens)}
               />
               <Stat label={t('llmCalls')} value={String(data.totals.calls)} />
+              {totalCost !== null && (
+                <Stat label={t('cost')} value={formatCost(totalCost)} />
+              )}
               <Stat
                 label={t('autoReply')}
                 value={formatCompactNumber(data.by_mode.auto_reply.tokens)}
@@ -203,11 +223,16 @@ export function AiUsageCard() {
                           tokens: formatCompactNumber(m.tokens),
                           calls: m.calls,
                         })}
+                        {m.cost_usd !== null && ` · ${formatCost(m.cost_usd)}`}
                       </span>
                     </li>
                   ))}
                 </ul>
               </div>
+            )}
+
+            {totalCost !== null && (
+              <p className="text-muted-foreground text-xs">{t('costNote')}</p>
             )}
 
             {data.truncated && (

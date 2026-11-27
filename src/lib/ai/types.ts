@@ -6,7 +6,33 @@
 // whether the account is on OpenAI or Anthropic.
 // ============================================================
 
-export type AiProvider = 'openai' | 'anthropic';
+export type AiProvider = 'openai' | 'anthropic' | 'openrouter';
+
+/** All providers, in the order the settings screen lists them. */
+export const AI_PROVIDERS: readonly AiProvider[] = [
+  'openai',
+  'anthropic',
+  'openrouter',
+];
+
+/** Who serves the knowledge-base embeddings (SPEC 089 D-3). */
+export type EmbeddingsProvider = 'openai' | 'openrouter';
+
+/** Where to send an embeddings request: provider + the key to use. */
+export interface EmbeddingsTarget {
+  provider: EmbeddingsProvider;
+  apiKey: string;
+}
+
+/**
+ * Per-account provider options (`ai_configs.provider_options`), parsed.
+ * `denyDataCollection` (SPEC 089 D-5, born OFF): when true, OpenRouter chat
+ * requests ask for endpoints that do not retain data for training
+ * (`provider: { data_collection: "deny" }`).
+ */
+export interface AiProviderOptions {
+  denyDataCollection: boolean;
+}
 
 /**
  * Account AI setup, decrypted and ready to use. Produced by
@@ -25,10 +51,13 @@ export interface AiConfig {
    *  agent's `auth.users.id`, or null to leave it unassigned (drop into
    *  the shared queue). */
   handoffAgentId: string | null;
-  /** Optional OpenAI-compatible key for embeddings. When set, the
-   *  knowledge base is embedded and semantic retrieval turns on; when
-   *  null, retrieval falls back to lexical full-text search. */
-  embeddingsApiKey: string | null;
+  /** Who serves embeddings and with which key, already resolved (own
+   *  embeddings key, or — on OpenRouter — the chat key reused, D-3). When
+   *  set, the knowledge base is embedded and semantic retrieval turns on;
+   *  when null, retrieval falls back to lexical full-text search. */
+  embeddingsTarget: EmbeddingsTarget | null;
+  /** Provider options (privacy filter etc.). */
+  providerOptions: AiProviderOptions;
 }
 
 /** A single conversation turn in the shape both providers accept. */
@@ -46,6 +75,9 @@ export interface AiUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** Call cost in USD when the provider reports it (OpenRouter
+   *  `usage.cost`). Absent for OpenAI / Anthropic direct. */
+  costUsd?: number;
 }
 
 /** Raw text + usage a provider adapter returns before handoff parsing. */

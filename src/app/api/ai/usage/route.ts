@@ -22,6 +22,8 @@ interface UsageRow {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /** USD, reported by OpenRouter only (migration 102); null otherwise. */
+  cost_usd: number | string | null;
 }
 
 /**
@@ -58,7 +60,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase
       .from('ai_usage_log')
       .select(
-        'created_at, mode, provider, model, prompt_tokens, completion_tokens, total_tokens'
+        'created_at, mode, provider, model, prompt_tokens, completion_tokens, total_tokens, cost_usd'
       )
       .eq('account_id', accountId)
       .gte('created_at', since.toISOString())
@@ -81,6 +83,9 @@ export async function GET(request: Request) {
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
+    // Cost is only known for providers that report it (OpenRouter): null
+    // until at least one row carries a value, so the UI can hide it.
+    let costUsd: number | null = null;
 
     // Per-mode + per-model tallies.
     const byMode = {
@@ -89,7 +94,13 @@ export async function GET(request: Request) {
     };
     const modelMap = new Map<
       string,
-      { model: string; provider: string; calls: number; tokens: number }
+      {
+        model: string;
+        provider: string;
+        calls: number;
+        tokens: number;
+        cost_usd: number | null;
+      }
     >();
 
     // Zero-filled daily buckets so the chart shows quiet days as gaps,
@@ -107,6 +118,10 @@ export async function GET(request: Request) {
       promptTokens += r.prompt_tokens;
       completionTokens += r.completion_tokens;
       totalTokens += r.total_tokens;
+      // numeric comes back as a string from PostgREST.
+      const rowCost = r.cost_usd == null ? null : Number(r.cost_usd);
+      const hasCost = rowCost !== null && Number.isFinite(rowCost);
+      if (hasCost) costUsd = (costUsd ?? 0) + rowCost;
 
       // `mode` is DB-CHECK-constrained to these two values.
       byMode[r.mode].calls += 1;
@@ -118,9 +133,11 @@ export async function GET(request: Request) {
         provider: r.provider,
         calls: 0,
         tokens: 0,
+        cost_usd: null,
       };
       m.calls += 1;
       m.tokens += r.total_tokens;
+      if (hasCost) m.cost_usd = (m.cost_usd ?? 0) + rowCost;
       modelMap.set(mk, m);
 
       const bucket = daily.get(localDayKey(r.created_at));
@@ -140,6 +157,7 @@ export async function GET(request: Request) {
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         total_tokens: totalTokens,
+        cost_usd: costUsd,
       },
       by_mode: byMode,
       by_model: byModel,

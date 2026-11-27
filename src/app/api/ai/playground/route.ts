@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAiFeature } from '@/lib/ai/plan-gate';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import {
   checkRateLimit,
@@ -6,10 +7,8 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit';
 import { loadAiConfig } from '@/lib/ai/config';
-import { retrieveKnowledge } from '@/lib/ai/knowledge';
+import { composeAgentTurn } from '@/lib/ai/compose';
 import { generateReply } from '@/lib/ai/generate';
-import { buildSystemPrompt } from '@/lib/ai/defaults';
-import { latestUserMessage } from '@/lib/ai/query';
 import { AiError, type ChatMessage } from '@/lib/ai/types';
 
 // Keep the tested transcript bounded, mirroring the live context window.
@@ -28,6 +27,8 @@ const MAX_TURNS = 20;
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('agent');
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
 
     const limit = checkRateLimit(
       `ai-playground:${userId}`,
@@ -82,22 +83,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const knowledge = await retrieveKnowledge(
-      supabase,
+    const turn = await composeAgentTurn({
+      db: supabase,
       accountId,
       config,
-      latestUserMessage(messages)
-    );
-    const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
-      mode: 'auto_reply',
-      knowledge,
+      mode: 'playground',
+      messages,
     });
 
     const { text, handoff } = await generateReply({
       config,
-      systemPrompt,
-      messages,
+      systemPrompt: turn.systemPrompt,
+      messages: turn.messages,
     });
     return NextResponse.json({ reply: text, handoff });
   } catch (err) {

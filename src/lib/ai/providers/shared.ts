@@ -1,4 +1,9 @@
-import { AiError, type AiUsage, type ChatMessage } from '../types';
+import {
+  AiError,
+  type AiProviderOptions,
+  type AiUsage,
+  type ChatMessage,
+} from '../types';
 
 // ============================================================
 // Bits shared by the OpenAI + Anthropic adapters.
@@ -10,6 +15,8 @@ export interface ProviderArgs {
   systemPrompt: string;
   messages: ChatMessage[];
   timeoutMs: number;
+  /** Per-account provider options; only the OpenRouter adapter reads it. */
+  providerOptions?: AiProviderOptions;
 }
 
 /**
@@ -23,6 +30,7 @@ export function normalizeUsage(raw: {
   prompt?: unknown;
   completion?: unknown;
   total?: unknown;
+  cost?: unknown;
 }): AiUsage | null {
   const num = (v: unknown): number =>
     typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
@@ -33,7 +41,15 @@ export function normalizeUsage(raw: {
   if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) {
     return null;
   }
-  return { promptTokens, completionTokens, totalTokens };
+  const usage: AiUsage = { promptTokens, completionTokens, totalTokens };
+  if (
+    typeof raw.cost === 'number' &&
+    Number.isFinite(raw.cost) &&
+    raw.cost >= 0
+  ) {
+    usage.costUsd = raw.cost;
+  }
+  return usage;
 }
 
 /** Map a fetch rejection (timeout / DNS / offline) to a typed AiError. */
@@ -51,21 +67,42 @@ export function toNetworkError(err: unknown): AiError {
   });
 }
 
-/** Build a typed AiError from a non-2xx provider response, pulling the
- *  provider's own error message out of the JSON body when present. */
+/** Which routing filter OpenRouter's 404 failed on (SPEC 089 F0 §1.4/§1.8). */
+const TOOLS_STEP = 'Filter by Tool Compatibility';
+const DATA_POLICY_STEP = 'Filter by Data Policy';
+
+/**
+ * Build a typed AiError from a non-2xx provider response, pulling the
+ * provider's own error message out of the JSON body when present.
+ *
+ * Only the message and the routing step are read. The raw body is never
+ * kept, logged or returned: OpenRouter's 402/429 bodies carry the owner's
+ * `user_id` (F0 §1.9).
+ */
 export async function providerHttpError(
   provider: string,
   res: Response
 ): Promise<AiError> {
   let detail = '';
+  let routingStep = '';
   try {
     const body = (await res.json()) as {
-      error?: { message?: string } | string;
+      error?:
+        | { message?: string; metadata?: { failed_routing_step?: unknown } }
+        | string;
     };
     detail =
       typeof body?.error === 'string'
         ? body.error
         : (body?.error?.message ?? '');
+    // Provider messages can embed links with account/key identifiers
+    // (OpenRouter's 402 links to the key's settings page): drop them.
+    detail = detail.replace(/https?:\/\/\S+/g, '[link]').slice(0, 300);
+    const step =
+      typeof body?.error === 'object'
+        ? body.error?.metadata?.failed_routing_step
+        : undefined;
+    if (typeof step === 'string') routingStep = step;
   } catch {
     // Non-JSON error body — fall back to the status line.
   }
@@ -74,15 +111,27 @@ export async function providerHttpError(
   const code =
     status === 401 || status === 403
       ? 'invalid_key'
-      : status === 429
-        ? 'rate_limited'
-        : 'provider_error';
+      : status === 402
+        ? 'insufficient_credits'
+        : status === 429
+          ? 'rate_limited'
+          : status === 404 && routingStep === DATA_POLICY_STEP
+            ? 'data_policy_no_endpoint'
+            : status === 404 && routingStep === TOOLS_STEP
+              ? 'tools_unsupported'
+              : 'provider_error';
   const base =
     code === 'invalid_key'
       ? `${provider} rejected the API key`
-      : code === 'rate_limited'
-        ? `${provider} rate limit reached`
-        : `${provider} API error (${status})`;
+      : code === 'insufficient_credits'
+        ? `${provider} has no credits for this request`
+        : code === 'rate_limited'
+          ? `${provider} rate limit reached`
+          : code === 'data_policy_no_endpoint'
+            ? `${provider} has no endpoint matching the data-collection policy for this model`
+            : code === 'tools_unsupported'
+              ? `${provider} has no endpoint for this model that supports tools`
+              : `${provider} API error (${status})`;
 
   return new AiError(detail ? `${base}: ${detail}` : base, {
     code,

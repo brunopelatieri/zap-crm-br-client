@@ -12,9 +12,14 @@ import type { ChannelType } from '@/lib/channels/types';
  * BYO-key forker may want a cheaper/newer one — so these are only the
  * starting point, never a hard allow-list.
  */
+export const OPENROUTER_DEFAULT_MODEL = 'anthropic/claude-haiku-5.5';
+
 export const AI_PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
   openai: 'gpt-5.4-mini',
   anthropic: 'claude-haiku-4-5-20251001',
+  // Suggested by the SPEC 089 F0 measurements (the only cheap model that
+  // did not invent facts without a knowledge base). Easy to swap here.
+  openrouter: OPENROUTER_DEFAULT_MODEL,
 };
 
 /**

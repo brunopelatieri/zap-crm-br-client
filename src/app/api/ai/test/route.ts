@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAiFeature } from '@/lib/ai/plan-gate';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import {
   checkRateLimit,
@@ -7,7 +8,7 @@ import {
 } from '@/lib/rate-limit';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { validateAiCredentials } from '@/lib/ai/validate';
-import { AiError, type AiProvider } from '@/lib/ai/types';
+import { AI_PROVIDERS, AiError, type AiProvider } from '@/lib/ai/types';
 
 /**
  * POST /api/ai/test  (admin+)
@@ -21,6 +22,8 @@ import { AiError, type AiProvider } from '@/lib/ai/types';
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('admin');
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
 
     const limit = checkRateLimit(`ai-test:${userId}`, RATE_LIMITS.adminAction);
     if (!limit.success) return rateLimitResponse(limit);
@@ -34,9 +37,9 @@ export async function POST(request: Request) {
     }
 
     const provider = body.provider as AiProvider;
-    if (provider !== 'openai' && provider !== 'anthropic') {
+    if (!AI_PROVIDERS.includes(provider)) {
       return NextResponse.json(
-        { error: 'provider must be "openai" or "anthropic"' },
+        { error: 'provider must be "openai", "anthropic" or "openrouter"' },
         { status: 400 }
       );
     }
@@ -76,12 +79,6 @@ export async function POST(request: Request) {
         provider,
         model,
         apiKey: apiKeyPlain,
-        systemPrompt: null,
-        isActive: true,
-        autoReplyEnabled: false,
-        autoReplyMaxPerConversation: 3,
-        handoffAgentId: null,
-        embeddingsApiKey: null,
       });
     } catch (err) {
       if (err instanceof AiError) {

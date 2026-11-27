@@ -161,6 +161,10 @@ export const RATE_LIMITS = {
    *  spend on the account's own LLM key against an accidental
    *  hold-down / script. */
   aiDraft: { limit: 20, windowMs: 60_000 },
+  /** OpenRouter model-catalog suggestions, per user. Served from a
+   *  1 h server cache and fired as the admin types (debounced), so it
+   *  needs far more headroom than `aiDraft`; it never calls an LLM. */
+  aiModels: { limit: 120, windowMs: 60_000 },
   /** AI draft-reply generation, per account. Caps the WHOLE team's
    *  draws on the one shared BYO provider key — without this, N agents
    *  each under their per-user limit could still stampede the account's

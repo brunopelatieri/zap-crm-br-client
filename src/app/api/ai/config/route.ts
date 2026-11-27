@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { hasAiFeature, requireAiFeature } from '@/lib/ai/plan-gate';
 import {
   getCurrentAccount,
   requireRole,
@@ -12,7 +13,17 @@ import {
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption';
 import { validateAiCredentials } from '@/lib/ai/validate';
 import { embedTexts } from '@/lib/ai/embeddings';
-import { AiError, type AiProvider } from '@/lib/ai/types';
+import {
+  AI_PROVIDERS,
+  AiError,
+  type AiProvider,
+  type EmbeddingsProvider,
+} from '@/lib/ai/types';
+import {
+  parseProviderOptions,
+  serializeProviderOptions,
+} from '@/lib/ai/provider-options';
+import { promptChanged, recordPromptVersion } from '@/lib/ai/prompt-versions';
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -29,12 +40,18 @@ export async function GET() {
   try {
     const { supabase, accountId } = await getCurrentAccount();
 
+    // SPEC 089 D-20: sem `ai_enabled` no plano a tela mostra o aviso (200),
+    // em vez de um 403 que pareceria falha de carga.
+    if (!(await hasAiFeature(accountId))) {
+      return NextResponse.json({ configured: false, feature_in_plan: false });
+    }
+
     const { data, error } = await supabase
       .from('ai_configs')
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key'
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key, embeddings_provider, provider_options'
       )
       .eq('account_id', accountId)
       .maybeSingle();
@@ -50,11 +67,13 @@ export async function GET() {
     if (!data) return NextResponse.json({ configured: false });
     // The keys are selected only to derive the has_* flags; neither is
     // returned to the client.
-    const { api_key, embeddings_api_key, ...safe } = data;
+    const { api_key, embeddings_api_key, provider_options, ...safe } = data;
     return NextResponse.json({
       configured: true,
       has_key: !!api_key,
       has_embeddings_key: !!embeddings_api_key,
+      deny_data_collection:
+        parseProviderOptions(provider_options).denyDataCollection,
       ...safe,
     });
   } catch (err) {
@@ -74,6 +93,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('admin');
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
 
     const limit = checkRateLimit(
       `ai-config:${userId}`,
@@ -85,8 +106,8 @@ export async function POST(request: Request) {
     if (!body || typeof body !== 'object') return bad('Invalid request body');
 
     const provider = body.provider as AiProvider;
-    if (provider !== 'openai' && provider !== 'anthropic') {
-      return bad('provider must be "openai" or "anthropic"');
+    if (!AI_PROVIDERS.includes(provider)) {
+      return bad('provider must be "openai", "anthropic" or "openrouter"');
     }
     const model = typeof body.model === 'string' ? body.model.trim() : '';
     if (!model) return bad('model is required');
@@ -135,10 +156,29 @@ export async function POST(request: Request) {
         : '';
     const clearEmbeddingsKey = body.embeddings_api_key === null;
 
+    // Who serves embeddings (SPEC 089 D-3). Absent = unchanged.
+    let embeddingsProvider: EmbeddingsProvider | undefined;
+    if ('embeddings_provider' in body) {
+      if (
+        body.embeddings_provider !== 'openai' &&
+        body.embeddings_provider !== 'openrouter'
+      ) {
+        return bad('embeddings_provider must be "openai" or "openrouter"');
+      }
+      embeddingsProvider = body.embeddings_provider;
+    }
+    // OpenRouter privacy filter (D-5). Absent = unchanged; born off.
+    const denyDataCollection =
+      typeof body.deny_data_collection === 'boolean'
+        ? body.deny_data_collection
+        : undefined;
+
     // Reuse the stored key when the form didn't send a fresh one.
     const { data: existing } = await supabase
       .from('ai_configs')
-      .select('id, provider, model, api_key')
+      .select(
+        'id, provider, model, api_key, system_prompt, embeddings_provider, provider_options'
+      )
       .eq('account_id', accountId)
       .maybeSingle();
 
@@ -173,12 +213,6 @@ export async function POST(request: Request) {
           provider,
           model,
           apiKey: apiKeyPlain,
-          systemPrompt,
-          isActive,
-          autoReplyEnabled,
-          autoReplyMaxPerConversation: maxPer,
-          handoffAgentId: null,
-          embeddingsApiKey: null,
         });
       } catch (err) {
         if (err instanceof AiError) {
@@ -196,7 +230,14 @@ export async function POST(request: Request) {
     // embed), same "verify before save" discipline as the chat key.
     if (rawEmbeddingsKey) {
       try {
-        await embedTexts(rawEmbeddingsKey, ['ping']);
+        await embedTexts(
+          {
+            provider:
+              embeddingsProvider ?? existing?.embeddings_provider ?? 'openai',
+            apiKey: rawEmbeddingsKey,
+          },
+          ['ping']
+        );
       } catch (err) {
         if (err instanceof AiError) {
           return NextResponse.json(
@@ -226,6 +267,13 @@ export async function POST(request: Request) {
     } else if (clearEmbeddingsKey) {
       shared.embeddings_api_key = null;
     }
+    if (embeddingsProvider) shared.embeddings_provider = embeddingsProvider;
+    if (denyDataCollection !== undefined) {
+      shared.provider_options = serializeProviderOptions({
+        ...parseProviderOptions(existing?.provider_options),
+        denyDataCollection,
+      });
+    }
 
     if (existing) {
       const { error: upErr } = await supabase
@@ -253,6 +301,17 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+    }
+
+    // Prompt history (SPEC 089 F1): every save that changes the prompt
+    // appends a version. Best-effort — the config is already saved.
+    if (promptChanged(existing?.system_prompt, systemPrompt)) {
+      await recordPromptVersion(supabase, {
+        accountId,
+        systemPrompt,
+        source: 'panel',
+        createdBy: userId,
+      });
     }
 
     return NextResponse.json({ success: true });

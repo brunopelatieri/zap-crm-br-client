@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAiFeature } from '@/lib/ai/plan-gate';
 import {
   getCurrentAccount,
   requireRole,
@@ -9,7 +10,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
-import { loadEmbeddingsKey } from '@/lib/ai/config';
+import { loadEmbeddingsTarget } from '@/lib/ai/config';
 import { ingestDocument } from '@/lib/ai/knowledge';
 import { AiError } from '@/lib/ai/types';
 
@@ -21,6 +22,8 @@ import { AiError } from '@/lib/ai/types';
 export async function GET() {
   try {
     const { supabase, accountId } = await getCurrentAccount();
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
     const { data, error } = await supabase
       .from('ai_knowledge_documents')
       .select('id, title, updated_at')
@@ -48,6 +51,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('admin');
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
     const limit = checkRateLimit(`ai-kb:${userId}`, RATE_LIMITS.adminAction);
     if (!limit.success) return rateLimitResponse(limit);
 
@@ -75,7 +80,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { key: embeddingsApiKey, corrupt } = await loadEmbeddingsKey(
+    const { target: embeddingsTarget, corrupt } = await loadEmbeddingsTarget(
       supabase,
       accountId
     );
@@ -83,7 +88,7 @@ export async function POST(request: Request) {
       await ingestDocument(
         supabase,
         accountId,
-        { embeddingsApiKey },
+        { embeddingsTarget },
         doc.id,
         content
       );

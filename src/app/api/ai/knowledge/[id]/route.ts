@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAiFeature } from '@/lib/ai/plan-gate';
 import {
   getCurrentAccount,
   requireRole,
@@ -9,7 +10,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit';
-import { loadEmbeddingsKey } from '@/lib/ai/config';
+import { loadEmbeddingsTarget } from '@/lib/ai/config';
 import { ingestDocument } from '@/lib/ai/knowledge';
 import { AiError } from '@/lib/ai/types';
 
@@ -21,6 +22,8 @@ type Params = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, { params }: Params) {
   try {
     const { supabase, accountId } = await getCurrentAccount();
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
     const { id } = await params;
     const { data, error } = await supabase
       .from('ai_knowledge_documents')
@@ -50,6 +53,8 @@ export async function GET(_request: Request, { params }: Params) {
 export async function PATCH(request: Request, { params }: Params) {
   try {
     const { supabase, accountId, userId } = await requireRole('admin');
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
     const limit = checkRateLimit(`ai-kb:${userId}`, RATE_LIMITS.adminAction);
     if (!limit.success) return rateLimitResponse(limit);
 
@@ -97,7 +102,7 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     if (content !== undefined) {
-      const { key: embeddingsApiKey, corrupt } = await loadEmbeddingsKey(
+      const { target: embeddingsTarget, corrupt } = await loadEmbeddingsTarget(
         supabase,
         accountId
       );
@@ -105,7 +110,7 @@ export async function PATCH(request: Request, { params }: Params) {
         await ingestDocument(
           supabase,
           accountId,
-          { embeddingsApiKey },
+          { embeddingsTarget },
           id,
           content
         );

@@ -27,7 +27,7 @@ interface MatchRow {
 export async function ingestDocument(
   db: SupabaseClient,
   accountId: string,
-  config: Pick<AiConfig, 'embeddingsApiKey'>,
+  config: Pick<AiConfig, 'embeddingsTarget'>,
   documentId: string,
   content: string
 ): Promise<void> {
@@ -50,9 +50,9 @@ export async function ingestDocument(
   // search really does still work.
   let embeddings: number[][] | null = null;
   let embedError: unknown = null;
-  if (config.embeddingsApiKey) {
+  if (config.embeddingsTarget) {
     try {
-      embeddings = await embedTexts(config.embeddingsApiKey, chunks);
+      embeddings = await embedTexts(config.embeddingsTarget, chunks);
     } catch (err) {
       embedError = err;
     }
@@ -84,7 +84,7 @@ export async function ingestDocument(
 export async function retrieveKnowledge(
   db: SupabaseClient,
   accountId: string,
-  config: Pick<AiConfig, 'embeddingsApiKey'>,
+  config: Pick<AiConfig, 'embeddingsTarget'>,
   queryText: string,
   k = 5
 ): Promise<string[]> {
@@ -108,9 +108,9 @@ export async function retrieveKnowledge(
   const picked = new Map<string, string>(); // id → content, preserves order
 
   // Semantic path.
-  if (config.embeddingsApiKey) {
+  if (config.embeddingsTarget) {
     try {
-      const [queryEmbedding] = await embedTexts(config.embeddingsApiKey, [
+      const [queryEmbedding] = await embedTexts(config.embeddingsTarget, [
         query,
       ]);
       if (queryEmbedding) {

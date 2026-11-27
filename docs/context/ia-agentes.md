@@ -5,7 +5,11 @@
 ## Onde mexer
 
 - **Auto-reply (resposta automática):** `src/lib/ai/auto-reply.ts` (`dispatchInboundToAiReply`)
-- **Chamar o modelo (normaliza provedores):** `src/lib/ai/generate.ts`, `providers/{openai,anthropic,shared}.ts`
+- **Montar o turno (prompt + conhecimento + canal), único ponto:** `src/lib/ai/compose.ts` (`composeAgentTurn`), usado por auto-reply, rascunho e playground
+- **Chamar o modelo (normaliza provedores):** `src/lib/ai/generate.ts`, `providers/{openai,anthropic,openrouter,shared}.ts` (o OpenRouter tem adaptador próprio; `openai.ts` não o conhece)
+- **OpenRouter:** catálogo de modelos só como sugestão (`openrouter-models.ts`, `GET /api/ai/models`), privacidade em `provider-options.ts`, custo em `usage.cost` → `ai_usage_log.cost_usd`
+- **Versões do prompt:** `src/lib/ai/prompt-versions.ts`, `src/app/api/ai/prompt-versions/`, `src/components/agents/ai-prompt-versions.tsx`
+- **Portão de plano `ai_enabled` (estrito, ligado desde 2026-11-27):** `src/lib/ai/plan-gate.ts`, lido no auto-reply (depois da conta bloqueada) e nas rotas `/api/ai/**`
 - **Chave/configuração da conta:** `src/lib/ai/config.ts`, `src/app/api/ai/config/route.ts`
 - **Prompt, limites, modelo padrão:** `src/lib/ai/defaults.ts` (`buildSystemPrompt`, `HANDOFF_SENTINEL`)
 - **Contexto da conversa:** `src/lib/ai/context.ts`
@@ -25,7 +29,7 @@
 6. **A janela de 24 h está aberta por construção** (reagimos a uma mensagem recém-chegada); não adicione checagem de janela aqui. Já o rascunho para o agente humano não envia nada.
 7. **Contexto = últimas N mensagens de texto** (`AI_CONTEXT_MESSAGE_LIMIT`), mídia/template/interativo ficam de fora. Retenção agressiva por contagem esvazia esse contexto — ver o piso de idade em [`atividade-painel-retencao.md`](./atividade-painel-retencao.md).
 8. **Modelo é texto livre na UI** (IDs mudam rápido); `AI_PROVIDER_DEFAULT_MODEL` é só pré-preenchimento, nunca lista permitida. Saída limitada por `MAX_OUTPUT_TOKENS`; timeout por `AI_REQUEST_TIMEOUT_MS`.
-9. **Base de conhecimento é híbrida**: busca semântica só se houver chave de embeddings; completa com busca textual. Recuperação é melhor esforço — falha não impede a resposta.
+9. **Base de conhecimento é híbrida**: busca semântica só se houver alvo de embeddings (`config.embeddingsTarget`: chave própria, ou, no OpenRouter, a chave do chat reaproveitada); completa com busca textual. Recuperação é melhor esforço — falha não impede a resposta.
 10. **O motor usa `service_role`** (`src/lib/ai/admin-client.ts`): filtre sempre por `account_id`; nunca importe no navegador.
 
 ## Armadilhas
@@ -34,10 +38,18 @@
 - Respostas duplicadas ao cliente: o `stand down` da regra 2 foi removido ou um fluxo também respondeu.
 - Custo inesperado: o limite por conta e o teto por conversa existem para proteger a chave do dono; não os contorne em campanha.
 
+## OpenRouter (SPEC 089 F1, no código desde 2026-11-26)
+
+- Provedor `openrouter`: adaptador próprio em `fetch`. 402 vira `insufficient_credits`; 404 se distingue por `error.metadata.failed_routing_step` (política de dados × ferramentas); o corpo de erro traz `user_id` da conta e **nunca** é gravado ou devolvido cru (links da mensagem viram `[link]`).
+- A chave é validada por `GET /api/v1/key` (sem custo); o modelo não é validado ali. O modelo padrão fica em `OPENROUTER_DEFAULT_MODEL` (`defaults.ts`); o catálogo só sugere, nunca restringe (regra 8).
+- Privacidade: `provider_options.deny_data_collection` nasce **desligado**; ligado, o chat leva `provider: { data_collection: "deny" }`. Não vale para embeddings (não medido na F0).
+- Migração 102 (provedor, `embeddings_provider`, `provider_options`, `cost_usd`, `ai_prompt_versions`): **aplicada no `vn` em 2026-11-27**; em outro banco, aplique antes de subir este código, porque `loadAiConfig` seleciona as colunas novas.
+- **Portão `ai_enabled` estrito (D-20) ligado**: chave ausente no plano = IA bloqueada (auto-reply não responde; rotas dão 403 `FEATURE_NOT_IN_PLAN`; `GET /api/ai/config` devolve `feature_in_plan: false`). Plano novo precisa nascer com `ai_enabled` explícito, senão a conta perde a IA. Ficam abertos: `DELETE` de config e de documento, `GET /api/ai/usage` e o `autoreply/:id`.
+
 ## Decisões ratificadas, ainda sem código
 
 - **Fine-tuning (treinar modelo) está fora** do ZAP CRM BR, por decisão do mantenedor em 2026-11-26 ([SPEC 089](../spec-089-agentes-de-ia-openrouter-rag-ferramentas.md) D-19, motivo no §7). Não crie job de treino, tela de treino nem integração com API de fine-tuning; reabrir exige nova decisão do mantenedor. O campo de modelo continua aceitando o identificador de um modelo já treinado por fora.
-- O restante da SPEC 089 (OpenRouter, base de conhecimento ampliada, execução de ações, ajuste do agente) é **proposta**, não regra vigente: confira o Status da SPEC antes de implementar.
+- O restante da SPEC 089 (base de conhecimento ampliada, execução de ações, ajuste do agente; a F1 já está no código) é **proposta**, não regra vigente: confira o Status da SPEC antes de implementar.
 
 ## Mais
 

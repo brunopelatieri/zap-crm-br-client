@@ -41,6 +41,11 @@ export async function logAiUsage(
       prompt_tokens: args.usage.promptTokens,
       completion_tokens: args.usage.completionTokens,
       total_tokens: args.usage.totalTokens,
+      // Only when reported (OpenRouter): keeps the insert valid on a
+      // database that has not received migration 102 yet.
+      ...(args.usage.costUsd !== undefined
+        ? { cost_usd: args.usage.costUsd }
+        : {}),
     });
     if (error) {
       console.error('[ai usage] log insert failed:', error);

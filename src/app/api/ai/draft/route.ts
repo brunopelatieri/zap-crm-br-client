@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAiFeature } from '@/lib/ai/plan-gate';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import {
   checkRateLimit,
@@ -7,14 +8,11 @@ import {
 } from '@/lib/rate-limit';
 import { loadAiConfig } from '@/lib/ai/config';
 import { buildConversationContext } from '@/lib/ai/context';
-import { retrieveKnowledge } from '@/lib/ai/knowledge';
+import { composeAgentTurn } from '@/lib/ai/compose';
 import { generateReply } from '@/lib/ai/generate';
-import { buildSystemPrompt } from '@/lib/ai/defaults';
-import { latestUserMessage } from '@/lib/ai/query';
 import { logAiUsage } from '@/lib/ai/usage';
 import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { AiError } from '@/lib/ai/types';
-import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-channel';
 
 /**
  * POST /api/ai/draft  (agent+)
@@ -28,6 +26,8 @@ import { resolveChannelTypeForConversation } from '@/lib/channels/conversation-c
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('agent');
+    // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
+    await requireAiFeature(accountId);
 
     const userLimit = checkRateLimit(`ai-draft:${userId}`, RATE_LIMITS.aiDraft);
     if (!userLimit.success) return rateLimitResponse(userLimit);
@@ -103,31 +103,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // Ground the draft in the account's knowledge base (best-effort —
-    // returns [] when there's no KB or retrieval fails).
-    const knowledge = await retrieveKnowledge(
-      supabase,
+    // Knowledge (best-effort), channel and system prompt in one place.
+    const turn = await composeAgentTurn({
+      db: supabase,
       accountId,
       config,
-      latestUserMessage(messages)
-    );
-
-    const channelType = await resolveChannelTypeForConversation(
-      supabase,
-      accountId,
-      conversationId
-    );
-    const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
       mode: 'draft',
-      knowledge,
-      channelType,
+      messages,
+      conversationId,
     });
 
     const { text, usage } = await generateReply({
       config,
-      systemPrompt,
-      messages,
+      systemPrompt: turn.systemPrompt,
+      messages: turn.messages,
     });
 
     // Record spend on the account's BYO key. Best-effort + via the

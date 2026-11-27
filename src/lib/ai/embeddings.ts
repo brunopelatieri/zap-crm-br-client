@@ -1,22 +1,69 @@
-import { AiError } from './types';
+import {
+  AiError,
+  type AiProvider,
+  type EmbeddingsProvider,
+  type EmbeddingsTarget,
+} from './types';
 import { aiRequestTimeoutMs } from './defaults';
 import { providerHttpError, toNetworkError } from './providers/shared';
+import { OPENROUTER_BASE_URL, openRouterHeaders } from './providers/openrouter';
 
 // ============================================================
 // Embeddings (OpenAI-compatible).
 //
 // Used for the knowledge base's optional semantic-search path: embed
 // each chunk at ingest, and embed the query at retrieval. Anthropic has
-// no embeddings endpoint, so this is always OpenAI's — the account
-// supplies a (possibly separate) embeddings key. 1536-dim
-// text-embedding-3-small matches the `vector(1536)` column in
-// migration 030.
+// no embeddings endpoint, so the provider is OpenAI or OpenRouter (SPEC
+// 089 D-3) — the account supplies a (possibly separate) embeddings key,
+// or reuses the chat key on OpenRouter. Both serve 1536-dim
+// text-embedding-3-small, which matches the `vector(1536)` column in
+// migration 030. The adapter never sends `dimensions` (F0 §1.9).
 // ============================================================
 
-const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
+/** URL and model per embeddings provider (the model id is the one
+ *  REQUESTED — OpenRouter echoes it back without the `openai/` prefix). */
+export const EMBEDDINGS_PROVIDER_CONFIG: Record<
+  EmbeddingsProvider,
+  { url: string; model: string; label: string }
+> = {
+  openai: {
+    url: 'https://api.openai.com/v1/embeddings',
+    model: 'text-embedding-3-small',
+    label: 'OpenAI embeddings',
+  },
+  openrouter: {
+    url: `${OPENROUTER_BASE_URL}/embeddings`,
+    model: 'openai/text-embedding-3-small',
+    label: 'OpenRouter embeddings',
+  },
+};
 
-export const EMBEDDING_MODEL = 'text-embedding-3-small';
 export const EMBEDDING_DIMENSIONS = 1536;
+
+/**
+ * Decide who embeds, given what the account configured:
+ *  - an own embeddings key wins, on `embeddingsProvider`;
+ *  - else, on OpenRouter, the chat key is reused (D-3);
+ *  - else null → lexical-only retrieval (OpenAI / Anthropic chat keys
+ *    are never reused silently, as before).
+ */
+export function resolveEmbeddingsTarget(args: {
+  provider: AiProvider;
+  apiKey: string;
+  embeddingsProvider: EmbeddingsProvider;
+  embeddingsApiKey: string | null;
+}): EmbeddingsTarget | null {
+  if (args.embeddingsApiKey) {
+    return {
+      provider: args.embeddingsProvider,
+      apiKey: args.embeddingsApiKey,
+    };
+  }
+  if (args.provider === 'openrouter' && args.apiKey) {
+    return { provider: 'openrouter', apiKey: args.apiKey };
+  }
+  return null;
+}
 
 // OpenAI accepts an array input; keep batches modest so a big re-index
 // stays under request-size limits and partial failures are cheap.
@@ -39,10 +86,11 @@ export function toVectorLiteral(embedding: number[]): string {
  * to degrade (retrieval) or surface (ingest).
  */
 export async function embedTexts(
-  apiKey: string,
+  target: EmbeddingsTarget,
   inputs: string[]
 ): Promise<number[][]> {
   if (inputs.length === 0) return [];
+  const cfg = EMBEDDINGS_PROVIDER_CONFIG[target.provider];
   const timeoutMs = aiRequestTimeoutMs();
   const out: number[][] = [];
 
@@ -51,13 +99,16 @@ export async function embedTexts(
 
     let res: Response;
     try {
-      res = await fetch(OPENAI_EMBEDDINGS_URL, {
+      res = await fetch(cfg.url, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ model: EMBEDDING_MODEL, input: batch }),
+        headers:
+          target.provider === 'openrouter'
+            ? openRouterHeaders(target.apiKey)
+            : {
+                Authorization: `Bearer ${target.apiKey}`,
+                'Content-Type': 'application/json',
+              },
+        body: JSON.stringify({ model: cfg.model, input: batch }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
@@ -65,7 +116,7 @@ export async function embedTexts(
     }
 
     if (!res.ok) {
-      throw await providerHttpError('OpenAI embeddings', res);
+      throw await providerHttpError(cfg.label, res);
     }
 
     const data = (await res

@@ -1,9 +1,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { decrypt } from '@/lib/whatsapp/encryption';
-import type { AiConfig } from './types';
+import type {
+  AiConfig,
+  AiProvider,
+  EmbeddingsProvider,
+  EmbeddingsTarget,
+} from './types';
+import { resolveEmbeddingsTarget } from './embeddings';
+import { parseProviderOptions } from './provider-options';
 
 interface AiConfigRow {
-  provider: 'openai' | 'anthropic';
+  provider: AiProvider;
+  embeddings_provider: EmbeddingsProvider | null;
+  provider_options: unknown;
   model: string;
   api_key: string;
   system_prompt: string | null;
@@ -15,7 +24,7 @@ interface AiConfigRow {
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key';
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key, embeddings_provider, provider_options';
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -69,46 +78,81 @@ export async function loadAiConfig(
     }
   }
 
+  const apiKey = decrypt(row.api_key);
   return {
     provider: row.provider,
     model: row.model,
-    apiKey: decrypt(row.api_key),
+    apiKey,
     systemPrompt: row.system_prompt,
     isActive: row.is_active,
     autoReplyEnabled: row.auto_reply_enabled,
     autoReplyMaxPerConversation: row.auto_reply_max_per_conversation,
     handoffAgentId: row.handoff_agent_id,
-    embeddingsApiKey,
+    embeddingsTarget: resolveEmbeddingsTarget({
+      provider: row.provider,
+      apiKey,
+      embeddingsProvider: row.embeddings_provider ?? 'openai',
+      embeddingsApiKey,
+    }),
+    providerOptions: parseProviderOptions(row.provider_options),
   };
 }
 
 /**
- * Load + decrypt just the embeddings key, independent of `is_active`.
- * Used by the knowledge-base ingest routes so the KB gets embedded (and
- * semantic search works) whenever an embeddings key is present, even if
- * the assistant's master switch is currently off.
+ * Load the embeddings target (provider + key) independent of
+ * `is_active`. Used by the knowledge-base ingest routes so the KB gets
+ * embedded (and semantic search works) whenever a key is available, even
+ * if the assistant's master switch is currently off. On OpenRouter with
+ * no own embeddings key, the chat key is reused (SPEC 089 D-3).
  *
- * Returns `{ key, corrupt }`: `key` is null when there's no key OR it
- * can't be decrypted; `corrupt` distinguishes those cases so callers can
- * warn ("a key is set but unusable") rather than silently indexing
- * lexical-only and reporting success.
+ * Returns `{ target, corrupt }`: `target` is null when there's no usable
+ * key; `corrupt` distinguishes "a key is set but can't be decrypted" so
+ * callers can warn rather than silently indexing lexical-only.
  */
-export async function loadEmbeddingsKey(
+export async function loadEmbeddingsTarget(
   db: SupabaseClient,
   accountId: string
-): Promise<{ key: string | null; corrupt: boolean }> {
+): Promise<{ target: EmbeddingsTarget | null; corrupt: boolean }> {
   const { data, error } = await db
     .from('ai_configs')
-    .select('embeddings_api_key')
+    .select('provider, api_key, embeddings_api_key, embeddings_provider')
     .eq('account_id', accountId)
     .maybeSingle();
-  if (error || !data?.embeddings_api_key) return { key: null, corrupt: false };
-  try {
-    return { key: decrypt(data.embeddings_api_key), corrupt: false };
-  } catch {
-    console.error(
-      `[ai config] embeddings key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY.`
-    );
-    return { key: null, corrupt: true };
+  if (error || !data) return { target: null, corrupt: false };
+
+  const row = data as Pick<
+    AiConfigRow,
+    'provider' | 'api_key' | 'embeddings_api_key' | 'embeddings_provider'
+  >;
+  let embeddingsApiKey: string | null = null;
+  if (row.embeddings_api_key) {
+    try {
+      embeddingsApiKey = decrypt(row.embeddings_api_key);
+    } catch {
+      console.error(
+        `[ai config] embeddings key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY.`
+      );
+      return { target: null, corrupt: true };
+    }
   }
+  let apiKey = '';
+  if (!embeddingsApiKey && row.provider === 'openrouter' && row.api_key) {
+    try {
+      apiKey = decrypt(row.api_key);
+    } catch {
+      console.error(
+        `[ai config] chat key for account ${accountId} could not be decrypted — check ENCRYPTION_KEY.`
+      );
+      return { target: null, corrupt: true };
+    }
+  }
+  return {
+    target: resolveEmbeddingsTarget({
+      provider: row.provider,
+      apiKey,
+      embeddingsProvider: row.embeddings_provider ?? 'openai',
+      embeddingsApiKey,
+    }),
+    corrupt: false,
+  };
 }

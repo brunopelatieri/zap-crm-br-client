@@ -14,5 +14,7 @@ paths:
 - A resposta sai pelo canal da conversa (`engineSendText`); não adicione checagem de janela de 24 h aqui.
 - O motor usa service role (`admin-client.ts`): filtre por `account_id`; nunca no navegador.
 - Modelo é texto livre na UI; `AI_PROVIDER_DEFAULT_MODEL` é só pré-preenchimento. Recuperação da base de conhecimento é melhor esforço.
+- `ai_enabled` vale em modo estrito (`plan-gate.ts`): plano sem a chave bloqueia a IA; toda rota nova de `/api/ai/**` que gaste token ou mude config chama `requireAiFeature` depois do `requireRole`.
+- O prompt e o contexto do turno saem de `compose.ts` (`composeAgentTurn`), não de montagem própria em cada chamador. OpenRouter tem adaptador próprio; o corpo de erro dele traz `user_id` e nunca é gravado cru.
 
 Detalhe: leia `docs/context/ia-agentes.md`.

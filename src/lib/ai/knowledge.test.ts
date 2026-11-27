@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+const T = { provider: 'openai' as const, apiKey: 'sk-x' };
+
 const h = vi.hoisted(() => ({ embedTexts: vi.fn() }));
 vi.mock('./embeddings', () => ({
   embedTexts: h.embedTexts,
@@ -58,7 +60,7 @@ function makeDb() {
 
 beforeEach(() => {
   h.embedTexts.mockReset();
-  h.embedTexts.mockImplementation(async (_key: string, inputs: string[]) =>
+  h.embedTexts.mockImplementation(async (_target: unknown, inputs: string[]) =>
     inputs.map((_, i) => [i, i])
   );
 });
@@ -67,7 +69,7 @@ describe('retrieveKnowledge', () => {
   it('returns [] for an empty query without touching the DB', async () => {
     const { db, state } = makeDb();
     expect(
-      await retrieveKnowledge(db, 'acct', { embeddingsApiKey: null }, '  ')
+      await retrieveKnowledge(db, 'acct', { embeddingsTarget: null }, '  ')
     ).toEqual([]);
     expect(state.rpcCalls).toEqual([]);
   });
@@ -78,7 +80,7 @@ describe('retrieveKnowledge', () => {
     const out = await retrieveKnowledge(
       db,
       'acct',
-      { embeddingsApiKey: 'sk-x' },
+      { embeddingsTarget: T },
       'q'
     );
     expect(out).toEqual([]);
@@ -92,7 +94,7 @@ describe('retrieveKnowledge', () => {
     const out = await retrieveKnowledge(
       db,
       'acct',
-      { embeddingsApiKey: null },
+      { embeddingsTarget: null },
       'q'
     );
     expect(out).toEqual(['F1']);
@@ -110,7 +112,7 @@ describe('retrieveKnowledge', () => {
     const out = await retrieveKnowledge(
       db,
       'acct',
-      { embeddingsApiKey: 'sk-x' },
+      { embeddingsTarget: T },
       'q',
       3
     );
@@ -133,7 +135,7 @@ describe('retrieveKnowledge', () => {
     const out = await retrieveKnowledge(
       db,
       'acct',
-      { embeddingsApiKey: 'sk-x' },
+      { embeddingsTarget: T },
       'q',
       3
     );
@@ -151,7 +153,7 @@ describe('ingestDocument', () => {
     await ingestDocument(
       db,
       'acct',
-      { embeddingsApiKey: 'sk-x' },
+      { embeddingsTarget: T },
       'doc-1',
       'hello world'
     );
@@ -167,7 +169,7 @@ describe('ingestDocument', () => {
     await ingestDocument(
       db,
       'acct',
-      { embeddingsApiKey: null },
+      { embeddingsTarget: null },
       'doc-1',
       'hello world'
     );
@@ -177,13 +179,7 @@ describe('ingestDocument', () => {
 
   it('deletes existing chunks and inserts nothing for empty content', async () => {
     const { db, state } = makeDb();
-    await ingestDocument(
-      db,
-      'acct',
-      { embeddingsApiKey: 'sk-x' },
-      'doc-1',
-      '   '
-    );
+    await ingestDocument(db, 'acct', { embeddingsTarget: T }, 'doc-1', '   ');
     expect(state.deletedFor).toBe('doc-1');
     expect(state.inserted).toBeNull();
     expect(h.embedTexts).not.toHaveBeenCalled();
@@ -196,7 +192,7 @@ describe('ingestDocument', () => {
       ingestDocument(
         db,
         'acct',
-        { embeddingsApiKey: 'sk-x' },
+        { embeddingsTarget: T },
         'doc-1',
         'hello world'
       )

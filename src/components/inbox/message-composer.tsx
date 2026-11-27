@@ -427,6 +427,8 @@ export function MessageComposer({
           toast.error(
             "AI isn't set up yet — enable it in Settings → AI Assistant."
           );
+        } else if (data.error === 'FEATURE_NOT_IN_PLAN') {
+          toast.error("AI replies aren't included in your plan.");
         } else {
           toast.error(data.error ?? "Couldn't draft a reply.");
         }

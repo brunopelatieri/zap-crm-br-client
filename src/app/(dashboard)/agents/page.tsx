@@ -18,6 +18,8 @@ export default function AgentsPage() {
   const canViewUsage = accountRole ? canEditSettings(accountRole) : false;
   const [tab, setTab] = useState<Tab>('playground');
   const [decided, setDecided] = useState(false);
+  // SPEC 089 D-20: false = the plan does not include `ai_enabled`.
+  const [featureInPlan, setFeatureInPlan] = useState(true);
 
   // Land first-time users on Setup, returning users on the Playground.
   useEffect(() => {
@@ -26,7 +28,10 @@ export default function AgentsPage() {
       try {
         const res = await fetch('/api/ai/config');
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) setTab(data?.configured ? 'playground' : 'setup');
+        if (!cancelled) {
+          setFeatureInPlan(data?.feature_in_plan !== false);
+          setTab(data?.configured ? 'playground' : 'setup');
+        }
       } catch {
         if (!cancelled) setTab('setup');
       } finally {
@@ -48,7 +53,13 @@ export default function AgentsPage() {
       </div>
       <p className="text-muted-foreground mt-1 text-sm">{t('description')}</p>
 
-      {decided && (
+      {decided && !featureInPlan && (
+        <p className="border-border bg-muted/40 text-muted-foreground mt-6 rounded-md border px-4 py-3 text-sm">
+          {t('notInPlan')}
+        </p>
+      )}
+
+      {decided && featureInPlan && (
         <Tabs
           value={tab}
           onValueChange={(v) => setTab(v as Tab)}

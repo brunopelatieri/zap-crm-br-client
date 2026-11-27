@@ -9,6 +9,8 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  History,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
@@ -33,8 +35,10 @@ import {
 } from '@/components/ui/select';
 import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
+import { AiModelSuggest } from '@/components/agents/ai-model-suggest';
+import { AiPromptVersionsDialog } from '@/components/agents/ai-prompt-versions';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
-import type { AiProvider } from '@/lib/ai/types';
+import type { AiProvider, EmbeddingsProvider } from '@/lib/ai/types';
 import type { AccountMember } from '@/types';
 import { fetchAccountMembers, memberLabel } from '@/lib/account/members';
 import { useTranslations } from 'next-intl';
@@ -48,17 +52,20 @@ const HANDOFF_QUEUE = '__queue__';
 const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic (Claude)',
+  openrouter: 'OpenRouter',
 };
 
 const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   openai: 'sk-...',
   anthropic: 'sk-ant-...',
+  openrouter: 'sk-or-...',
 };
 
 export function AiConfig() {
   const { accountId, accountRole, profileLoading } = useAuth();
   const canEdit = accountRole ? canEditSettings(accountRole) : false;
   const t = useTranslations('Settings.aiConfig');
+  const tc = useTranslations('Agents.config');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,6 +83,13 @@ export function AiConfig() {
   const [embeddingsKeyEdited, setEmbeddingsKeyEdited] = useState(false);
   const [hasStoredEmbeddingsKey, setHasStoredEmbeddingsKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
+  // The prompt as last saved: what the version history compares against.
+  const [savedPrompt, setSavedPrompt] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [embeddingsProvider, setEmbeddingsProvider] =
+    useState<EmbeddingsProvider>('openai');
+  // OpenRouter privacy filter (SPEC 089 D-5): born OFF.
+  const [denyDataCollection, setDenyDataCollection] = useState(false);
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
@@ -103,6 +117,11 @@ export function AiConfig() {
         setProvider(data.provider);
         setModel(data.model);
         setSystemPrompt(data.system_prompt ?? '');
+        setSavedPrompt((data.system_prompt ?? '').trim());
+        setEmbeddingsProvider(
+          data.embeddings_provider === 'openrouter' ? 'openrouter' : 'openai'
+        );
+        setDenyDataCollection(data.deny_data_collection === true);
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
@@ -137,8 +156,7 @@ export function AiConfig() {
   const handleProviderChange = (next: AiProvider) => {
     setProvider(next);
     const isDefaultModel =
-      model === AI_PROVIDER_DEFAULT_MODEL.openai ||
-      model === AI_PROVIDER_DEFAULT_MODEL.anthropic ||
+      Object.values(AI_PROVIDER_DEFAULT_MODEL).includes(model) ||
       model.trim() === '';
     if (isDefaultModel) setModel(AI_PROVIDER_DEFAULT_MODEL[next]);
   };
@@ -159,6 +177,9 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
+    embeddings_provider: embeddingsProvider,
+    // Only meaningful on OpenRouter; harmless to store on the others.
+    deny_data_collection: denyDataCollection,
   });
 
   const handleTest = async () => {
@@ -226,6 +247,9 @@ export function AiConfig() {
         setIsActive(false);
         setAutoReplyEnabled(false);
         setSystemPrompt('');
+        setSavedPrompt('');
+        setDenyDataCollection(false);
+        setEmbeddingsProvider('openai');
         setHandoffAgentId('');
       } else {
         const data = await res.json();
@@ -249,6 +273,16 @@ export function AiConfig() {
   }
 
   const disabled = !canEdit || saving;
+
+  // On OpenRouter without an own embeddings key, embeddings run through
+  // OpenRouter with the chat key (D-3): show that, not the stored default.
+  const hasOwnEmbeddingsKey = embeddingsKeyEdited
+    ? embeddingsKey.trim().length > 0
+    : hasStoredEmbeddingsKey;
+  const reusesChatKey = provider === 'openrouter' && !hasOwnEmbeddingsKey;
+  const shownEmbeddingsProvider: EmbeddingsProvider = reusesChatKey
+    ? 'openrouter'
+    : embeddingsProvider;
 
   return (
     <div>
@@ -288,6 +322,9 @@ export function AiConfig() {
                     <SelectItem value="anthropic">
                       {PROVIDER_LABEL.anthropic}
                     </SelectItem>
+                    <SelectItem value="openrouter">
+                      {PROVIDER_LABEL.openrouter}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -303,6 +340,22 @@ export function AiConfig() {
                 />
               </div>
             </div>
+
+            {provider === 'openrouter' && (
+              <div className="space-y-2">
+                <p className="text-muted-foreground text-xs">
+                  {tc('openrouterIntro')}{' '}
+                  {tc('defaultModelHint', {
+                    model: AI_PROVIDER_DEFAULT_MODEL.openrouter,
+                  })}
+                </p>
+                <AiModelSuggest
+                  query={model}
+                  disabled={disabled}
+                  onPick={setModel}
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="ai-key">{t('apiKey')}</Label>
@@ -361,30 +414,92 @@ export function AiConfig() {
                   {t('optionalSemanticSearch')}
                 </span>
               </Label>
-              <Input
-                id="ai-embeddings-key"
-                type="password"
-                value={embeddingsKey}
-                onChange={(e) => {
-                  setEmbeddingsKey(e.target.value);
-                  setEmbeddingsKeyEdited(true);
-                }}
-                onFocus={() => {
-                  if (!embeddingsKeyEdited && hasStoredEmbeddingsKey) {
-                    setEmbeddingsKey('');
-                    setEmbeddingsKeyEdited(true);
+              <div className="grid gap-2 sm:grid-cols-[11rem_1fr]">
+                <Select
+                  value={shownEmbeddingsProvider}
+                  onValueChange={(v) =>
+                    setEmbeddingsProvider(
+                      v === 'openrouter' ? 'openrouter' : 'openai'
+                    )
                   }
-                }}
-                placeholder="sk-... (OpenAI)"
-                disabled={disabled}
-                autoComplete="off"
-              />
+                  disabled={disabled || reusesChatKey}
+                >
+                  <SelectTrigger aria-label={tc('embeddingsProvider')}>
+                    <SelectValue>
+                      {() =>
+                        shownEmbeddingsProvider === 'openrouter'
+                          ? tc('embeddingsProviderOpenrouter')
+                          : tc('embeddingsProviderOpenai')
+                      }
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openai">
+                      {tc('embeddingsProviderOpenai')}
+                    </SelectItem>
+                    <SelectItem value="openrouter">
+                      {tc('embeddingsProviderOpenrouter')}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  id="ai-embeddings-key"
+                  type="password"
+                  value={embeddingsKey}
+                  onChange={(e) => {
+                    setEmbeddingsKey(e.target.value);
+                    setEmbeddingsKeyEdited(true);
+                  }}
+                  onFocus={() => {
+                    if (!embeddingsKeyEdited && hasStoredEmbeddingsKey) {
+                      setEmbeddingsKey('');
+                      setEmbeddingsKeyEdited(true);
+                    }
+                  }}
+                  placeholder={
+                    shownEmbeddingsProvider === 'openrouter'
+                      ? tc('embeddingsKeyPlaceholderOpenrouter')
+                      : 'sk-... (OpenAI)'
+                  }
+                  disabled={disabled}
+                  autoComplete="off"
+                />
+              </div>
               <p className="text-muted-foreground text-xs">
-                {t('embeddingsHint', {
-                  sameKeyText: provider === 'openai' ? t('sameKeyText') : '',
-                })}
+                {provider === 'openrouter'
+                  ? tc('embeddingsOpenrouterReuse')
+                  : t('embeddingsHint', {
+                      sameKeyText:
+                        provider === 'openai' ? t('sameKeyText') : '',
+                    })}
               </p>
             </div>
+
+            {provider === 'openrouter' && (
+              <div className="border-border space-y-3 rounded-md border p-3">
+                <p className="text-foreground flex items-center gap-2 text-sm font-medium">
+                  <ShieldAlert className="text-primary h-4 w-4" />
+                  {tc('privacyTitle')}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  {tc('privacyNotice')}
+                </p>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor="ai-deny-data">{tc('privacySwitch')}</Label>
+                    <p className="text-muted-foreground text-xs">
+                      {tc('privacySwitchDesc')}
+                    </p>
+                  </div>
+                  <Switch
+                    id="ai-deny-data"
+                    checked={denyDataCollection}
+                    onCheckedChange={setDenyDataCollection}
+                    disabled={disabled}
+                  />
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -395,7 +510,21 @@ export function AiConfig() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="ai-prompt">{t('businessContext')}</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="ai-prompt">{t('businessContext')}</Label>
+                {configured && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setHistoryOpen(true)}
+                    disabled={!canEdit}
+                  >
+                    <History className="mr-1.5 h-3.5 w-3.5" />
+                    {tc('historyButton')}
+                  </Button>
+                )}
+              </div>
               <Textarea
                 id="ai-prompt"
                 value={systemPrompt}
@@ -491,14 +620,20 @@ export function AiConfig() {
           </CardContent>
         </Card>
 
+        <AiPromptVersionsDialog
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          currentPrompt={savedPrompt}
+          hasUnsavedEdits={systemPrompt.trim() !== savedPrompt}
+          onRestored={() => void fetchConfig()}
+        />
+
         <AiKnowledgeCard
           accountId={accountId}
           canEdit={canEdit}
-          hasEmbeddingsKey={
-            embeddingsKeyEdited
-              ? embeddingsKey.trim().length > 0
-              : hasStoredEmbeddingsKey
-          }
+          // On OpenRouter the chat key is reused for embeddings (D-3), so
+          // semantic search is on even without a separate embeddings key.
+          hasEmbeddingsKey={provider === 'openrouter' || hasOwnEmbeddingsKey}
         />
 
         <div className="flex items-center justify-between">

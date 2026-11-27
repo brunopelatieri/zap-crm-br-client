@@ -3015,7 +3015,8 @@
       "description": "Seu agente de IA com chave própria — configure-o e teste no playground antes de ele responder aos clientes na caixa de entrada.",
       "tabPlayground": "Playground",
       "tabSetup": "Configuração",
-      "tabUsage": "Uso"
+      "tabUsage": "Uso",
+      "notInPlan": "O agente de IA não está incluído no seu plano atual. Peça ao titular da conta para mudar de plano para usá-lo."
     },
     "playground": {
       "title": "Playground",
@@ -3046,7 +3047,56 @@
       "tokensCategory": "Tokens",
       "byModel": "Por modelo",
       "modelUsage": "{tokens} tok · {calls} {calls, plural, =1 {chamada} other {chamadas}}",
-      "truncatedNote": "Exibindo uma janela parcial — o uso é alto o suficiente para que apenas os registros mais recentes sejam resumidos aqui."
+      "truncatedNote": "Exibindo uma janela parcial — o uso é alto o suficiente para que apenas os registros mais recentes sejam resumidos aqui.",
+      "cost": "Custo",
+      "costNote": "O custo só é informado pelo OpenRouter; chamadas em outros provedores ficam sem custo aqui."
+    },
+    "config": {
+      "providerOpenrouter": "OpenRouter",
+      "openrouterIntro": "O OpenRouter dá acesso a vários modelos (Claude, GPT, Gemini, modelos abertos) com uma chave só. A mesma chave também gera os embeddings da sua base de conhecimento.",
+      "openrouterKeyPlaceholder": "sk-or-...",
+      "defaultModelHint": "Padrão sugerido: {model}.",
+      "modelSearchHint": "Busque no catálogo do OpenRouter abaixo ou digite qualquer identificador de modelo — o campo continua livre.",
+      "modelsLoading": "Buscando modelos…",
+      "modelsFailed": "Não foi possível carregar o catálogo de modelos. Você ainda pode digitar o identificador.",
+      "modelsNone": "Nenhum modelo do catálogo corresponde. Você ainda pode usar o que digitou.",
+      "toolsBadge": "ferramentas",
+      "noToolsBadge": "sem ferramentas",
+      "modelMeta": "{context} de contexto · {prompt} entrada / {completion} saída por 1M de tokens",
+      "embeddingsProvider": "Provedor de embeddings",
+      "embeddingsProviderOpenai": "OpenAI",
+      "embeddingsProviderOpenrouter": "OpenRouter",
+      "embeddingsOpenrouterReuse": "A busca semântica já está ativa sem chave separada: o OpenRouter gera os embeddings com a mesma chave do chat. Informe uma chave de embeddings só se quiser usar outra.",
+      "embeddingsKeyPlaceholderOpenrouter": "sk-or-... (OpenRouter)",
+      "privacyTitle": "Privacidade no OpenRouter",
+      "privacyNotice": "Com o OpenRouter, o texto das conversas e os trechos da base de conhecimento passam pelo OpenRouter e depois chegam ao provedor do modelo para o qual ele roteia. Confira a política de dados do modelo escolhido.",
+      "privacySwitch": "Usar só provedores que não retêm dados para treino",
+      "privacySwitchDesc": "Envia data_collection: deny em cada chamada de chat. Vem desligado: alguns modelos (principalmente os gratuitos) não têm provedor que atenda ao filtro, e a chamada falha com erro de roteamento. Vale só para o chat; os embeddings não são filtrados.",
+      "historyButton": "Histórico de versões"
+    },
+    "promptVersions": {
+      "title": "Histórico de versões do prompt",
+      "description": "Todo salvamento que muda o contexto do negócio cria uma versão. Compare duas versões e restaure uma antiga — restaurar também fica registrado como uma versão nova.",
+      "loadFailed": "Falha ao carregar o histórico de versões.",
+      "empty": "Ainda não há versões. A primeira é criada na próxima vez que você salvar um prompt alterado.",
+      "sourcePanel": "Painel",
+      "sourceApi": "API",
+      "emptyPrompt": "(prompt vazio)",
+      "restoreNote": "Restauração de uma versão anterior",
+      "selected": "Versão selecionada",
+      "compareWith": "Comparar com",
+      "compareCurrent": "Prompt atual",
+      "compareOlder": "Versão anterior",
+      "noDifferences": "Sem diferenças.",
+      "restore": "Restaurar esta versão",
+      "restoring": "Restaurando…",
+      "restored": "Prompt restaurado.",
+      "restoredNoChange": "Esta versão já é o prompt atual.",
+      "restoreFailed": "Falha ao restaurar a versão.",
+      "pickOne": "Escolha uma versão à esquerda para compará-la.",
+      "unsavedWarning": "Há edições não salvas no campo do prompt. Restaurar substitui o prompt salvo; recarregue a tela depois para vê-lo.",
+      "close": "Fechar",
+      "versionLabel": "Versão de {date}"
     }
   },
   "Currencies": {
@@ -3891,7 +3941,7 @@
     },
     "aiConfig": {
       "title": "Configuração do agente",
-      "description": "Use sua própria chave da OpenAI ou Anthropic. O wacrm chama o provedor diretamente com sua chave — sem taxas de IA por assento, e seus dados continuam seus. Isso alimenta respostas geradas por IA na caixa de entrada, o bot de resposta automática e o Playground.",
+      "description": "Use sua própria chave da OpenAI, Anthropic ou OpenRouter. O wacrm chama o provedor diretamente com sua chave — sem taxas de IA por assento, e seus dados continuam seus. Isso alimenta respostas geradas por IA na caixa de entrada, o bot de resposta automática e o Playground.",
       "adminOnlyConfig": "Somente admins e proprietários podem alterar a configuração de IA.",
       "loadFailed": "Falha ao carregar configuração de IA",
       "providerAndKey": "Provedor e chave",
