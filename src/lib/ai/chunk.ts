@@ -1,4 +1,5 @@
 import { parseFaqText, type FaqPair } from './ingest/faq';
+import { parseMarkdownHeading } from './ingest/markdown-heading';
 
 // ============================================================
 // Fatiamento da base de conhecimento (SPEC 089 D-12).
@@ -166,10 +167,11 @@ function splitSections(text: string): Section[] {
 
   for (const line of text.split('\n')) {
     if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
-    const m = inFence ? null : /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (m) {
+    // Sem regex com retrocesso: ver `markdown-heading.ts` (ReDoS cúbico).
+    const parsed = inFence ? null : parseMarkdownHeading(line);
+    if (parsed) {
       close();
-      heading = m[1].trim();
+      heading = parsed.text;
     } else {
       lines.push(line);
     }

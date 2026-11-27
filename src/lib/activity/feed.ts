@@ -81,6 +81,9 @@ export function activityHref(row: {
         row.action === 'form.responses_deleted'
         ? `/forms/${row.resource_id}/respostas`
         : `/forms/${row.resource_id}`;
+    case 'ai':
+      // A conversa onde o agente agiu, quando a linha a carrega.
+      return row.conversation_id ? `/inbox?c=${row.conversation_id}` : null;
     case 'export':
     case 'tag':
       return null;
@@ -111,7 +114,10 @@ export function activityValues(row: {
     label: row.resource_label ?? '',
   };
 
-  if (row.action === 'deal.stage_changed') {
+  if (
+    row.action === 'deal.stage_changed' ||
+    row.action === 'ai.tool_deal_moved'
+  ) {
     values.from = str('from');
     values.to = str('to');
   }

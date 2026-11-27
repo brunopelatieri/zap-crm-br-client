@@ -25,6 +25,8 @@ const h = vi.hoisted(() => ({
   afters: [] as (() => Promise<void> | void)[],
   indexPending: vi.fn(),
   target: { target: null as unknown, corrupt: false },
+  // Dublê do transporte HTTP guardado (`safeRequest`) só no teste da página pública.
+  httpRequest: null as null | ((input: unknown) => Promise<unknown>),
 }));
 
 function fakeSupabase() {
@@ -150,6 +152,23 @@ vi.mock('@/lib/ai/config', () => ({
 vi.mock('@/lib/ai/admin-client', () => ({
   supabaseAdmin: () => ({ admin: true }),
 }));
+
+// A importação por URL sai por `safeRequest` (endereço validado na conexão); sem
+// dublê, o transporte é o real, que recusa tudo que for interno antes de abrir socket.
+vi.mock('@/lib/http/safe-request', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/http/safe-request')>();
+  return {
+    ...actual,
+    safeRequest: (
+      input: Parameters<typeof actual.safeRequest>[0],
+      deps?: Parameters<typeof actual.safeRequest>[1]
+    ) =>
+      h.httpRequest
+        ? (h.httpRequest(input) as ReturnType<typeof actual.safeRequest>)
+        : actual.safeRequest(input, deps),
+  };
+});
 
 vi.mock('@/lib/ai/ingest/indexer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ai/ingest/indexer')>()),
@@ -514,21 +533,25 @@ describe('POST /api/ai/knowledge/import-url', () => {
   });
 
   it('imports a public page: only its text is saved, with the final URL as the source', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        '<html><head><title>Frete da Loja</title></head><body><h1>Frete</h1><p>Entrega em 5 dias.</p></body></html>',
-        {
-          headers: { 'content-type': 'text/html' },
-        }
-      )
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    const body =
+      '<html><head><title>Frete da Loja</title></head><body><h1>Frete</h1><p>Entrega em 5 dias.</p></body></html>';
+    const requestMock = vi.fn().mockResolvedValue({
+      status: 200,
+      contentType: 'text/html',
+      body,
+      bytes: body.length,
+      buffer: Buffer.from(body),
+    });
+    h.httpRequest = requestMock;
     try {
       const res = await IMPORT_URL(
         json({ url: 'http://93.184.216.34/frete#topo', tags: ['site'] })
       );
       expect(res.status).toBe(200);
-      expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
+      expect(requestMock.mock.calls[0][0]).toMatchObject({
+        redirect: 'return',
+        url: 'http://93.184.216.34/frete#topo',
+      });
       expect(inserts()[0].payload).toMatchObject({
         source_type: 'url',
         source_url: 'http://93.184.216.34/frete',
@@ -542,7 +565,7 @@ describe('POST /api/ai/knowledge/import-url', () => {
       );
       expect(h.afters).toHaveLength(1);
     } finally {
-      vi.unstubAllGlobals();
+      h.httpRequest = null;
     }
   });
 });

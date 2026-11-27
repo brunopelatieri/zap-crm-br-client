@@ -49,3 +49,72 @@ describe('loadAiConfig requireActive', () => {
     ).toBeNull();
   });
 });
+
+describe('loadAiConfig tools_config (SPEC 089 F4, migration 105)', () => {
+  it('parses tools_config fail-closed', async () => {
+    const config = await loadAiConfig(
+      dbReturning({
+        ...ROW,
+        tools_config: {
+          search_knowledge: { enabled: true },
+          drop_all: { enabled: true },
+        },
+      }),
+      'acct',
+      { requireActive: false }
+    );
+    expect(config!.toolsConfig).toEqual({
+      search_knowledge: { enabled: true },
+    });
+  });
+
+  it('falls back to the old columns (tools off) when migration 105 is missing', async () => {
+    const selects: string[] = [];
+    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const chain = {
+      from: () => chain,
+      select: (cols: string) => {
+        selects.push(cols);
+        return chain;
+      },
+      eq: () => chain,
+      maybeSingle: () =>
+        Promise.resolve(
+          selects[selects.length - 1].includes('tools_config')
+            ? {
+                data: null,
+                error: {
+                  code: '42703',
+                  message: 'column ai_configs.tools_config does not exist',
+                },
+              }
+            : { data: ROW, error: null }
+        ),
+    };
+    const config = await loadAiConfig(
+      chain as unknown as SupabaseClient,
+      'acct',
+      { requireActive: false }
+    );
+    expect(selects).toHaveLength(2);
+    expect(selects[1]).not.toContain('tools_config');
+    expect(config!.toolsConfig).toEqual({});
+    consoleErr.mockRestore();
+  });
+
+  it('other errors still throw', async () => {
+    const chain = {
+      from: () => chain,
+      select: () => chain,
+      eq: () => chain,
+      maybeSingle: () =>
+        Promise.resolve({
+          data: null,
+          error: { code: '42501', message: 'denied' },
+        }),
+    };
+    await expect(
+      loadAiConfig(chain as unknown as SupabaseClient, 'acct')
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+});

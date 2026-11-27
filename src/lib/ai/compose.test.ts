@@ -4,6 +4,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const h = vi.hoisted(() => ({
   retrieveKnowledge: vi.fn(),
   resolveChannel: vi.fn(),
+  loadCustom: vi.fn(),
+}));
+
+// The draft audits through the service role; no real client in unit tests.
+vi.mock('./admin-client', () => ({ supabaseAdmin: () => ({ rpc: vi.fn() }) }));
+vi.mock('./tools/custom-tools', () => ({
+  loadCustomToolsForTurn: h.loadCustom,
 }));
 
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }));
@@ -32,6 +39,7 @@ const config = { systemPrompt: 'We sell shoes.', embeddingsTarget: null };
 beforeEach(() => {
   h.retrieveKnowledge.mockReset().mockResolvedValue([]);
   h.resolveChannel.mockReset().mockResolvedValue('whatsapp_cloud');
+  h.loadCustom.mockReset().mockResolvedValue([]);
 });
 
 describe('composeAgentTurn', () => {
@@ -126,5 +134,184 @@ describe('composeAgentTurn', () => {
     });
     expect(turn.channelType).toBe('whatsapp_qr');
     expect(turn.systemPrompt).toContain('plain text');
+  });
+});
+
+describe('composeAgentTurn — tools (SPEC 089 F4)', () => {
+  const ALL_ON = {
+    search_knowledge: { enabled: true },
+    get_contact_profile: { enabled: true },
+    add_contact_tags: { enabled: true, tagIds: [] },
+  };
+  // A conversations table with one row of this account.
+  function dbWithConversation(row: Record<string, unknown> | null) {
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      maybeSingle: () => Promise.resolve({ data: row, error: null }),
+    };
+    return { from: vi.fn(() => chain) } as unknown as SupabaseClient & {
+      from: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it('no tool on = no tool query, unchanged prompt (the existing tests use a db that throws if touched)', async () => {
+    const turn = await composeAgentTurn({
+      db,
+      accountId: 'acct',
+      config: { ...config, toolsConfig: {} },
+      mode: 'auto_reply',
+      messages: [{ role: 'user', content: 'Hi' }],
+      conversationId: 'conv-1',
+    });
+    expect(turn.tools).toEqual([]);
+    expect(turn.toolContext).toBeNull();
+    expect(turn.systemPrompt).not.toContain('tool_result');
+  });
+
+  it('draft: read tools only, bound to the contact of the conversation row', async () => {
+    const tdb = dbWithConversation({
+      id: 'conv-1',
+      account_id: 'acct',
+      contact_id: 'contact-9',
+    });
+    const turn = await composeAgentTurn({
+      db: tdb,
+      accountId: 'acct',
+      config: { ...config, toolsConfig: ALL_ON },
+      mode: 'draft',
+      messages: [{ role: 'user', content: 'Hi' }],
+      conversationId: 'conv-1',
+    });
+    expect(turn.tools.map((t) => t.key)).toEqual([
+      'search_knowledge',
+      'get_contact_profile',
+    ]);
+    expect(turn.toolContext).toMatchObject({
+      contactId: 'contact-9',
+      dryRun: true,
+      mode: 'draft',
+    });
+    expect(turn.systemPrompt).toContain('<tool_result>');
+    expect(turn.systemPrompt).toContain('internal record');
+    // The retry prompt (model rejects tools) has no tools paragraph.
+    expect(turn.fallbackSystemPrompt).toBeDefined();
+    expect(turn.fallbackSystemPrompt).not.toContain('tool_result');
+    // Only the embeddings target reaches the tools, never the chat key.
+    expect(Object.keys(turn.toolContext!.aiConfig)).toEqual([
+      'embeddingsTarget',
+    ]);
+  });
+
+  it('playground: writes offered in simulation, no contact', async () => {
+    const turn = await composeAgentTurn({
+      db,
+      accountId: 'acct',
+      config: { ...config, toolsConfig: ALL_ON },
+      mode: 'playground',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    expect(turn.tools.map((t) => t.key)).toEqual([
+      'search_knowledge',
+      'get_contact_profile',
+      'add_contact_tags',
+    ]);
+    expect(turn.toolContext).toMatchObject({
+      contactId: null,
+      conversationId: null,
+      dryRun: true,
+    });
+  });
+
+  it('a conversation that does not resolve for the account turns the tools off', async () => {
+    const tdb = dbWithConversation(null);
+    const turn = await composeAgentTurn({
+      db: tdb,
+      accountId: 'acct',
+      config: { ...config, toolsConfig: ALL_ON },
+      mode: 'auto_reply',
+      messages: [{ role: 'user', content: 'Hi' }],
+      conversationId: 'conv-other',
+    });
+    expect(turn.tools).toEqual([]);
+    expect(turn.toolContext).toBeNull();
+    expect(turn.systemPrompt).not.toContain('tool_result');
+  });
+});
+
+describe('composeAgentTurn — the account HTTP tools (SPEC 089 F6)', () => {
+  const custom = (key: string, risk: 'read' | 'write' = 'write') =>
+    ({
+      key,
+      description: 'x',
+      inputSchema: { type: 'object', properties: {} },
+      risk,
+      external: true,
+      parse: () => ({ ok: true, value: {} }),
+      handler: async () => ({ ok: true, data: {} }),
+    }) as never;
+
+  it('an account with only a custom tool (no built-in on) still gets tools and a context', async () => {
+    h.loadCustom.mockResolvedValue([custom('check_stock')]);
+    const turn = await composeAgentTurn({
+      db,
+      accountId: 'acct',
+      config: { ...config, toolsConfig: {} },
+      mode: 'playground',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    expect(turn.tools.map((t) => t.key)).toEqual(['check_stock']);
+    expect(turn.toolContext).toMatchObject({
+      dryRun: true,
+      mode: 'playground',
+    });
+    expect(turn.systemPrompt).toContain('tool_result');
+    expect(h.loadCustom).toHaveBeenCalledWith({
+      accountId: 'acct',
+      mode: 'playground',
+    });
+  });
+
+  it('a custom tool that collides with an enabled built-in is dropped (the built-in wins)', async () => {
+    h.loadCustom.mockResolvedValue([
+      custom('search_knowledge'),
+      custom('check_stock'),
+    ]);
+    const turn = await composeAgentTurn({
+      db,
+      accountId: 'acct',
+      config: {
+        ...config,
+        toolsConfig: { search_knowledge: { enabled: true } },
+      },
+      mode: 'playground',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    expect(turn.tools.map((t) => t.key)).toEqual([
+      'search_knowledge',
+      'check_stock',
+    ]);
+    // The first one is the built-in, not the account's tool.
+    expect(turn.tools[0].external).toBeUndefined();
+  });
+
+  it('write tools in the prompt flag follows the custom risk', async () => {
+    h.loadCustom.mockResolvedValue([custom('lookup_order', 'read')]);
+    const readOnly = await composeAgentTurn({
+      db,
+      accountId: 'acct',
+      config,
+      mode: 'playground',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    h.loadCustom.mockResolvedValue([custom('lookup_order', 'write')]);
+    const withWrite = await composeAgentTurn({
+      db,
+      accountId: 'acct',
+      config,
+      mode: 'playground',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    expect(withWrite.systemPrompt).not.toBe(readOnly.systemPrompt);
   });
 });

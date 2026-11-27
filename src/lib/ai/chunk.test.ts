@@ -225,3 +225,37 @@ describe('chunkDocument', () => {
     expect(out[0].heading).toBe('Manual › Passo 1');
   });
 });
+
+describe('chunkText — hostile input runs in linear time', () => {
+  // `\u2003` (EM SPACE) is whitespace for `\s` but not for `[ \t]`.
+  const EM = String.fromCharCode(0x2003);
+  const N = 12_000;
+  const cases: Record<string, string> = {
+    'heading with em-space / # / em-space and a trailing char': `# ${EM.repeat(N)}${'#'.repeat(N)}${EM.repeat(N)}x`,
+    'heading of only em-spaces': `## ${EM.repeat(50_000)}`,
+    'heading of only #': `# ${'#'.repeat(50_000)}`,
+    'heading with spaces and hashes alternating': `# ${'# '.repeat(25_000)}x`,
+    'many hostile headings': Array.from(
+      { length: 200 },
+      () => `# ${EM.repeat(250)}${'#'.repeat(250)}${EM.repeat(250)}x`
+    ).join('\n'),
+    'long run of blank lines with spaces': `a${'\n '.repeat(25_000)}b`,
+    'long unpunctuated sentence run': `${'. '.repeat(25_000)}x`,
+  };
+
+  it.each(Object.keys(cases))('%s', (name) => {
+    const t0 = performance.now();
+    chunkText(cases[name]);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+
+  it('keeps the heading semantics of normal Markdown', () => {
+    const out = chunkText(
+      '# Título ##\n\ncorpo\n\n####### não é título\n\n###### Fundo\n\nx\n\n#semespaco\n\n#\ttab\n\ny'
+    );
+    expect(out.map((c) => c.heading)).toEqual(['Título', 'Fundo', 'tab']);
+    expect(out[0].content).toContain('####### não é título');
+    expect(out[1].content).toContain('#semespaco');
+    expect(out[2].content).toBe('tab\n\ny');
+  });
+});

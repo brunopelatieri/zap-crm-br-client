@@ -3,8 +3,11 @@ import { MAX_OUTPUT_TOKENS } from '../defaults';
 import {
   normalizeTurnOrder,
   normalizeUsage,
+  parseOpenAiChoice,
   providerHttpError,
   toNetworkError,
+  toOpenAiMessages,
+  toOpenAiTools,
   type ProviderArgs,
 } from './shared';
 
@@ -38,7 +41,6 @@ export function openRouterHeaders(apiKey: string): Record<string, string> {
 }
 
 interface OpenRouterResponse {
-  choices?: { message?: { content?: unknown }; finish_reason?: unknown }[];
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -57,19 +59,29 @@ interface OpenRouterResponse {
 export async function generateOpenRouter(
   args: ProviderArgs
 ): Promise<ProviderResult> {
-  const { apiKey, model, systemPrompt, messages, timeoutMs, providerOptions } =
-    args;
+  const {
+    apiKey,
+    model,
+    systemPrompt,
+    messages,
+    timeoutMs,
+    providerOptions,
+    tools,
+  } = args;
 
   const body: Record<string, unknown> = {
     model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...normalizeTurnOrder(messages),
-    ],
+    messages: toOpenAiMessages(systemPrompt, messages, normalizeTurnOrder, {
+      echoReasoning: true,
+    }),
     max_tokens: MAX_OUTPUT_TOKENS,
   };
   if (providerOptions?.denyDataCollection) {
     body.provider = { data_collection: 'deny' };
+  }
+  if (tools && tools.length > 0) {
+    body.tools = toOpenAiTools(tools);
+    body.tool_choice = 'auto';
   }
 
   let res: Response;
@@ -91,11 +103,12 @@ export async function generateOpenRouter(
   const data = (await res
     .json()
     .catch(() => null)) as OpenRouterResponse | null;
-  const text = data?.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text.trim()) {
+  const { text, toolCalls, finishReason, rawMessage } = parseOpenAiChoice(data);
+  // A pure tool step (tool_calls with null/empty content) is a valid answer.
+  if (toolCalls.length === 0 && !text.trim()) {
     // Reasoning tokens share the output cap: a reasoning model can spend it
     // all and leave no text (finish_reason "length").
-    if (data?.choices?.[0]?.finish_reason === 'length') {
+    if (finishReason === 'length') {
       throw new AiError(
         'OpenRouter hit the output limit before producing text (a reasoning model can spend it all thinking). Try a non-reasoning model.',
         { code: 'output_truncated' }
@@ -111,7 +124,16 @@ export async function generateOpenRouter(
     total: data?.usage?.total_tokens,
     cost: data?.usage?.cost,
   });
-  return { text, usage };
+  const result: ProviderResult = { text, usage, toolCalls, finishReason };
+  // OpenRouter docs: when continuing after tool calls, send the
+  // `reasoning_details` of the assistant turn back unchanged. NOT measured
+  // in F0 (the captured second-step request omits them and still worked), so
+  // it is an echo per the docs, not a proven requirement.
+  const details = rawMessage?.reasoning_details;
+  if (Array.isArray(details) && details.length > 0) {
+    result.providerState = { reasoning_details: details };
+  }
+  return result;
 }
 
 /**

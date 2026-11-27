@@ -2,9 +2,12 @@ import { supabaseAdmin } from './admin-client';
 import { loadAiConfig } from './config';
 import { buildConversationContext } from './context';
 import { composeAgentTurn } from './compose';
-import { documentIdsOf } from './sources';
+import { documentIdsOf, toolUsageOf, turnSources } from './sources';
 import { generateReply } from './generate';
-import { buildHandoffSummary } from './handoff';
+import { buildAgentHandoffSummary, buildHandoffSummary } from './handoff';
+import { findDisallowedLinks } from './output-guard';
+import { getTool } from './tools/registry';
+import { partialOf } from './types';
 import { logAiUsage } from './usage';
 import { engineSendText } from '@/lib/flows/meta-send';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
@@ -124,39 +127,37 @@ export async function dispatchInboundToAiReply(
       conversationId,
     });
 
-    const { text, handoff, usage } = await generateReply({
-      config,
-      systemPrompt: turn.systemPrompt,
-      messages: turn.messages,
-    });
+    // Atomically claim a reply slot: the cap check + increment happen in
+    // one UPDATE, so concurrent inbounds can never overshoot the cap. If
+    // another inbound just took the last slot, `claimed` is false and we
+    // skip the turn. We consume a slot slightly before the send lands —
+    // fail-safe: under-reply rather than over-reply.
+    const claimSlot = async (): Promise<boolean> => {
+      const { data: claimed, error: claimErr } = await db.rpc(
+        'claim_ai_reply_slot',
+        {
+          conversation_id: conversationId,
+          max_replies: config.autoReplyMaxPerConversation,
+        }
+      );
+      if (claimErr) {
+        // A real error here (vs. losing the cap race) is almost always a
+        // deploy issue — e.g. `claim_ai_reply_slot` not EXECUTE-able by the
+        // service role, or the migration not applied. Log it loudly: a
+        // silent return makes "auto-reply never fires" undiagnosable.
+        console.error('[ai auto-reply] claim_ai_reply_slot failed:', claimErr);
+        return false;
+      }
+      return claimed === true; // false = lost the per-conversation cap race
+    };
 
-    // Record token spend on the account's BYO key. Fire-and-forget so it
-    // never adds latency to the customer-facing send: `logAiUsage`
-    // swallows its own errors, so the floating promise can't reject.
-    // Logged regardless of handoff — the provider call happened either
-    // way.
-    void logAiUsage(db, {
-      accountId,
-      conversationId,
-      mode: 'auto_reply',
-      provider: config.provider,
-      model: config.model,
-      usage,
-      knowledgeDocumentIds: documentIdsOf(turn.sources),
-    });
-
-    if (handoff || !text) {
-      // The model can't (or shouldn't) answer — stop auto-replying on
-      // this thread and hand it to a human. We (a) pause the bot here
-      // (sticky until re-enabled), (b) route the conversation to the
-      // configured handoff agent — null leaves it in the shared queue —
-      // and (c) leave a short internal note so whoever picks it up has
-      // context. Assigning fires the `on_conversation_assigned` trigger,
-      // which notifies the agent.
-      const summary = buildHandoffSummary({
-        messages,
-        replyCount: conv.ai_reply_count ?? 0,
-      });
+    // The model can't (or shouldn't) answer — stop auto-replying on this
+    // thread and hand it to a human. We (a) pause the bot here (sticky until
+    // re-enabled), (b) route the conversation to the configured handoff
+    // agent — null leaves it in the shared queue — and (c) leave a short
+    // internal note so whoever picks it up has context. Assigning fires the
+    // `on_conversation_assigned` trigger, which notifies the agent.
+    const handOff = async (summary: string): Promise<void> => {
       const update: Record<string, unknown> = {
         ai_autoreply_disabled: true,
         ai_handoff_summary: summary,
@@ -171,6 +172,7 @@ export async function dispatchInboundToAiReply(
       // fila e a esconde de todos, justamente no momento em que a IA
       // desistiu e um humano precisa assumir. Destino inválido degrada
       // para "handoff sem dono": a conversa fica na fila, visível.
+      let assignTo: string | null = null;
       if (config.handoffAgentId && !conv.assigned_agent_id) {
         const eligible = await isAssignableMember(
           db,
@@ -178,7 +180,7 @@ export async function dispatchInboundToAiReply(
           config.handoffAgentId
         );
         if (eligible) {
-          update.assigned_agent_id = config.handoffAgentId;
+          assignTo = config.handoffAgentId;
         } else {
           console.warn(
             '[ai] handoff agent is no longer an eligible member — leaving the conversation in the queue',
@@ -187,30 +189,155 @@ export async function dispatchInboundToAiReply(
         }
       }
       await db.from('conversations').update(update).eq('id', conversationId);
+      // `conv` was read before a turn of up to 60 s: a human may have taken
+      // the thread since. Assign only if it is STILL unowned (SPEC 089 F8).
+      if (assignTo) {
+        await db
+          .from('conversations')
+          .update({ assigned_agent_id: assignTo })
+          .eq('id', conversationId)
+          .is('assigned_agent_id', null);
+      }
+    };
+
+    // SPEC 089 F8: eligibility (no human, bot not paused) was read once,
+    // before a turn of up to 60 s. A human may have taken the thread, or a
+    // concurrent turn may have handed it off, in the meantime. Re-read right
+    // before sending; the slot RPC (migration 110) checks the same.
+    const stillOurs = async (): Promise<boolean> => {
+      const { data: now, error } = await db
+        .from('conversations')
+        .select('assigned_agent_id, ai_autoreply_disabled')
+        .eq('id', conversationId)
+        .eq('account_id', accountId)
+        .maybeSingle();
+      if (error || !now) return false;
+      return !now.assigned_agent_id && !now.ai_autoreply_disabled;
+    };
+
+    // SPEC 089 D-17: with tools on, the slot is claimed BEFORE the agent
+    // loop. A tool can change the CRM, and losing the race AFTER that would
+    // leave the side effect with no reply sent (or a reply sent twice by two
+    // inbounds that both acted). A turn that ends in a handoff keeps the
+    // slot spent: we prefer to reply too little. Without tools nothing is
+    // written, so the claim stays after generation, as it always was.
+    const claimBeforeLoop = turn.tools.length > 0;
+    if (claimBeforeLoop && !(await claimSlot())) return;
+
+    // With tools on this runs the agent loop (SPEC 089 F4/F5); a turn that
+    // uses its 4 steps, or in which the model calls `handoff_to_human`,
+    // comes back as a handoff.
+    let result: Awaited<ReturnType<typeof generateReply>>;
+    try {
+      result = await generateReply({
+        config,
+        systemPrompt: turn.systemPrompt,
+        messages: turn.messages,
+        tools: turn.tools,
+        toolContext: turn.toolContext,
+        fallbackSystemPrompt: turn.fallbackSystemPrompt,
+      });
+    } catch (err) {
+      // A turn that fails midway has already spent tokens and made tool
+      // calls (the quota of tool calls depends on them): record what
+      // happened, then let the outer handler swallow the error as before.
+      const partial = partialOf(err);
+      if (partial) {
+        await logAiUsage(db, {
+          accountId,
+          conversationId,
+          mode: 'auto_reply',
+          provider: config.provider,
+          model: config.model,
+          usage: partial.usage,
+          steps: partial.steps,
+          toolCalls: partial.toolCalls.length,
+        });
+        // A WRITE already landed (or may have: a timed-out one can still
+        // finish) but no answer will go out. Staying silent would leave the
+        // CRM changed, the customer unanswered and nobody told, and the next
+        // turn would not see what was done: hand the thread to a human.
+        // The risk comes from the trace (the tool OFFERED under that name):
+        // `getTool` only knows the built-in catalog, so an account HTTP tool
+        // that wrote was missed before (SPEC 089 F8).
+        const wrote = partial.toolCalls.some(
+          (t) =>
+            (t.risk ?? getTool(t.name)?.risk) === 'write' &&
+            (t.status === 'ok' ||
+              t.error === 'tool_timeout' ||
+              t.outcomeUnknown === true)
+        );
+        if (wrote) {
+          await handOff(
+            buildHandoffSummary({
+              messages,
+              replyCount: conv.ai_reply_count ?? 0,
+            })
+          );
+          return;
+        }
+      }
+      throw err;
+    }
+    const { text, handoff, usage } = result;
+
+    // Record token spend on the account's BYO key. Fire-and-forget so it
+    // never adds latency to the customer-facing send: `logAiUsage`
+    // swallows its own errors, so the floating promise can't reject.
+    // Logged regardless of handoff — the provider call happened either
+    // way.
+    void logAiUsage(db, {
+      accountId,
+      conversationId,
+      mode: 'auto_reply',
+      provider: config.provider,
+      model: config.model,
+      usage,
+      knowledgeDocumentIds: documentIdsOf(
+        turnSources(turn.sources, result.toolSources)
+      ),
+      ...toolUsageOf(result),
+    });
+
+    if (handoff || !text) {
+      // The model's own reason and summary when it handed off through the
+      // tool (F5); the deterministic summary otherwise (no second LLM call).
+      await handOff(
+        result.handoffRequest
+          ? buildAgentHandoffSummary({
+              ...result.handoffRequest,
+              replyCount: conv.ai_reply_count ?? 0,
+            })
+          : buildHandoffSummary({
+              messages,
+              replyCount: conv.ai_reply_count ?? 0,
+            })
+      );
       return;
     }
 
-    // Atomically claim a reply slot: the cap check + increment happen in
-    // one UPDATE, so concurrent inbounds can never overshoot the cap. If
-    // another inbound just took the last slot, `claimed` is false and we
-    // skip the send. (We consume a slot slightly before the send lands —
-    // fail-safe: under-reply rather than over-reply.)
-    const { data: claimed, error: claimErr } = await db.rpc(
-      'claim_ai_reply_slot',
-      {
-        conversation_id: conversationId,
-        max_replies: config.autoReplyMaxPerConversation,
-      }
-    );
-    if (claimErr) {
-      // A real error here (vs. losing the cap race) is almost always a
-      // deploy issue — e.g. `claim_ai_reply_slot` not EXECUTE-able by the
-      // service role, or the migration not applied. Log it loudly: a
-      // silent return makes "auto-reply never fires" undiagnosable.
-      console.error('[ai auto-reply] claim_ai_reply_slot failed:', claimErr);
+    // SPEC 089 F8: nobody reviews an auto-reply before it goes out. A link
+    // the business never wrote (not in its instructions, knowledge excerpts
+    // or approved examples) may be a poisoned document or tool result
+    // carrying the customer's data out: hold the reply, hand off. Only the
+    // count is logged (the link itself may carry personal data).
+    const heldLinks = findDisallowedLinks(text, [turn.systemPrompt]);
+    if (heldLinks.length > 0) {
+      console.warn('[ai auto-reply] reply held: link not from the business', {
+        conversationId,
+        links: heldLinks.length,
+      });
+      await handOff(
+        buildHandoffSummary({
+          messages,
+          replyCount: conv.ai_reply_count ?? 0,
+        })
+      );
       return;
     }
-    if (claimed !== true) return; // lost the per-conversation cap race
+
+    if (!claimBeforeLoop && !(await claimSlot())) return;
+    if (!(await stillOurs())) return;
 
     await engineSendText({
       accountId,

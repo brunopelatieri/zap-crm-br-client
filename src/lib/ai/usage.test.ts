@@ -83,3 +83,34 @@ describe('logAiUsage', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('logAiUsage — error log (LGPD review)', () => {
+  it('logs only code and message of a database error, never its details', async () => {
+    const insert = vi.fn().mockResolvedValue({
+      error: {
+        code: '23514',
+        message: 'new row violates check constraint',
+        details: 'Failing row contains (Maria da Silva, 11987654321)',
+        hint: 'x',
+      },
+    });
+    const db = { from: vi.fn(() => ({ insert })) } as unknown as SupabaseClient;
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await logAiUsage(db, {
+        accountId: 'acct-1',
+        conversationId: 'conv-1',
+        mode: 'auto_reply',
+        provider: 'anthropic',
+        model: 'claude-x',
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      });
+      expect(spy).toHaveBeenCalled();
+      const logged = JSON.stringify(spy.mock.calls);
+      expect(logged).toContain('23514');
+      expect(logged).not.toMatch(/Maria|11987654321|Failing row/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

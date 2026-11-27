@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHandoffSummary } from './handoff';
+import { buildAgentHandoffSummary, buildHandoffSummary } from './handoff';
 
 describe('buildHandoffSummary', () => {
   it('notes the reply count and quotes the last customer message', () => {
@@ -62,5 +62,35 @@ describe('buildHandoffSummary', () => {
       replyCount: 0,
     });
     expect(summary).toBe('🤖 AI agent handed off without replying.');
+  });
+});
+
+describe('buildAgentHandoffSummary (model-written, SPEC 089 F5)', () => {
+  it('leads like the deterministic one and marks the text as unverified', () => {
+    const s = buildAgentHandoffSummary({
+      reason: 'Wants a discount',
+      summary: 'Asked for 15% off on the Pro plan.',
+      replyCount: 2,
+    });
+    expect(s).toContain('AI agent handed off after 2 replies.');
+    expect(s).toContain('unverified');
+    expect(s).toContain('Wants a discount');
+    expect(s).toContain('Asked for 15% off on the Pro plan.');
+  });
+
+  it('does not repeat the reason when the summary is the same text, and is bounded', () => {
+    const same = buildAgentHandoffSummary({
+      reason: 'Angry customer',
+      summary: 'Angry customer',
+      replyCount: 0,
+    });
+    expect(same.match(/Angry customer/g)).toHaveLength(1);
+    expect(same).toContain('without replying');
+    const long = buildAgentHandoffSummary({
+      reason: 'r'.repeat(900),
+      summary: 's'.repeat(900),
+      replyCount: 1,
+    });
+    expect(long.length).toBeLessThan(900);
   });
 });

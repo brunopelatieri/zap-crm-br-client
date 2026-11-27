@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import {
   checkRateLimit,
@@ -13,6 +13,8 @@ import {
 import { claimConversation } from '@/lib/inbox/assignment';
 import { findOrCreateInboxConversation } from '@/lib/inbox/find-or-create-conversation';
 import { resolveDefaultChannelId } from '@/lib/channels/send';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
+import { captureAfterSend } from '@/lib/ai/tuning/capture';
 
 // The dashboard's outbound-send endpoint. It owns auth, per-user rate
 // limiting, and the two ways the UI targets a thread — an existing
@@ -93,6 +95,9 @@ export async function POST(request: Request) {
       // Reenvio de uma mensagem apagada (SPEC 074 §8) — repassado tal
       // qual até `messages.resent_from_message_id`.
       resent_from_message_id,
+      // SPEC 089 F7: id returned by `/api/ai/draft` when this text started as
+      // an AI draft; lets the capture tell an edit from a send as written.
+      ai_draft_id,
     } = body;
 
     if ((!conversationIdInput && !contact_id) || !message_type) {
@@ -273,6 +278,31 @@ export async function POST(request: Request) {
         // o motor.
         coldSendOrigin: 'human',
       });
+
+      // SPEC 089 F7: a human text answer may become a candidate example (an
+      // edited AI draft, or the first reply after an AI handoff). After the
+      // response, best-effort: it never fails or delays the send.
+      if (
+        message_type === 'text' &&
+        typeof content_text === 'string' &&
+        result.messageId
+      ) {
+        const aiDraftId = typeof ai_draft_id === 'string' ? ai_draft_id : null;
+        after(async () => {
+          try {
+            await captureAfterSend(supabaseAdmin(), {
+              accountId,
+              userId: user.id,
+              conversationId: conversationId as string,
+              messageId: result.messageId,
+              finalText: content_text,
+              aiDraftId,
+            });
+          } catch (captureErr) {
+            console.error('[whatsapp/send] ai capture skipped:', captureErr);
+          }
+        });
+      }
 
       return NextResponse.json({
         success: true,

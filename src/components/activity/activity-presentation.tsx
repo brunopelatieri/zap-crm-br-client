@@ -16,6 +16,7 @@ import { useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   Briefcase,
+  Bot,
   ClipboardList,
   CreditCard,
   Download,
@@ -62,6 +63,7 @@ export const KIND_THEME: Record<ActivityResourceType, KindTheme> = {
   tag: { icon: TagIcon, badge: 'bg-pink-500/10 text-pink-400' },
   webhook: { icon: Webhook, badge: 'bg-orange-500/10 text-orange-400' },
   form: { icon: ClipboardList, badge: 'bg-lime-500/10 text-lime-400' },
+  ai: { icon: Bot, badge: 'bg-fuchsia-500/10 text-fuchsia-400' },
 };
 
 const KNOWN_ROLES = new Set(['owner', 'admin', 'agent', 'viewer']);
@@ -115,6 +117,10 @@ export function actorLabel(
   // do banco.
   if (entry.actorKind === 'system' && entry.actorName === 'platform') {
     return t('actors.platform');
+  }
+  // SPEC 089 F5: o agente de IA grava `system`/`ai-agent`.
+  if (entry.actorKind === 'system' && entry.actorName === 'ai-agent') {
+    return t('actors.ai');
   }
   const frozen = entry.actorName?.trim();
   if (frozen) return frozen;

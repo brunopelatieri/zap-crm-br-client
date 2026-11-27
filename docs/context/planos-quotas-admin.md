@@ -32,7 +32,7 @@
 
 ## Quotas de uso por trigger (referência)
 
-Metadados do contador e do erro `QUOTA_EXCEEDED:<métrica>:<usado>:<limite>` em `src/lib/plans/errors.ts`. Quotas com trigger própria: `contacts` (067), `forms`, `form_responses_month` e `form_upload_mb` (098) e **`knowledge_documents`** (103, SPEC 089 D-20: documentos da base de conhecimento da IA; ausente = ilimitado; `AFTER INSERT OR DELETE` em `ai_knowledge_documents`, recontada por `recount_account_usage`). Métrica nova de uso = trigger + `USAGE_QUOTA_KEYS` + `usedByKey` em `account-plan.ts` + rótulo `Plan.quotaLabel.*` nos dois dicionários.
+Metadados do contador e do erro `QUOTA_EXCEEDED:<métrica>:<usado>:<limite>` em `src/lib/plans/errors.ts`. Quotas com trigger própria: `contacts` (067), `forms`, `form_responses_month` e `form_upload_mb` (098) e **`knowledge_documents`** (103, SPEC 089 D-20: documentos da base de conhecimento da IA; ausente = ilimitado; `AFTER INSERT OR DELETE` em `ai_knowledge_documents`, recontada por `recount_account_usage`) e **`ai_tool_calls_month`** (106, SPEC 089 F5: chamadas de ferramenta do agente no mês; contador `ai_tool_calls:YYYY-MM` em America/Sao_Paulo; decidida **dentro de `claim_ai_tool_call`**, que incrementa só se há vaga; ausente = ilimitado; não é recontada, como `form_responses_month`). Métrica nova de uso = trigger + `USAGE_QUOTA_KEYS` + `usedByKey` em `account-plan.ts` + rótulo `Plan.quotaLabel.*` nos dois dicionários.
 
 ## Exclusão da conta pelo titular (PRD 072 / SPEC 073)
 

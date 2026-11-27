@@ -221,11 +221,15 @@ export function AiKnowledgeSearch() {
                             : ''}
                         </span>
                       </div>
-                      {hit.heading && hit.heading !== hit.title && (
-                        <p className="text-muted-foreground text-xs">
-                          {hit.heading}
-                        </p>
-                      )}
+                      {/* The excerpt text already opens with its heading
+                          (D-12), so only show it when it does not. */}
+                      {hit.heading &&
+                        hit.heading !== hit.title &&
+                        !hit.content.startsWith(hit.heading) && (
+                          <p className="text-muted-foreground text-xs">
+                            {hit.heading}
+                          </p>
+                        )}
                       <p className="text-foreground/90 text-xs whitespace-pre-wrap">
                         {open || !long
                           ? hit.content

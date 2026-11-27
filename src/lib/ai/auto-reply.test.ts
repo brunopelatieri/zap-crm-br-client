@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { AiConfig } from './types';
+import { AiError, type AiConfig } from './types';
 
 // Shared, hoisted mock state so the module mocks can close over it.
 const h = vi.hoisted(() => ({
@@ -32,6 +32,10 @@ const h = vi.hoisted(() => ({
     channelType: null as string | null,
     /** SPEC 062 §4.3 ponto 5 — conta bloqueada não auto-responde. */
     accountBlockedAt: null as string | null,
+    /** Linhas gravadas em `ai_usage_log` (uso, inclusive o parcial). */
+    usageInserts: [] as Record<string, unknown>[],
+    /** Ordem dos eventos do turno (a vaga vem antes do laço, D-17). */
+    order: [] as string[],
   },
 }));
 
@@ -60,6 +64,14 @@ vi.mock('./admin-client', () => ({
             }),
         };
         return chain;
+      }
+      if (table === 'ai_usage_log') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            h.state.usageInserts.push(row);
+            return Promise.resolve({ error: null });
+          },
+        };
       }
       if (table === 'automations') {
         // .select().eq().eq().in().limit() → active auto-responders
@@ -119,13 +131,39 @@ vi.mock('./admin-client', () => ({
       return {
         ...chain,
         update: (payload: Record<string, unknown>) => {
-          h.state.updatePayload = payload;
-          return { eq: () => Promise.resolve({ error: null }) };
+          // Handoff writes in two steps since SPEC 089 F8 (pause + summary,
+          // then the assignee only if the thread is still unowned): the
+          // payloads are merged so a test sees the end state.
+          const assignOnlyIfFree = 'assigned_agent_id' in payload;
+          const apply = () => {
+            if (assignOnlyIfFree && h.state.conv?.assigned_agent_id) return;
+            h.state.updatePayload = {
+              ...(h.state.updatePayload ?? {}),
+              ...payload,
+            };
+          };
+          const done = Promise.resolve({ error: null });
+          return {
+            eq: () => ({
+              is: () => {
+                apply();
+                return done;
+              },
+              then: (
+                ok: (v: { error: null }) => unknown,
+                ko?: (e: unknown) => unknown
+              ) => {
+                apply();
+                return done.then(ok, ko);
+              },
+            }),
+          };
         },
       };
     },
     rpc: (name: string, args: unknown) => {
       h.state.rpcCalls.push({ name, args });
+      h.state.order.push(`rpc:${name}`);
       return Promise.resolve({ data: h.state.claim, error: null });
     },
   }),
@@ -166,6 +204,8 @@ beforeEach(() => {
   h.state.claim = true;
   h.state.updatePayload = null;
   h.state.rpcCalls = [];
+  h.state.usageInserts = [];
+  h.state.order = [];
   // Por padrão o agente de handoff configurado É elegível — os testes
   // que exercitam o caminho inverso sobrescrevem isto.
   h.state.eligibleProfile = { user_id: 'agent-7' };
@@ -244,6 +284,256 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     const systemPrompt = h.generateReply.mock.calls[0][0]
       .systemPrompt as string;
     expect(systemPrompt).toContain('Returns accepted within 30 days.');
+  });
+
+  // SPEC 089 F4: tools off by default — generateReply gets no tools, so
+  // the existing behaviour (one model call) is untouched.
+  it('passes no tools when the account has none on', async () => {
+    await dispatchInboundToAiReply(ARGS);
+    const args = h.generateReply.mock.calls[0][0];
+    expect(args.tools).toEqual([]);
+    expect(args.toolContext).toBeNull();
+  });
+
+  it('with tools on, binds them to the contact of the conversation row (not the webhook payload); a write tool is offered in the live auto-reply (F5)', async () => {
+    h.loadAiConfig.mockResolvedValue(
+      aiConfig({
+        toolsConfig: {
+          get_contact_profile: { enabled: true },
+          add_contact_tags: { enabled: true, tagIds: [] },
+        },
+      })
+    );
+    h.state.conv = {
+      ...h.state.conv,
+      id: 'conv-1',
+      account_id: 'acct-1',
+      contact_id: 'contact-from-row',
+    };
+    await dispatchInboundToAiReply({
+      ...ARGS,
+      contactId: 'contact-from-payload',
+    });
+    const args = h.generateReply.mock.calls[0][0];
+    expect(args.tools.map((t: { key: string }) => t.key)).toEqual([
+      'get_contact_profile',
+      'add_contact_tags',
+    ]);
+    expect(args.toolContext).toMatchObject({
+      accountId: 'acct-1',
+      conversationId: 'conv-1',
+      contactId: 'contact-from-row',
+      mode: 'auto_reply',
+    });
+    expect(h.engineSendText).toHaveBeenCalled();
+  });
+
+  // SPEC 089 D-17: with tools on the slot is claimed BEFORE the agent loop.
+  describe('reply slot and the agent loop (SPEC 089 D-17)', () => {
+    const withTools = () => {
+      h.loadAiConfig.mockResolvedValue(
+        aiConfig({
+          toolsConfig: { add_contact_tags: { enabled: true, tagIds: [] } },
+        })
+      );
+      // The tools are bound to the conversation row (buildToolContext).
+      h.state.conv = {
+        ...h.state.conv,
+        id: 'conv-1',
+        account_id: 'acct-1',
+        contact_id: 'contact-1',
+      };
+    };
+    const genOrdered = (result: Record<string, unknown>) =>
+      h.generateReply.mockImplementation(async () => {
+        h.state.order.push('generate');
+        return result;
+      });
+
+    it('with tools: claims the slot, THEN runs the loop, then sends', async () => {
+      withTools();
+      genOrdered({ text: 'Done!', handoff: false });
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.state.order).toEqual(['rpc:claim_ai_reply_slot', 'generate']);
+      // One claim only: the slot is not claimed a second time after the loop.
+      expect(
+        h.state.rpcCalls.filter((c) => c.name === 'claim_ai_reply_slot')
+      ).toHaveLength(1);
+      expect(h.engineSendText).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'Done!' })
+      );
+    });
+
+    it('with tools: losing the claim race means the loop (and its writes) never runs', async () => {
+      withTools();
+      h.state.claim = false;
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.generateReply).not.toHaveBeenCalled();
+      expect(h.engineSendText).not.toHaveBeenCalled();
+    });
+
+    it('without tools (regression): the claim stays AFTER generation', async () => {
+      genOrdered({ text: 'Hello!', handoff: false });
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.state.order).toEqual(['generate', 'rpc:claim_ai_reply_slot']);
+    });
+
+    it('with tools: a turn that ends in a handoff keeps the slot spent', async () => {
+      withTools();
+      genOrdered({ text: '', handoff: true });
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.state.order).toEqual(['rpc:claim_ai_reply_slot', 'generate']);
+      expect(h.engineSendText).not.toHaveBeenCalled();
+      expect(h.state.updatePayload).toMatchObject({
+        ai_autoreply_disabled: true,
+      });
+    });
+
+    it('handoff_to_human: the summary carries the model reason and nothing is sent', async () => {
+      withTools();
+      h.generateReply.mockResolvedValue({
+        text: '',
+        handoff: true,
+        stopReason: 'handoff',
+        handoffRequest: {
+          reason: 'Customer wants to negotiate a discount',
+          summary: 'Asked for 15% off on the Pro plan.',
+        },
+      });
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.engineSendText).not.toHaveBeenCalled();
+      expect(h.state.updatePayload?.ai_handoff_summary).toContain(
+        'Customer wants to negotiate a discount'
+      );
+      expect(h.state.updatePayload?.ai_handoff_summary).toContain(
+        'Asked for 15% off on the Pro plan.'
+      );
+    });
+
+    it('a turn that throws midway still records what it spent', async () => {
+      withTools();
+      const err = new AiError('too slow', { code: 'agent_timeout' });
+      err.partial = {
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        steps: 2,
+        toolCalls: [
+          {
+            step: 1,
+            name: 'add_contact_tags',
+            arguments: {},
+            status: 'ok',
+            durationMs: 3,
+          },
+        ],
+      };
+      h.generateReply.mockRejectedValue(err);
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.engineSendText).not.toHaveBeenCalled();
+      expect(h.state.usageInserts).toHaveLength(1);
+      expect(h.state.usageInserts[0]).toMatchObject({
+        account_id: 'acct-1',
+        total_tokens: 15,
+        steps: 2,
+        tool_calls: 1,
+      });
+      // A write landed: the thread goes to a human, it is not left silent.
+      expect(h.state.updatePayload).toMatchObject({
+        ai_autoreply_disabled: true,
+      });
+    });
+
+    const failing = (
+      calls: {
+        name: string;
+        status: 'ok' | 'error';
+        error?: string;
+        risk?: 'read' | 'write';
+        outcomeUnknown?: true;
+      }[]
+    ) => {
+      const err = new AiError('provider down', { code: 'provider_error' });
+      err.partial = {
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        steps: 1,
+        toolCalls: calls.map((c) => ({
+          step: 1,
+          arguments: {},
+          durationMs: 1,
+          ...c,
+        })),
+      };
+      return err;
+    };
+
+    it('an error after a timed-out WRITE (it may still land) also hands off', async () => {
+      withTools();
+      h.generateReply.mockRejectedValue(
+        failing([
+          { name: 'add_internal_note', status: 'error', error: 'tool_timeout' },
+        ])
+      );
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.state.updatePayload).toMatchObject({
+        ai_autoreply_disabled: true,
+      });
+      expect(h.engineSendText).not.toHaveBeenCalled();
+    });
+
+    // SPEC 089 F8: `getTool` only knows the built-in catalog, so an account
+    // HTTP tool that wrote was not seen and the thread stayed silent.
+    it('an error after an account HTTP WRITE (risk from the trace) also hands off', async () => {
+      withTools();
+      h.generateReply.mockRejectedValue(
+        failing([
+          {
+            name: 'abrir_chamado',
+            status: 'error',
+            error: 'http_5xx',
+            risk: 'write',
+            outcomeUnknown: true,
+          },
+        ])
+      );
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.state.updatePayload).toMatchObject({
+        ai_autoreply_disabled: true,
+      });
+      expect(h.engineSendText).not.toHaveBeenCalled();
+    });
+
+    it('an error after only READS or refused writes stays as before: no handoff, no send', async () => {
+      withTools();
+      h.generateReply.mockRejectedValue(
+        failing([
+          { name: 'get_contact_profile', status: 'ok' },
+          {
+            name: 'add_contact_tags',
+            status: 'error',
+            error: 'tag_not_allowed',
+          },
+        ])
+      );
+      await dispatchInboundToAiReply(ARGS);
+      expect(h.state.updatePayload).toBeNull();
+      expect(h.engineSendText).not.toHaveBeenCalled();
+      // The spend is still recorded.
+      expect(h.state.usageInserts).toHaveLength(1);
+    });
+  });
+
+  it('a tool turn that hit the step limit is handed off, not sent', async () => {
+    h.generateReply.mockResolvedValue({
+      text: '',
+      handoff: true,
+      stopReason: 'step_limit',
+      steps: 4,
+      toolCalls: [],
+    });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.engineSendText).not.toHaveBeenCalled();
+    expect(h.state.updatePayload).toMatchObject({
+      ai_autoreply_disabled: true,
+    });
   });
 
   // SPEC 049 §5.6 — the prompt must not promise a UI the channel can't
@@ -353,6 +643,62 @@ describe('dispatchInboundToAiReply — handoff', () => {
     );
     // No handoff target configured → conversation left unassigned.
     expect(h.state.updatePayload).not.toHaveProperty('assigned_agent_id');
+  });
+
+  // SPEC 089 F8 — eligibility was read once, before a turn of up to 60 s.
+  it('does not send when a human took the thread while the turn ran', async () => {
+    h.generateReply.mockImplementation(async () => {
+      h.state.conv = { ...h.state.conv, assigned_agent_id: 'human-1' };
+      return { text: 'Hello!', handoff: false };
+    });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.engineSendText).not.toHaveBeenCalled();
+  });
+
+  it('does not send when a concurrent turn handed the thread off', async () => {
+    h.generateReply.mockImplementation(async () => {
+      h.state.conv = { ...h.state.conv, ai_autoreply_disabled: true };
+      return { text: 'Hello!', handoff: false };
+    });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.engineSendText).not.toHaveBeenCalled();
+  });
+
+  it('a handoff never overwrites a human who took the thread during the turn', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ handoffAgentId: 'agent-7' }));
+    h.generateReply.mockImplementation(async () => {
+      h.state.conv = { ...h.state.conv, assigned_agent_id: 'human-1' };
+      return { text: '', handoff: true };
+    });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.state.updatePayload).toMatchObject({
+      ai_autoreply_disabled: true,
+    });
+    expect(h.state.updatePayload).not.toHaveProperty('assigned_agent_id');
+  });
+
+  it('holds a reply with a link the business never wrote and hands off', async () => {
+    h.generateReply.mockResolvedValue({
+      text: 'Confirme aqui: https://evil.example/?e=maria@x.com',
+      handoff: false,
+    });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.engineSendText).not.toHaveBeenCalled();
+    expect(h.state.updatePayload).toMatchObject({
+      ai_autoreply_disabled: true,
+    });
+  });
+
+  it('sends a reply whose link is in the business instructions', async () => {
+    h.loadAiConfig.mockResolvedValue(
+      aiConfig({ systemPrompt: 'Catálogo: https://loja.example/catalogo' })
+    );
+    h.generateReply.mockResolvedValue({
+      text: 'Veja https://loja.example/catalogo/',
+      handoff: false,
+    });
+    await dispatchInboundToAiReply(ARGS);
+    expect(h.engineSendText).toHaveBeenCalled();
   });
 
   it('routes to the configured handoff agent on handoff', async () => {

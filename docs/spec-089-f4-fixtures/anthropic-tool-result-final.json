@@ -1,0 +1,136 @@
+{
+  "captured_at": "2026-11-27",
+  "source": "Anthropic, chamada real (SPEC 089 F4, scripts/capture-tool-fixtures.mjs)",
+  "note": "Segundo passo: assistant com tool_use + uma mensagem user com os tool_result; resposta final em texto.",
+  "endpoint": "/v1/messages",
+  "method": "POST",
+  "request": {
+    "model": "claude-haiku-5-5",
+    "max_tokens": 400,
+    "system": "Você é a atendente virtual da Loja Exemplo no WhatsApp. Responda em português do Brasil, curto e cordial. Use as ferramentas para consultar fatos antes de responder.",
+    "tools": [
+      {
+        "name": "search_knowledge",
+        "description": "Search the business knowledge base for facts about prices, policies and opening hours. Use it before answering any factual question.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query in Portuguese"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "add_contact_tags",
+        "description": "Add tags to the contact of the current conversation.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "tags"
+          ]
+        }
+      }
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "Oi! Quanto custa o plano Avançado e qual o prazo para devolução?"
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "toolu_01Avh4vVJpi1z5kww7bE98ST",
+            "name": "search_knowledge",
+            "input": {
+              "query": "preço plano Avançado"
+            },
+            "caller": {
+              "type": "direct"
+            }
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01PgSV53qs6kbD8MUDDww1ou",
+            "name": "search_knowledge",
+            "input": {
+              "query": "prazo para devolução"
+            },
+            "caller": {
+              "type": "direct"
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01Avh4vVJpi1z5kww7bE98ST",
+            "content": "<resultado_ferramenta>Plano Avançado: R$ 129,00 por mês. Inclui suporte via WhatsApp.</resultado_ferramenta>"
+          },
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01PgSV53qs6kbD8MUDDww1ou",
+            "content": "<resultado_ferramenta>O prazo para devolução é de 7 dias corridos após o recebimento. Reembolso via PIX em até 5 dias úteis.</resultado_ferramenta>"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "request-id": "req_011ChSwdoeN6zfrQmuiEiRZb"
+    },
+    "body": {
+      "model": "claude-haiku-5-5",
+      "id": "msg_011ChSwdon3abooCf4NbhkoZ",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Oi! Tudo bem? 😊\n\n- **Plano Avançado:** R$ 129,00 por mês, com suporte via WhatsApp incluso.\n- **Devolução:** você tem 7 dias corridos após o recebimento. O reembolso é feito via PIX em até 5 dias úteis.\n\nPosso ajudar em mais alguma coisa?"
+        }
+      ],
+      "container": null,
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 889,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 123,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "service_tier": "standard",
+        "inference_geo": "global",
+        "speed": "standard"
+      },
+      "diagnostics": null
+    }
+  }
+}

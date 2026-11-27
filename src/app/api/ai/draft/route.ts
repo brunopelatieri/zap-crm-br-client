@@ -9,17 +9,21 @@ import {
 import { loadAiConfig } from '@/lib/ai/config';
 import { buildConversationContext } from '@/lib/ai/context';
 import { composeAgentTurn } from '@/lib/ai/compose';
-import { documentIdsOf } from '@/lib/ai/sources';
+import { documentIdsOf, toolUsageOf, turnSources } from '@/lib/ai/sources';
 import { generateReply } from '@/lib/ai/generate';
 import { logAiUsage } from '@/lib/ai/usage';
+import { registerDraft } from '@/lib/ai/tuning/capture';
 import { supabaseAdmin } from '@/lib/ai/admin-client';
-import { AiError } from '@/lib/ai/types';
+import { AiError, partialOf } from '@/lib/ai/types';
 
 /**
  * POST /api/ai/draft  (agent+)
  *
  * Body: { conversation_id }
- * Returns: { draft } — a suggested reply for the agent to edit + send.
+ * Returns: { draft, draft_id? } — a suggested reply for the agent to edit +
+ * send. `draft_id` links the draft to the message that is sent (the composer
+ * sends it back as `ai_draft_id`), so an edit becomes a candidate example
+ * (SPEC 089 F7).
  *
  * Uses the account's configured provider/key (BYO). Read-only: it never
  * sends or stores anything, just hands text back to the composer.
@@ -114,11 +118,40 @@ export async function POST(request: Request) {
       conversationId,
     });
 
-    const { text, usage } = await generateReply({
-      config,
-      systemPrompt: turn.systemPrompt,
-      messages: turn.messages,
-    });
+    // D-18: the draft only ever gets read tools (compose.ts narrows them).
+    let result: Awaited<ReturnType<typeof generateReply>>;
+    try {
+      result = await generateReply({
+        config,
+        systemPrompt: turn.systemPrompt,
+        messages: turn.messages,
+        tools: turn.tools,
+        toolContext: turn.toolContext,
+        fallbackSystemPrompt: turn.fallbackSystemPrompt,
+      });
+    } catch (genErr) {
+      // A tool turn that fails midway has already spent tokens: record them
+      // (best effort, like the success path) before the error is answered.
+      const partial = partialOf(genErr);
+      if (partial) {
+        try {
+          void logAiUsage(supabaseAdmin(), {
+            accountId,
+            conversationId,
+            mode: 'draft',
+            provider: config.provider,
+            model: config.model,
+            usage: partial.usage,
+            steps: partial.steps,
+            toolCalls: partial.toolCalls.length,
+          });
+        } catch (logErr) {
+          console.error('[ai/draft] partial usage log skipped:', logErr);
+        }
+      }
+      throw genErr;
+    }
+    const { text, usage } = result;
 
     // Record spend on the account's BYO key. Best-effort + via the
     // service role (the log has no `authenticated` INSERT policy). This
@@ -135,13 +168,46 @@ export async function POST(request: Request) {
         provider: config.provider,
         model: config.model,
         usage,
-        knowledgeDocumentIds: documentIdsOf(turn.sources),
+        knowledgeDocumentIds: documentIdsOf(
+          turnSources(turn.sources, result.toolSources)
+        ),
+        ...toolUsageOf(result),
       });
     } catch (logErr) {
       console.error('[ai/draft] usage log skipped:', logErr);
     }
 
-    return NextResponse.json({ draft: text });
+    // A tool turn can end without text (4 steps used): nothing to suggest.
+    if (!text) {
+      return NextResponse.json(
+        {
+          error: 'The assistant could not produce a draft.',
+          code: 'empty_response',
+        },
+        { status: 502 }
+      );
+    }
+
+    // SPEC 089 F7: remember the (masked) draft so the send can tell whether
+    // the attendant edited it. Best-effort: without the id the draft is still
+    // served, it just cannot be linked to the message that goes out.
+    let draftId: string | null = null;
+    try {
+      draftId = await registerDraft(supabaseAdmin(), {
+        accountId,
+        conversationId,
+        userId,
+        messages,
+        draftText: text,
+      });
+    } catch (regErr) {
+      console.error('[ai/draft] draft register skipped:', regErr);
+    }
+
+    return NextResponse.json({
+      draft: text,
+      ...(draftId ? { draft_id: draftId } : {}),
+    });
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

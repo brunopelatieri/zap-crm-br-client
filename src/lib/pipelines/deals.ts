@@ -73,6 +73,12 @@ export interface CreateDealInput {
   currency: string;
   assignedTo?: string | null;
   /**
+   * SPEC 089 F8 (migração 110): só o agente de IA preenche. Um índice único
+   * parcial impede dois negócios ABERTOS com a mesma chave na conta; negócio
+   * criado por humano fica sem chave e não é afetado.
+   */
+  aiDedupeKey?: string;
+  /**
    * Fora do escopo do modal do Inbox (SPEC de integração Kanban §1.3)
    * — só o formulário completo de `/pipelines` os expõe. Opcionais
    * aqui para que `deal-form.tsx` possa reusar este helper sem perder
@@ -107,6 +113,7 @@ export async function createDeal(
       notes: input.notes || null,
       expected_close_date: input.expectedCloseDate || null,
       status: 'open',
+      ...(input.aiDedupeKey ? { ai_dedupe_key: input.aiDedupeKey } : {}),
     })
     .select('*, stage:pipeline_stages(*)')
     .single();

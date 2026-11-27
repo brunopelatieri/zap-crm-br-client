@@ -1,4 +1,10 @@
-import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
+import {
+  safeRequest,
+  SafeRequestError,
+  type SafeRequestDeps,
+  type SafeRequestInput,
+  type SafeResponse,
+} from '@/lib/http/safe-request';
 
 import { IngestError } from './errors';
 import { htmlToText } from './html-to-text';
@@ -11,19 +17,21 @@ import {
 
 // ============================================================
 // Importar URL (SPEC 089 D-8). O servidor faz a requisição a um endereço
-// que o usuário digitou: é um primitivo de SSRF, então:
+// que o usuário digitou: é um primitivo de SSRF, então a requisição sai pelo
+// MESMO transporte da ferramenta HTTP (`safeRequest`, `src/lib/http/`):
 //
-//   - só http/https, sem usuário e senha na URL;
-//   - `isDeliverableUrl` ANTES de cada requisição (resolve o host e recusa
-//     loopback, rede privada, link-local, metadados de nuvem…);
-//   - `redirect: 'manual'`: um 3xx nunca é seguido pelo `fetch`. Seguimos
+//   - só http/https, sem usuário e senha na URL, só as portas 80, 443, 8080
+//     e 8443;
+//   - `isDeliverableUrl` antes (recusa clara, sem abrir socket) e, o que
+//     fecha o DNS rebinding, o endereço é validado NA CONEXÃO: o socket só
+//     conecta ao IP que passou pela checagem (um nome que responde IP público
+//     e depois 127.0.0.1 não alcança serviço interno);
+//   - `redirect: 'return'`: um 3xx nunca é seguido pelo transporte. Seguimos
 //     à mão, no máximo `MAX_URL_REDIRECTS` saltos, e CADA salto passa de
-//     novo pela guarda (senão uma página pública redirecionaria para
+//     novo por toda a guarda (senão uma página pública redirecionaria para
 //     `http://169.254.169.254/`);
-//   - prazo de 10 s no total, só `text/html` e `text/plain`, corpo
-//     lido em fluxo e cortado em 2 MB.
-//
-// Risco residual (documentado em `webhooks/ssrf.ts`): DNS rebinding.
+//   - prazo de 10 s no total (resolução de nome incluída), só `text/html` e
+//     `text/plain`, corpo lido em fluxo e cortado em 2 MB.
 // ============================================================
 
 export interface ExtractedText {
@@ -39,7 +47,11 @@ export interface UrlExtraction extends ExtractedText {
 
 const USER_AGENT = 'ZapCRM-KnowledgeImporter/1.0';
 
-type FetchFn = typeof fetch;
+/** O transporte; `safeRequest` em produção, um dublê nos testes. */
+export type UrlRequestFn = (
+  input: SafeRequestInput,
+  deps?: SafeRequestDeps
+) => Promise<SafeResponse>;
 
 function parseHttpUrl(raw: string): URL {
   let url: URL;
@@ -63,37 +75,6 @@ function parseHttpUrl(raw: string): URL {
   return url;
 }
 
-/** Lê o corpo em fluxo e para (erro) quando passa de `max` bytes. */
-async function readCapped(res: Response, max: number): Promise<Uint8Array> {
-  const declared = Number(res.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > max) {
-    await res.body?.cancel().catch(() => {});
-    throw new IngestError('url_too_large', 'The page is larger than 2 MB.');
-  }
-  if (!res.body) return new Uint8Array();
-
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel().catch(() => {});
-      throw new IngestError('url_too_large', 'The page is larger than 2 MB.');
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.byteLength;
-  }
-  return out;
-}
-
 function decodeBody(bytes: Uint8Array, contentType: string): string {
   let charset =
     /charset=["']?([\w-]+)/i.exec(contentType)?.[1]?.toLowerCase() ?? '';
@@ -110,60 +91,83 @@ function decodeBody(bytes: Uint8Array, contentType: string): string {
   }
 }
 
+const TIMEOUT_MESSAGE = 'The page took more than 10 seconds to respond.';
+
+/** Erro do transporte → erro de ingestão (código estável, sem corpo nem URL). */
+function mapTransportError(err: unknown): IngestError {
+  if (err instanceof SafeRequestError) {
+    switch (err.code) {
+      case 'blocked_url':
+      case 'blocked_port':
+        return new IngestError(
+          'url_blocked',
+          'This address is not allowed (internal, private or unresolvable host).'
+        );
+      case 'invalid_url':
+        return new IngestError('invalid_url', 'The URL is not valid.');
+      case 'timeout':
+        return new IngestError('url_timeout', TIMEOUT_MESSAGE);
+      case 'response_too_large':
+        return new IngestError(
+          'url_too_large',
+          'The page is larger than 2 MB.'
+        );
+      case 'unsupported_content_type':
+        return new IngestError(
+          'url_unsupported_content_type',
+          'Only HTML and plain-text pages can be imported.'
+        );
+      default:
+        return new IngestError('url_unreachable', 'Could not reach the page.');
+    }
+  }
+  return new IngestError('url_unreachable', 'Could not reach the page.');
+}
+
 /**
  * Baixa a página e devolve o texto principal. Lança `IngestError`.
- * `fetchFn` existe para teste; produção usa o `fetch` global.
+ * `request` existe para teste; produção usa `safeRequest`.
  */
 export async function extractUrlText(
   rawUrl: string,
-  fetchFn: FetchFn = fetch
+  request: UrlRequestFn = safeRequest
 ): Promise<UrlExtraction> {
   let url = parseHttpUrl(rawUrl);
-  const deadline = AbortSignal.timeout(URL_FETCH_TIMEOUT_MS);
+  const startedAt = Date.now();
 
   for (let hop = 0; hop <= MAX_URL_REDIRECTS; hop++) {
-    if (!(await isDeliverableUrl(url.toString()))) {
-      throw new IngestError(
-        'url_blocked',
-        'This address is not allowed (internal, private or unresolvable host).'
-      );
-    }
+    // Um prazo só para todos os saltos.
+    const remaining = URL_FETCH_TIMEOUT_MS - (Date.now() - startedAt);
+    if (remaining <= 0) throw new IngestError('url_timeout', TIMEOUT_MESSAGE);
 
-    let res: Response;
+    let res: SafeResponse;
     try {
-      res = await fetchFn(url.toString(), {
+      res = await request({
+        url: url.toString(),
         method: 'GET',
-        redirect: 'manual',
-        signal: deadline,
         headers: {
           Accept: 'text/html,text/plain;q=0.9',
           'User-Agent': USER_AGENT,
         },
+        timeoutMs: remaining,
+        maxBytes: MAX_URL_BODY_BYTES,
+        allowHttp: true,
+        acceptContentTypes: ['text/html', 'text/plain'],
+        redirect: 'return',
       });
     } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.name === 'TimeoutError' || err.name === 'AbortError')
-      ) {
-        throw new IngestError(
-          'url_timeout',
-          'The page took more than 10 seconds to respond.'
-        );
-      }
-      throw new IngestError('url_unreachable', 'Could not reach the page.');
+      throw mapTransportError(err);
     }
 
     if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      await res.body?.cancel().catch(() => {});
-      if (!location) {
+      if (!res.location) {
         throw new IngestError(
           'url_bad_status',
           `The page answered ${res.status} without a destination.`
         );
       }
       try {
-        url = parseHttpUrl(new URL(location, url).toString());
+        url = parseHttpUrl(new URL(res.location, url).toString());
       } catch {
         throw new IngestError(
           'url_blocked',
@@ -173,41 +177,16 @@ export async function extractUrlText(
       continue;
     }
 
-    if (!res.ok) {
-      await res.body?.cancel().catch(() => {});
+    if (res.status < 200 || res.status >= 300) {
       throw new IngestError(
         'url_bad_status',
         `The page answered ${res.status}.`
       );
     }
 
-    const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+    const contentType = res.contentType.toLowerCase();
     const isHtml = contentType.startsWith('text/html');
-    const isPlain = contentType.startsWith('text/plain');
-    if (!isHtml && !isPlain) {
-      await res.body?.cancel().catch(() => {});
-      throw new IngestError(
-        'url_unsupported_content_type',
-        'Only HTML and plain-text pages can be imported.'
-      );
-    }
-
-    let bytes: Uint8Array;
-    try {
-      bytes = await readCapped(res, MAX_URL_BODY_BYTES);
-    } catch (err) {
-      if (err instanceof IngestError) throw err;
-      if (
-        err instanceof Error &&
-        (err.name === 'TimeoutError' || err.name === 'AbortError')
-      ) {
-        throw new IngestError(
-          'url_timeout',
-          'The page took more than 10 seconds to respond.'
-        );
-      }
-      throw new IngestError('url_unreachable', 'Could not read the page.');
-    }
+    const bytes = new Uint8Array(res.buffer ?? Buffer.from(res.body, 'utf8'));
 
     const raw = decodeBody(bytes, contentType);
     const { title, text } = isHtml

@@ -2,15 +2,24 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Bot, Sparkles, Settings2, BarChart3 } from 'lucide-react';
+import {
+  Bot,
+  Sparkles,
+  Settings2,
+  BarChart3,
+  Wrench,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
+import { AiTools } from '@/components/agents/ai-tools';
+import { AiTuning } from '@/components/agents/ai-tuning';
 import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AiConfig } from '@/components/settings/ai-config';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
-type Tab = 'playground' | 'setup' | 'usage';
+type Tab = 'playground' | 'setup' | 'tools' | 'tuning' | 'usage';
 
 export default function AgentsPage() {
   const t = useTranslations('Agents.page');
@@ -73,6 +82,17 @@ export default function AgentsPage() {
               <Settings2 className="mr-1.5 h-4 w-4" /> {t('tabSetup')}
             </TabsTrigger>
             {canViewUsage && (
+              <TabsTrigger value="tools">
+                <Wrench className="mr-1.5 h-4 w-4" /> {t('tabTools')}
+              </TabsTrigger>
+            )}
+            {canViewUsage && (
+              <TabsTrigger value="tuning">
+                <SlidersHorizontal className="mr-1.5 h-4 w-4" />{' '}
+                {t('tabTuning')}
+              </TabsTrigger>
+            )}
+            {canViewUsage && (
               <TabsTrigger value="usage">
                 <BarChart3 className="mr-1.5 h-4 w-4" /> {t('tabUsage')}
               </TabsTrigger>
@@ -86,6 +106,21 @@ export default function AgentsPage() {
           <TabsContent value="setup" className="mt-4">
             <AiConfig />
           </TabsContent>
+
+          {canViewUsage && (
+            <TabsContent value="tools" className="mt-4">
+              <AiTools
+                onGoToSetup={() => setTab('setup')}
+                onGoToPlayground={() => setTab('playground')}
+              />
+            </TabsContent>
+          )}
+
+          {canViewUsage && (
+            <TabsContent value="tuning" className="mt-4">
+              <AiTuning />
+            </TabsContent>
+          )}
 
           {canViewUsage && (
             <TabsContent value="usage" className="mt-4">

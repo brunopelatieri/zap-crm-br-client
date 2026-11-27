@@ -32,6 +32,10 @@ export const USAGE_QUOTA_KEYS = [
   // por conta, contador `knowledge_documents` em `account_usage_counters`.
   // Ausente = ilimitado.
   'knowledge_documents',
+  // Chamadas de ferramenta do agente de IA no mês (SPEC 089 F5, migração
+  // 106): contador `ai_tool_calls:YYYY-MM` (America/Sao_Paulo) decidido
+  // por `claim_ai_tool_call`. Ausente = ilimitado.
+  'ai_tool_calls_month',
 ] as const;
 
 export type UsageQuotaKey = (typeof USAGE_QUOTA_KEYS)[number];

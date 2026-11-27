@@ -168,7 +168,9 @@ interface MessageComposerProps {
   onSend: (
     text: string,
     replyToId?: string,
-    resentFromMessageId?: string
+    resentFromMessageId?: string,
+    /** SPEC 089 F7: id of the AI draft this text started as, if any. */
+    aiDraftId?: string
   ) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
   onSendInteractive: (
@@ -239,6 +241,10 @@ export function MessageComposer({
   // SPEC 074 §8 — id da mensagem apagada sendo reenviada, guardado entre
   // o "Reenviar" que semeou o rascunho e o clique em Enviar de fato.
   const [resendFromId, setResendFromId] = useState<string | null>(null);
+  // SPEC 089 F7 — id do rascunho da IA que originou o texto do composer.
+  // Vai junto no envio para o servidor saber se o atendente editou o
+  // rascunho (candidato a exemplo). Um ref: nunca re-renderiza.
+  const aiDraftIdRef = useRef<string | null>(null);
 
   // Interactive-message builder dialog + quick-reply picker.
   const [interactiveOpen, setInteractiveOpen] = useState(false);
@@ -380,7 +386,13 @@ export function MessageComposer({
 
     setSending(true);
     try {
-      onSend(trimmed, replyTo?.id, resendFromId ?? undefined);
+      onSend(
+        trimmed,
+        replyTo?.id,
+        resendFromId ?? undefined,
+        aiDraftIdRef.current ?? undefined
+      );
+      aiDraftIdRef.current = null;
       setText('');
       setResendFromId(null);
       if (textareaRef.current) {
@@ -404,6 +416,9 @@ export function MessageComposer({
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value);
+      // An emptied composer abandons the AI draft: what is typed next is not
+      // a correction of it (SPEC 089 F7).
+      if (e.target.value.trim() === '') aiDraftIdRef.current = null;
       adjustHeight();
     },
     [adjustHeight]
@@ -440,6 +455,8 @@ export function MessageComposer({
         return;
       }
       setText(draftText);
+      aiDraftIdRef.current =
+        typeof data.draft_id === 'string' ? data.draft_id : null;
       // Let the textarea grow to fit and drop the cursor at the end so
       // the agent can tweak immediately.
       requestAnimationFrame(() => {

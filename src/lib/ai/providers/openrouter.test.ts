@@ -6,7 +6,12 @@ import {
   OPENROUTER_KEY_URL,
 } from './openrouter';
 import { providerHttpError } from './shared';
-import { AiError } from '../types';
+import {
+  AiError,
+  type AgentMessage,
+  type ToolCall,
+  type ToolSpec,
+} from '../types';
 import { fixtureResponse, loadFixture } from './openrouter-fixtures';
 
 const ARGS = {
@@ -284,5 +289,221 @@ describe('validateOpenRouterKey', () => {
     fetchMock.mockResolvedValue(fixtureResponse('error-401-invalid-key.json'));
     const err = await rejection(validateOpenRouterKey('bad', 5000));
     expect(err.code).toBe('invalid_key');
+  });
+});
+
+// ------------------------------------------------------------
+// Tool calling (SPEC 089 F4). Every payload below is a REAL OpenRouter
+// capture from F0 (docs/spec-089-f0-fixtures/): nothing is invented.
+// ------------------------------------------------------------
+
+interface RealToolRequest {
+  messages: Record<string, unknown>[];
+  tool_choice?: string;
+  tools: {
+    type: 'function';
+    function: { name: string; description: string; parameters: unknown };
+  }[];
+}
+
+interface RealToolResponse {
+  choices: {
+    message: {
+      content: string | null;
+      tool_calls: { id: string; function: Record<string, string> }[];
+      reasoning_details: unknown[];
+    };
+  }[];
+  usage: { cost: number; total_tokens: number };
+}
+
+function realRequest(name: string): RealToolRequest {
+  return loadFixture(name).request as unknown as RealToolRequest;
+}
+
+function realResponse(name: string): RealToolResponse {
+  return loadFixture(name).response.body as RealToolResponse;
+}
+
+/** The tool catalog of the captures, as the neutral `ToolSpec[]`. */
+function realTools(): ToolSpec[] {
+  return realRequest('tool-calls-parallel.json').tools.map((t) => ({
+    name: t.function.name,
+    description: t.function.description,
+    parameters: t.function.parameters as ToolSpec['parameters'],
+  }));
+}
+
+const TOOL_ARGS = {
+  ...ARGS,
+  systemPrompt: realRequest('tool-calls-parallel.json').messages[0]
+    .content as string,
+  messages: [
+    {
+      role: 'user' as const,
+      content:
+        'Oi! Quanto custa o plano Avançado e qual o prazo para devolução?',
+    },
+  ],
+  tools: realTools(),
+};
+
+function realCalls(): ToolCall[] {
+  return realResponse(
+    'tool-calls-parallel.json'
+  ).choices[0].message.tool_calls.map((c) => ({
+    id: c.id,
+    name: c.function.name,
+    arguments: c.function.arguments,
+  }));
+}
+
+describe('generateOpenRouter with tools', () => {
+  it('sends tools + tool_choice auto, identical to the real captured request', async () => {
+    fetchMock.mockResolvedValue(fixtureResponse('tool-calls-parallel.json'));
+    await generateOpenRouter(TOOL_ARGS);
+
+    const real = realRequest('tool-calls-parallel.json');
+    const body = sentBody();
+    expect(body.tools).toEqual(real.tools);
+    expect(body.tool_choice).toBe(real.tool_choice);
+    expect(body.messages).toEqual(real.messages);
+  });
+
+  it('omits tools and tool_choice when tools is absent or empty', async () => {
+    // A Response body can be read once: build a fresh one per call.
+    fetchMock.mockImplementation(async () =>
+      fixtureResponse('chat-completion.json')
+    );
+    await generateOpenRouter(ARGS);
+    await generateOpenRouter({ ...ARGS, tools: [] });
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    for (const call of fetchMock.mock.calls) {
+      const body = JSON.parse(call[1].body as string);
+      expect(body).not.toHaveProperty('tools');
+      expect(body).not.toHaveProperty('tool_choice');
+    }
+  });
+
+  it('parses two parallel tool calls with null content (real capture)', async () => {
+    fetchMock.mockResolvedValue(fixtureResponse('tool-calls-parallel.json'));
+    const real = realResponse('tool-calls-parallel.json');
+
+    const out = await generateOpenRouter(TOOL_ARGS);
+
+    expect(out.text).toBe('');
+    expect(out.finishReason).toBe('tool_calls');
+    expect(out.toolCalls).toEqual(realCalls());
+    expect(out.toolCalls).toHaveLength(2);
+    expect(out.toolCalls![0].id).toMatch(/^toolu_/);
+    expect(out.usage!.totalTokens).toBe(real.usage.total_tokens);
+    expect(out.usage!.costUsd).toBe(real.usage.cost);
+    // reasoning_details is carried for the echo on the next step.
+    expect(out.providerState).toEqual({
+      reasoning_details: real.choices[0].message.reasoning_details,
+    });
+  });
+
+  it('keeps the text that comes with the tool calls (real deepseek capture)', async () => {
+    fetchMock.mockResolvedValue(
+      fixtureResponse('tool-calls-with-content.json')
+    );
+    const real = realResponse('tool-calls-with-content.json');
+
+    const out = await generateOpenRouter(TOOL_ARGS);
+
+    expect(out.text).toBe(real.choices[0].message.content);
+    expect(out.toolCalls).toHaveLength(2);
+    expect(out.toolCalls![0].id).toMatch(/^call_/);
+    expect(out.finishReason).toBe('tool_calls');
+  });
+
+  it('a final answer has no tool calls and finishReason stop (real capture)', async () => {
+    fetchMock.mockResolvedValue(
+      fixtureResponse('tool-result-final-answer.json')
+    );
+    const out = await generateOpenRouter(TOOL_ARGS);
+    expect(out.toolCalls).toEqual([]);
+    expect(out.finishReason).toBe('stop');
+    expect(out.text).toContain('R$ 129,00');
+    expect(out.providerState).toBeUndefined();
+  });
+
+  it('second step: tool turns go out exactly like the real captured request', async () => {
+    fetchMock.mockResolvedValue(
+      fixtureResponse('tool-result-final-answer.json')
+    );
+    const realReq = realRequest('tool-result-final-answer.json');
+    const toolTurns = realReq.messages.filter((m) => m.role === 'tool');
+
+    const history: AgentMessage[] = [
+      ...TOOL_ARGS.messages,
+      { role: 'assistant', content: '', toolCalls: realCalls() },
+      ...toolTurns.map((m): AgentMessage => ({
+        role: 'tool',
+        toolCallId: m.tool_call_id as string,
+        name: 'search_knowledge',
+        content: m.content as string,
+      })),
+    ];
+
+    await generateOpenRouter({ ...TOOL_ARGS, messages: history });
+
+    const body = sentBody();
+    expect(body.messages).toEqual(realReq.messages);
+    expect(body.tools).toEqual(realReq.tools);
+  });
+
+  // The echo follows the OpenRouter docs; F0 did NOT measure it (the real
+  // second-step request above carries no reasoning_details and worked).
+  it('echoes reasoning_details on the assistant tool-call turn (per the docs, NOT measured in F0)', async () => {
+    fetchMock.mockResolvedValue(
+      fixtureResponse('tool-result-final-answer.json')
+    );
+    const msg = realResponse('tool-calls-parallel.json').choices[0].message;
+    const history: AgentMessage[] = [
+      ...TOOL_ARGS.messages,
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: realCalls(),
+        providerState: { reasoning_details: msg.reasoning_details },
+      },
+      {
+        role: 'tool',
+        toolCallId: msg.tool_calls[0].id,
+        name: 'search_knowledge',
+        content: 'x',
+      },
+    ];
+
+    await generateOpenRouter({ ...TOOL_ARGS, messages: history });
+
+    const sent = (sentBody().messages as Record<string, unknown>[])[2];
+    expect(sent.role).toBe('assistant');
+    expect(sent.content).toBeNull();
+    expect(sent.reasoning_details).toEqual(msg.reasoning_details);
+  });
+
+  it('maps the real 404 "no endpoint supports tools" to tools_unsupported', async () => {
+    fetchMock.mockResolvedValue(
+      fixtureResponse('error-404-tools-unsupported.json')
+    );
+    const err = await rejection(generateOpenRouter(TOOL_ARGS));
+    expect(err.code).toBe('tools_unsupported');
+  });
+
+  it('still rejects a response with neither text nor tool calls', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: null, tool_calls: [] } }],
+        }),
+        { status: 200 }
+      )
+    );
+    expect((await rejection(generateOpenRouter(TOOL_ARGS))).code).toBe(
+      'empty_response'
+    );
   });
 });

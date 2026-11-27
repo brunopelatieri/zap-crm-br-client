@@ -22,6 +22,7 @@ import {
   bytesToMbCeil,
   monthMetricKey,
 } from '@/lib/forms/quota';
+import { aiToolCallsMetricKey } from '@/lib/ai/tools/quota';
 import { bucketStatus } from './usage';
 import {
   USAGE_QUOTA_KEYS,
@@ -175,6 +176,8 @@ async function computeUsage(
     FORM_UPLOAD_BYTES_METRIC,
     // SPEC 089 D-20: documentos da base de conhecimento (trigger da 103).
     'knowledge_documents',
+    // SPEC 089 F5: chamadas de ferramenta do agente no mês (migração 106).
+    aiToolCallsMetricKey(new Date()),
   ];
 
   const [
@@ -249,6 +252,7 @@ async function computeUsage(
       formCounterByMetric.get(FORM_UPLOAD_BYTES_METRIC) ?? 0
     ),
     knowledge_documents: formCounterByMetric.get('knowledge_documents') ?? 0,
+    ai_tool_calls_month: formCounterByMetric.get(formMetrics[4]) ?? 0,
   };
 
   // USAGE_QUOTA_KEYS, não QUOTA_KEYS: as chaves de segurança da SPEC

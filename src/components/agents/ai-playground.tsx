@@ -11,6 +11,8 @@ import {
   UserCircle2,
   ArrowRight,
   BookOpen,
+  Wrench,
+  Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -23,6 +25,39 @@ interface Turn {
   /** assistant-only: knowledge-base excerpts that grounded this turn
    *  (SPEC 089 D-14). Admin-only view; never part of the customer text. */
   sources?: PlaygroundSource[];
+  /** assistant-only: tools the agent called on this turn (SPEC 089 F4).
+   *  Writes are simulated in the playground (D-18). */
+  toolCalls?: PlaygroundToolCall[];
+  /** assistant-only: how many model steps the turn took. */
+  steps?: number;
+  /** assistant-only: the model refused tools; the turn ran without them. */
+  toolsDisabled?: boolean;
+  /** assistant-only: the agent used all its steps without replying. */
+  stepLimit?: boolean;
+}
+
+interface PlaygroundToolCall {
+  step: number;
+  name: string;
+  arguments: unknown;
+  status: 'ok' | 'error' | 'simulated';
+  error?: string;
+  durationMs: number;
+}
+
+const ARGS_MAX_CHARS = 200;
+
+/** Compact JSON for the arguments, visually cut at ~200 characters. */
+function formatArgs(args: unknown): string {
+  let json: string;
+  try {
+    json = JSON.stringify(args) ?? '';
+  } catch {
+    json = '';
+  }
+  return json.length > ARGS_MAX_CHARS
+    ? `${json.slice(0, ARGS_MAX_CHARS)}…`
+    : json;
 }
 
 interface PlaygroundSource {
@@ -69,7 +104,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
         headers: { 'Content-Type': 'application/json' },
         // Send only role+content — the server ignores anything else.
         body: JSON.stringify({
-          messages: next.map((t) => ({ role: t.role, content: t.content })),
+          messages: next.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -94,6 +129,10 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
               : '',
           handoff: Boolean(data.handoff),
           sources: Array.isArray(data.sources) ? data.sources : [],
+          toolCalls: Array.isArray(data.tool_calls) ? data.tool_calls : [],
+          steps: typeof data.steps === 'number' ? data.steps : undefined,
+          toolsDisabled: data.tools_disabled === 'unsupported',
+          stepLimit: data.stop_reason === 'step_limit',
         },
       ]);
     } catch {
@@ -199,6 +238,77 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                     </span>
                   )}
                 </div>
+              )}
+              {turn.role === 'assistant' &&
+                turn.toolCalls &&
+                turn.toolCalls.length > 0 && (
+                  <details
+                    className={cn(
+                      'text-muted-foreground group text-xs',
+                      turn.content && 'border-border/50 mt-1.5 border-t pt-1.5'
+                    )}
+                    data-testid="playground-tool-calls"
+                  >
+                    <summary className="flex cursor-pointer items-center gap-1">
+                      <Wrench className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {t('toolCalls', { count: turn.toolCalls.length })}
+                        {turn.steps !== undefined && turn.steps > 1
+                          ? ` · ${t('toolSteps', { count: turn.steps })}`
+                          : ''}
+                      </span>
+                    </summary>
+                    <ul className="mt-1 space-y-1">
+                      {turn.toolCalls.map((call, j) => (
+                        <li key={j} className="break-words">
+                          <span className="text-foreground font-mono">
+                            {call.name}
+                          </span>{' '}
+                          <span className="font-mono">
+                            {formatArgs(call.arguments)}
+                          </span>{' '}
+                          <span
+                            className={cn(
+                              call.status === 'error' && 'text-destructive',
+                              call.status === 'simulated' && 'text-amber-500'
+                            )}
+                          >
+                            {call.status === 'ok' && t('toolStatusOk')}
+                            {call.status === 'error' &&
+                              t('toolStatusError', {
+                                code: call.error ?? 'unknown',
+                              })}
+                            {call.status === 'simulated' &&
+                              t('toolStatusSimulated')}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              {turn.role === 'assistant' && turn.toolsDisabled && (
+                <p
+                  className={cn(
+                    'text-muted-foreground flex items-start gap-1 text-xs',
+                    turn.content && 'border-border/50 mt-1.5 border-t pt-1.5'
+                  )}
+                  data-testid="playground-tools-disabled"
+                >
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {t('toolsUnsupported')}
+                </p>
+              )}
+              {turn.role === 'assistant' && turn.stepLimit && (
+                <p
+                  className={cn(
+                    'text-muted-foreground flex items-start gap-1 text-xs',
+                    turn.content && 'border-border/50 mt-1.5 border-t pt-1.5'
+                  )}
+                  data-testid="playground-step-limit"
+                >
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {t('stepLimit')}
+                </p>
               )}
               {turn.role === 'assistant' && turn.handoff && (
                 <p

@@ -10,6 +10,7 @@ export type IngestErrorCode =
   | 'file_too_large'
   | 'file_corrupt'
   | 'pdf_encrypted'
+  | 'file_too_complex'
   | 'empty_text'
   | 'text_too_long'
   | 'invalid_url'
@@ -28,6 +29,7 @@ const STATUS_BY_CODE: Record<IngestErrorCode, number> = {
   file_too_large: 413,
   file_corrupt: 422,
   pdf_encrypted: 422,
+  file_too_complex: 422,
   empty_text: 422,
   text_too_long: 413,
   invalid_url: 400,

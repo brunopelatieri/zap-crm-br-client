@@ -9,6 +9,7 @@ import { runPlanLifecycle } from '@/lib/plans/lifecycle';
 import { deliverPending } from '@/lib/notifications/dispatch';
 import { runFormsSweep, shouldLogFormsSweep } from '@/lib/forms/sweep';
 import { sweepKnowledgeIndexing } from '@/lib/ai/ingest/indexer';
+import { sweepAiTuningRetention } from '@/lib/ai/tuning/retention';
 
 /**
  * Oito fases, um único agendamento:
@@ -35,6 +36,14 @@ import { sweepKnowledgeIndexing } from '@/lib/ai/ingest/indexer';
  *      (processo reiniciado no meio). No máximo 5 documentos por ciclo; a
  *      terceira falha vira `error`, com botão de reindexar na tela. Sem
  *      agendador novo nem ação do operador: é fase desta rota.
+ *   9. **Reter os dados do ajuste do agente** (SPEC 089 P-5, F7): apaga por
+ *      idade os rascunhos de IA (2 dias), candidatos a exemplo sem revisão
+ *      (60), rejeitados (30) e rodadas de avaliação (180); nunca exemplo
+ *      aprovado nem caso. No máximo uma vez por hora por processo;
+ *      `AI_TUNING_RETENTION=off` desliga. Na mesma passada (SPEC 089 F8,
+ *      migração 110), expurga a auditoria `ai_tool_calls` com mais de 90
+ *      dias, até 1.000 linhas por passada, pela RPC `purge_ai_tool_calls`;
+ *      isto não depende de `AI_TUNING_RETENTION`.
  *
  * Por que a varredura mora AQUI e não numa rota nova (§5.5.1, e o mesmo
  * argumento vale para a fase 3 — SPEC 046 §6.1 —, para a fase 4 —
@@ -244,6 +253,24 @@ export async function GET(request: Request) {
       console.log(
         '[automations-cron] knowledge indexing:',
         JSON.stringify(knowledgeResult)
+      );
+    }
+
+    // Fase 9 (SPEC 089 P-5, F7) — retenção dos dados do ajuste do agente.
+    // Limitada a uma vez por hora por processo; só loga quando apagou algo.
+    // Não lança.
+    const tuningResult = await sweepAiTuningRetention(admin, new Date());
+    if (
+      tuningResult.drafts +
+        tuningResult.candidates +
+        tuningResult.rejected +
+        tuningResult.evalRuns +
+        tuningResult.toolCalls >
+      0
+    ) {
+      console.log(
+        '[automations-cron] ai tuning retention:',
+        JSON.stringify(tuningResult)
       );
     }
   });

@@ -9,3 +9,6 @@ package-lock.json
 supabase/migrations
 public/opus
 public/emojibase
+# Payload real de provedor capturado (SPEC 089): não se reformata
+docs/spec-089-f0-fixtures
+docs/spec-089-f4-fixtures

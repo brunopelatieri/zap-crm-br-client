@@ -13,6 +13,10 @@ export interface LogAiUsageArgs {
   usage: AiUsage | null;
   /** Knowledge documents whose excerpts went into the prompt (D-14). */
   knowledgeDocumentIds?: string[];
+  /** Tool turns only (SPEC 089 F4): model calls made and tool calls handled.
+   *  One row per reply; `usage` is already summed over the steps. */
+  steps?: number;
+  toolCalls?: number;
 }
 
 /**
@@ -53,9 +57,14 @@ export async function logAiUsage(
       ...(args.knowledgeDocumentIds && args.knowledgeDocumentIds.length > 0
         ? { knowledge_document_ids: args.knowledgeDocumentIds }
         : {}),
+      // Only on tool turns (columns from migration 105).
+      ...(args.steps !== undefined ? { steps: args.steps } : {}),
+      ...(args.toolCalls !== undefined ? { tool_calls: args.toolCalls } : {}),
     });
     if (error) {
-      console.error('[ai usage] log insert failed:', error);
+      // A CHECK / NOT NULL violation carries the failing row in `details`:
+      // log only the code and the message.
+      console.error('[ai usage] log insert failed:', error.code, error.message);
     }
   } catch (err) {
     console.error('[ai usage] log insert threw:', err);

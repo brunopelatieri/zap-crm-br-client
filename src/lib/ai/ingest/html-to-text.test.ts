@@ -101,3 +101,144 @@ describe('htmlToText — hostile pages run in linear time', () => {
     expect(performance.now() - t0).toBeLessThan(1500);
   });
 });
+
+describe('htmlToText — hidden elements are not content', () => {
+  const body = (inner: string) =>
+    htmlToText(`<html><body><p>Visível.</p>${inner}<p>Fim.</p></body></html>`)
+      .text;
+
+  it.each([
+    ['hidden attribute', '<div hidden>SEGREDO</div>'],
+    ['hidden with a value', '<p hidden="hidden">SEGREDO</p>'],
+    ['aria-hidden true', '<span aria-hidden="true">SEGREDO</span>'],
+    [
+      'aria-hidden single quotes, any case',
+      "<div ARIA-HIDDEN='True'>SEGREDO</div>",
+    ],
+    ['display:none', '<div style="color:red;display:none">SEGREDO</div>'],
+    [
+      'display: none !important',
+      '<div style="DISPLAY :  none !important">SEGREDO</div>',
+    ],
+    ['visibility:hidden', '<p style="visibility:hidden">SEGREDO</p>'],
+    ['unquoted attribute', '<div hidden class=x>SEGREDO</div>'],
+    [
+      'nested same-name elements inside',
+      '<div hidden><div>a</div>SEGREDO<div>b</div></div>',
+    ],
+    ['a list item', '<ul><li hidden>SEGREDO</li></ul>'],
+    [
+      'hidden inside a visible <main>',
+      '<main><div hidden>SEGREDO</div></main>',
+    ],
+    [
+      'a <main> inside a hidden element',
+      '<div hidden><main><p>SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO SEGREDO</p></main></div>',
+    ],
+    ['attribute value holding ">"', '<div title="a>b" hidden>SEGREDO</div>'],
+    ['never closed', '<div hidden>SEGREDO'],
+  ])('drops %s', (_name, inner) => {
+    const text = body(inner);
+    expect(text).not.toContain('SEGREDO');
+    expect(text).toContain('Visível.');
+  });
+
+  // SPEC 089 F8 (/code-review): these legitimate pages lost their content.
+  it('a `<` inside a script is not a tag (the page keeps its content)', () => {
+    const page =
+      '<html><head><script>for (var i=0;i<n;i++) { hidden = true }</script></head>' +
+      '<body><main><h1>Preços</h1><p>Plano Avançado R$ 129.</p></main></body></html>';
+    const { text } = htmlToText(page);
+    expect(text).toContain('Plano Avançado R$ 129.');
+    expect(text).not.toContain('for (var');
+  });
+
+  it('a hidden <p> without </p> ends at the next <p> (valid HTML)', () => {
+    const { text } = htmlToText(
+      '<body><p hidden>aviso<p>Plano R$ 129.</p><ul><li hidden>x<li>Entrega em 7 dias.</ul></body>'
+    );
+    expect(text).toContain('Plano R$ 129.');
+    expect(text).toContain('Entrega em 7 dias.');
+    expect(text).not.toContain('aviso');
+  });
+
+  // Adversarial pass of the F8: a fake close in a comment or an attribute
+  // value let the hidden text out; an entity hid `display:none`.
+  it.each([
+    ['a fake close in a comment', '<div hidden><!-- </div> -->SEGREDO</div>'],
+    [
+      'a fake close in an attribute value',
+      '<div hidden><span title="</div>">SEGREDO</span></div>',
+    ],
+    ['an entity in the style', '<div style="display&#58;none">SEGREDO</div>'],
+  ])('drops hidden text despite %s', (_n, inner) => {
+    const { text } = htmlToText(
+      `<body><p>Visível.</p>${inner}<p>Fim.</p></body>`
+    );
+    expect(text).not.toContain('SEGREDO');
+    expect(text).toContain('Visível.');
+    expect(text).toContain('Fim.');
+  });
+
+  it('a bare `<` inside a hidden element does not swallow its close', () => {
+    const { text } = htmlToText(
+      '<body><div hidden>a < b SEGREDO</div><p>Visível.</p></body>'
+    );
+    expect(text).not.toContain('SEGREDO');
+    expect(text).toContain('Visível.');
+  });
+
+  it('a body hidden until JavaScript loads (anti-flicker) is still read', () => {
+    const { text } = htmlToText(
+      '<html><body style="visibility:hidden"><p>Conteúdo real.</p></body></html>'
+    );
+    expect(text).toContain('Conteúdo real.');
+  });
+
+  it('keeps what follows a closed hidden element', () => {
+    expect(body('<div hidden><div>x</div></div><p>Depois.</p>')).toContain(
+      'Depois.'
+    );
+  });
+
+  it('does not treat other attributes or values as hidden', () => {
+    const text = body(
+      '<p class="hidden">A.</p><p title="hidden">B.</p><p aria-hidden="false">C.</p><p style="color:red">D.</p><p data-x="display:none">E.</p>'
+    );
+    for (const t of ['A.', 'B.', 'C.', 'D.', 'E.']) expect(text).toContain(t);
+  });
+
+  it('ignores hidden on void elements (they have no content to drop)', () => {
+    expect(body('<br hidden>Depois do br.<img hidden src=x>')).toContain(
+      'Depois do br.'
+    );
+  });
+
+  it('runs in linear time on hostile hidden markup', () => {
+    const MB2 = 2 * 1024 * 1024;
+    const cases = [
+      '<div hidden>'.repeat(MB2 / 12),
+      '<div hidden>'.repeat(MB2 / 24) + '</div>'.repeat(MB2 / 12),
+      '<p style="display:none">'.repeat(MB2 / 24),
+      '<div hidden title="'.repeat(MB2 / 19),
+      `<div style="${'display'.padEnd(MB2 / 2, ' ')}" hidden>x</div>`,
+    ];
+    for (const c of cases) {
+      const t0 = performance.now();
+      htmlToText(c);
+      expect(performance.now() - t0).toBeLessThan(1500);
+    }
+  });
+});
+
+describe('htmlToText — Unicode spaces', () => {
+  it('normalizes Unicode spaces and runs in linear time on them', () => {
+    const EM = String.fromCharCode(0x2003);
+    expect(htmlToText(`<p>a${EM}${EM}b</p>`).text).toBe('a b');
+    const t0 = performance.now();
+    htmlToText(
+      `<h1>${EM.repeat(50_000)}${'#'.repeat(50_000)}${EM.repeat(50_000)}x</h1>`
+    );
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+});

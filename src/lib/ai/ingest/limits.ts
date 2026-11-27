@@ -55,3 +55,36 @@ export const ACCEPTED_FILE_EXTENSIONS = [
   'csv',
 ] as const;
 export type AcceptedFileExtension = (typeof ACCEPTED_FILE_EXTENSIONS)[number];
+
+/**
+ * DOCX é um ZIP: o tamanho DESCOMPACTADO é o que derruba a memória (um DOCX
+ * de 153 KB com `document.xml` repetitivo inflava para gigabytes). Orçamento
+ * total de todas as entradas, medido inflando de verdade (os tamanhos
+ * declarados no ZIP não valem) — 40 MB cobre um DOCX de 10 MB com imagens.
+ */
+export const MAX_ZIP_UNCOMPRESSED_BYTES = 40 * 1024 * 1024;
+
+/**
+ * Parte XML do DOCX (`.xml` e `.rels`), que é o que o `mammoth` transforma em
+ * árvore na memória. Medido na F8: o `mammoth` usa ~140 vezes o tamanho do
+ * XML (15 MB de `document.xml` → 2,1 GB de RSS; 35 MB derruba o Node com heap
+ * de 2 GB). 6 MB de XML cobre com folga um documento de 500 mil caracteres
+ * (um DOCX de cem páginas tem 1 a 3 MB de XML) e fica abaixo de ~1 GB.
+ */
+export const MAX_ZIP_XML_BYTES = 6 * 1024 * 1024;
+
+/**
+ * Tags (`<`) somadas nas entradas XML. A memória do `mammoth` segue o NÚMERO
+ * de elementos, não os bytes: 2,9 MB de `<w:p><w:r><w:t>a</w:t></w:r></w:p>`
+ * (~680 mil `<`) já levavam a 870 MB de RSS, e só de `<w:p/>` a 1,1 GB. Um
+ * documento real de 500 mil caracteres tem por volta de 100 mil `<`; 400 mil
+ * dá folga e limita o pior caso a ~0,5 GB.
+ */
+export const MAX_ZIP_XML_TAGS = 400_000;
+
+/** Entradas do ZIP (um DOCX comum tem dezenas). */
+export const MAX_ZIP_ENTRIES = 2_000;
+
+/** PDF: páginas lidas e prazo total da extração. */
+export const MAX_PDF_PAGES = 500;
+export const PDF_EXTRACT_TIMEOUT_MS = 30_000;

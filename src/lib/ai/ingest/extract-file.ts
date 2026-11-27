@@ -4,9 +4,13 @@ import {
   ACCEPTED_FILE_EXTENSIONS,
   MAX_DOCUMENT_CHARS,
   MAX_FILE_BYTES,
+  MAX_PDF_PAGES,
+  PDF_EXTRACT_TIMEOUT_MS,
   type AcceptedFileExtension,
 } from './limits';
 import type { ExtractedText } from './extract-url';
+import { parseMarkdownHeading } from './markdown-heading';
+import { assertSafeZip } from './zip-guard';
 
 // ============================================================
 // Arquivo → texto puro (SPEC 089 D-7). PDF (`unpdf`), DOCX (`mammoth`),
@@ -161,26 +165,86 @@ export function csvToText(text: string): string {
 // PDF e DOCX
 // ------------------------------------------------------------
 
-async function extractPdf(bytes: Uint8Array): Promise<string> {
-  const { getDocumentProxy, extractText } = await import('unpdf');
+export interface PdfLimits {
+  maxPages?: number;
+  maxChars?: number;
+  timeoutMs?: number;
+}
+
+/**
+ * Texto de um PDF, página a página (não `extractText({ mergePages })`: um PDF
+ * de 61 KB com 20 páginas apontando para um stream de 20 MB custava 63 s de
+ * CPU sem chance de parar no meio). Teto de páginas, parada assim que o texto
+ * acumulado passa do limite do documento e prazo total conferido entre
+ * páginas (o pdf.js roda no mesmo thread: não dá para interromper no meio de
+ * uma página, por isso o prazo só vale entre elas).
+ */
+export async function extractPdfText(
+  bytes: Uint8Array,
+  limits: PdfLimits = {}
+): Promise<string> {
+  const maxPages = limits.maxPages ?? MAX_PDF_PAGES;
+  const maxChars = limits.maxChars ?? MAX_DOCUMENT_CHARS;
+  const timeoutMs = limits.timeoutMs ?? PDF_EXTRACT_TIMEOUT_MS;
+  const { getDocumentProxy } = await import('unpdf');
+  const startedAt = Date.now();
+  let pdf: Awaited<ReturnType<typeof getDocumentProxy>> | null = null;
   try {
     // Cópia: o pdf.js assume a posse do buffer e o zera.
-    const pdf = await getDocumentProxy(new Uint8Array(bytes));
-    const { text } = await extractText(pdf, { mergePages: true });
-    return text;
+    pdf = await getDocumentProxy(new Uint8Array(bytes));
+    if (pdf.numPages > maxPages) {
+      throw new IngestError(
+        'file_too_complex',
+        `The PDF has more than ${maxPages} pages.`
+      );
+    }
+    const pages: string[] = [];
+    let chars = 0;
+    for (let n = 1; n <= pdf.numPages; n++) {
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new IngestError(
+          'file_too_complex',
+          'The PDF took too long to process.'
+        );
+      }
+      const page = await pdf.getPage(n);
+      const content = await page.getTextContent();
+      page.cleanup();
+      const text = content.items
+        .map((item) =>
+          'str' in item && item.str != null
+            ? item.str + (item.hasEOL ? '\n' : '')
+            : ''
+        )
+        .join('');
+      pages.push(text);
+      chars += text.length + 1;
+      if (chars > maxChars) {
+        throw new IngestError(
+          'text_too_long',
+          'The text is over 500,000 characters.'
+        );
+      }
+    }
+    return pages.join('\n');
   } catch (err) {
+    if (err instanceof IngestError) throw err;
     const name = (err as { name?: string } | null)?.name ?? '';
     if (name === 'PasswordException') {
       throw new IngestError('pdf_encrypted', 'This PDF is password-protected.');
     }
-    if (err instanceof IngestError) throw err;
     throw new IngestError('file_corrupt', 'The PDF could not be read.');
+  } finally {
+    await pdf?.loadingTask.destroy().catch(() => {});
   }
 }
 
 async function extractDocx(
   bytes: Uint8Array
 ): Promise<{ title: string | null; text: string }> {
+  // ZIP bomba: confere o que o arquivo vira DESCOMPACTADO antes de entregar
+  // ao `mammoth` (que descompacta sem teto).
+  assertSafeZip(bytes);
   const mammoth = await import('mammoth');
   try {
     // `convertToHtml` (e não `extractRawText`) preserva títulos, lista e
@@ -204,14 +268,17 @@ async function extractDocx(
 
 /** Normaliza o texto extraído: quebras, espaços e linhas em branco em excesso. */
 function tidy(text: string): string {
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\x00/g, '')
-    .split('\n')
-    .map((l) => l.replace(/[ \t\xa0]+/g, ' ').trim())
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return (
+    text
+      .replace(/\r\n?/g, '\n')
+      .replace(/\x00/g, '')
+      .split('\n')
+      // `[^\S\n]` = qualquer espaço Unicode (U+2003, U+00A0…) menos a quebra.
+      .map((l) => l.replace(/[^\S\n]+/g, ' ').trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
 }
 
 export interface FileInput {
@@ -240,7 +307,7 @@ export async function extractFileText(file: FileInput): Promise<ExtractedText> {
     if (!startsWith(file.bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) {
       throw new IngestError('file_corrupt', 'The file is not a valid PDF.');
     }
-    raw = await extractPdf(file.bytes);
+    raw = await extractPdfText(file.bytes);
   } else if (kind === 'docx') {
     // DOCX é um ZIP: assinatura `PK\x03\x04`.
     if (!startsWith(file.bytes, [0x50, 0x4b, 0x03, 0x04])) {
@@ -273,8 +340,14 @@ export async function extractFileText(file: FileInput): Promise<ExtractedText> {
   }
   if (kind === 'md') {
     // Título do documento Markdown: o primeiro `# Título`, se houver.
-    const h1 = /^#\s+(.+?)\s*#*\s*$/m.exec(text);
-    if (h1) title = h1[1].trim();
+    // Sem regex com retrocesso (ReDoS cúbico): ver `markdown-heading.ts`.
+    for (const line of text.split('\n')) {
+      const heading = parseMarkdownHeading(line);
+      if (heading?.level === 1 && heading.text) {
+        title = heading.text;
+        break;
+      }
+    }
   }
 
   return { title, text, mimeType: MIME_BY_EXTENSION[kind] };

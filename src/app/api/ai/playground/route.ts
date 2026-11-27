@@ -9,6 +9,7 @@ import {
 import { loadAiConfig } from '@/lib/ai/config';
 import { composeAgentTurn } from '@/lib/ai/compose';
 import { generateReply } from '@/lib/ai/generate';
+import { turnSources } from '@/lib/ai/sources';
 import { AiError, type ChatMessage } from '@/lib/ai/types';
 
 // Keep the tested transcript bounded, mirroring the live context window.
@@ -35,6 +36,14 @@ export async function POST(request: Request) {
       RATE_LIMITS.aiDraft
     );
     if (!limit.success) return rateLimitResponse(limit);
+    // Per account too, like the draft (SPEC 089 F8): every agent of the team
+    // can open the playground, and each turn spends up to 4 model calls on
+    // the account's own key.
+    const accountLimit = checkRateLimit(
+      `ai-playground-acct:${accountId}`,
+      RATE_LIMITS.aiDraftAccount
+    );
+    if (!accountLimit.success) return rateLimitResponse(accountLimit);
 
     const body = await request.json().catch(() => null);
     const rawMessages = Array.isArray(body?.messages) ? body.messages : null;
@@ -91,13 +100,33 @@ export async function POST(request: Request) {
       messages,
     });
 
-    const { text, handoff } = await generateReply({
+    // SPEC 089 F4 / D-18: the account's enabled tools; write tools run in
+    // simulation (nothing is written), reads run for real. No conversation
+    // here, so contact tools answer `no_contact`.
+    const result = await generateReply({
       config,
       systemPrompt: turn.systemPrompt,
       messages: turn.messages,
+      tools: turn.tools,
+      toolContext: turn.toolContext,
+      fallbackSystemPrompt: turn.fallbackSystemPrompt,
     });
-    // Sources (D-14): what grounded this turn, for the admin only.
-    return NextResponse.json({ reply: text, handoff, sources: turn.sources });
+    // Sources (D-14) and tool calls: what grounded this turn, for the
+    // admin only.
+    return NextResponse.json({
+      reply: result.text,
+      handoff: result.handoff,
+      sources: turnSources(turn.sources, result.toolSources),
+      tool_calls: result.toolCalls ?? [],
+      steps: result.steps ?? 1,
+      ...(result.handoffRequest
+        ? { handoff_request: result.handoffRequest }
+        : {}),
+      ...(result.toolsDisabled ? { tools_disabled: result.toolsDisabled } : {}),
+      ...(result.stopReason === 'step_limit'
+        ? { stop_reason: 'step_limit' }
+        : {}),
+    });
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

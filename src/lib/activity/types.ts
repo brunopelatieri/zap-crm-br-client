@@ -29,7 +29,9 @@ export type ActivityResourceType =
   | 'tag'
   | 'webhook'
   /** SPEC 085 §9 (migração 097 estende o CHECK da 084). */
-  | 'form';
+  | 'form'
+  /** SPEC 089 F5 (migração 106 estende o CHECK): o agente de IA agiu no CRM. */
+  | 'ai';
 
 /**
  * Uma entrada por linha da tabela do §4. `broadcast.blocked` cobre os
@@ -125,6 +127,20 @@ export const ACTIVITY_CATALOG = {
     'form.deleted',
     'form.responses_deleted',
     'form.exported',
+  ],
+  // Agente de IA (SPEC 089 F5): uma linha por ESCRITA real de uma ferramenta
+  // no auto-reply; ator `system` (nome `ai-agent`). A auditoria completa de
+  // cada chamada (inclusive leitura e recusa) está em `ai_tool_calls`.
+  ai: [
+    'ai.tool_contact_updated',
+    'ai.tool_tags_added',
+    'ai.tool_tags_removed',
+    'ai.tool_deal_created',
+    'ai.tool_deal_moved',
+    'ai.tool_note_added',
+    'ai.tool_handoff',
+    // F6: a ferramenta HTTP da conta (escrita) chamou um endpoint externo.
+    'ai.tool_http_called',
   ],
 } as const satisfies Record<ActivityResourceType, readonly string[]>;
 

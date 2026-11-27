@@ -40,6 +40,31 @@ export function buildHandoffSummary(args: {
   return `${base} Last customer message: “${quote}”`;
 }
 
+/**
+ * The summary when the MODEL handed off through `handoff_to_human` (SPEC 089
+ * F5): its own short reason and summary for the team, after the same
+ * "handed off after N replies" lead as the deterministic one. Model-written
+ * and shown to staff as plain text; cut so it stays a glanceable note.
+ */
+export function buildAgentHandoffSummary(args: {
+  reason: string;
+  summary: string;
+  replyCount: number;
+}): string {
+  const { reason, summary, replyCount } = args;
+  const replies =
+    replyCount === 0
+      ? 'without replying'
+      : `after ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}`;
+  const why = truncate(reason, 200);
+  const what = truncate(summary, 500);
+  const body = what === why ? why : `${why} — ${what}`;
+  // Written by the model after reading the customer's messages: it can
+  // echo what the customer asked it to say, so staff must not read it as
+  // a verification (a claim like "approved by finance" is just text).
+  return `🤖 AI agent handed off ${replies}. [AI-written from the customer's messages, unverified] ${body}`;
+}
+
 function truncate(text: string, max: number): string {
   const collapsed = text.replace(/\s+/g, ' ');
   if (collapsed.length <= max) return collapsed;

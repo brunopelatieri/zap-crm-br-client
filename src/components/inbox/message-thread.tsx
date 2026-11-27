@@ -558,7 +558,12 @@ export function MessageThread({
   }, [messages]);
 
   const handleSend = useCallback(
-    async (text: string, replyToId?: string, resentFromMessageId?: string) => {
+    async (
+      text: string,
+      replyToId?: string,
+      resentFromMessageId?: string,
+      aiDraftId?: string
+    ) => {
       if (!conversation) return;
 
       const tempId = `temp-${Date.now()}`;
@@ -588,6 +593,8 @@ export function MessageThread({
             content_text: text,
             reply_to_message_id: replyToId,
             resent_from_message_id: resentFromMessageId,
+            // SPEC 089 F7: lets the server tell an edited AI draft apart.
+            ai_draft_id: aiDraftId,
           }),
         });
 

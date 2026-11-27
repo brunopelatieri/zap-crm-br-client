@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { resolveEmbeddingsTarget } from './embeddings';
 import { parseProviderOptions } from './provider-options';
+import { parseToolsConfig } from './tools/config';
 
 interface AiConfigRow {
   provider: AiProvider;
@@ -21,10 +22,25 @@ interface AiConfigRow {
   auto_reply_max_per_conversation: number;
   handoff_agent_id: string | null;
   embeddings_api_key: string | null;
+  tools_config?: unknown;
 }
 
-const CONFIG_COLUMNS =
+const BASE_COLUMNS =
   'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key, embeddings_provider, provider_options';
+// `tools_config` is from migration 105 (SPEC 089 F4). On a database that
+// has not received it yet the load falls back to the columns above (every
+// tool off) instead of taking auto-reply, drafts and the playground down.
+const CONFIG_COLUMNS = `${BASE_COLUMNS}, tools_config`;
+
+/** Postgres `undefined_column` naming `tools_config` (migration 105 missing). */
+function isMissingToolsConfig(error: unknown): boolean {
+  const e = error as { code?: unknown; message?: unknown } | null;
+  return (
+    e?.code === '42703' &&
+    typeof e.message === 'string' &&
+    e.message.includes('tools_config')
+  );
+}
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -43,16 +59,24 @@ export async function loadAiConfig(
   opts: { requireActive?: boolean } = {}
 ): Promise<AiConfig | null> {
   const { requireActive = true } = opts;
-  const { data, error } = await db
-    .from('ai_configs')
-    .select(CONFIG_COLUMNS)
-    .eq('account_id', accountId)
-    .maybeSingle();
+  const select = (columns: string) =>
+    db
+      .from('ai_configs')
+      .select(columns)
+      .eq('account_id', accountId)
+      .maybeSingle();
+  let { data, error } = await select(CONFIG_COLUMNS);
+  if (error && isMissingToolsConfig(error)) {
+    console.error(
+      '[ai config] ai_configs.tools_config is missing — apply migration 105. Tools stay off until then.'
+    );
+    ({ data, error } = await select(BASE_COLUMNS));
+  }
 
   if (error) throw error;
   if (!data) return null;
 
-  const row = data as AiConfigRow;
+  const row = data as unknown as AiConfigRow;
   // The Playground passes requireActive:false so an admin can test the
   // agent before flipping the master switch on.
   if (requireActive && !row.is_active) return null;
@@ -95,6 +119,7 @@ export async function loadAiConfig(
       embeddingsApiKey,
     }),
     providerOptions: parseProviderOptions(row.provider_options),
+    toolsConfig: parseToolsConfig(row.tools_config),
   };
 }
 

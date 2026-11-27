@@ -2,15 +2,23 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { buildBlankPdf } from './__fixtures__/build-pdf';
+import { buildZip } from './__fixtures__/build-zip';
 import { IngestError } from './errors';
 import {
   csvToText,
   decodeText,
   extractFileText,
+  extractPdfText,
   fileExtension,
   parseCsv,
 } from './extract-file';
-import { MAX_DOCUMENT_CHARS, MAX_FILE_BYTES } from './limits';
+import {
+  MAX_DOCUMENT_CHARS,
+  MAX_FILE_BYTES,
+  MAX_PDF_PAGES,
+  MAX_ZIP_UNCOMPRESSED_BYTES,
+} from './limits';
 
 // PDF e DOCX de VERDADE (não texto inventado): o PDF foi impresso pelo
 // Edge headless (fonte TrueType embutida, como um PDF comum), o DOCX saiu
@@ -248,5 +256,114 @@ describe('extractFileText — limits and types', () => {
     expect(fileExtension('Manual.PDF')).toBe('pdf');
     expect(fileExtension('a.tar.gz')).toBe('gz');
     expect(fileExtension('nome')).toBe('');
+  });
+});
+
+describe('extractFileText — DOCX zip bomb', () => {
+  it('refuses a small DOCX that inflates past the budget, before the converter runs', async () => {
+    const bomb = buildZip([
+      {
+        name: 'word/document.xml',
+        data: Buffer.alloc(MAX_ZIP_UNCOMPRESSED_BYTES + 1024, 0x61),
+      },
+    ]);
+    expect(bomb.byteLength).toBeLessThan(200_000);
+    const t0 = performance.now();
+    expect(
+      await codeOf(extractFileText({ name: 'bomba.docx', bytes: bomb }))
+    ).toBe('file_too_complex');
+    expect(performance.now() - t0).toBeLessThan(3000);
+  });
+
+  it('refuses a DOCX with a lying declared size and too many entries', async () => {
+    const many = buildZip(
+      Array.from({ length: 2_001 }, (_, i) => ({
+        name: `f${i}`,
+        data: Buffer.from('x'),
+      }))
+    );
+    expect(await codeOf(extractFileText({ name: 'a.docx', bytes: many }))).toBe(
+      'file_too_complex'
+    );
+  });
+
+  it('still reads the real DOCX fixture through the guard', async () => {
+    const out = await extractFileText({
+      name: 'politica-trocas.docx',
+      bytes: fixture('politica-trocas.docx'),
+    });
+    expect(out.text).toContain('# Política de Trocas e Devoluções');
+  });
+});
+
+describe('extractFileText — hostile Markdown runs in linear time', () => {
+  const EM = String.fromCharCode(0x2003);
+  const hostile = [
+    `# ${EM.repeat(12_000)}${'#'.repeat(12_000)}${EM.repeat(12_000)}x`,
+    `# ${EM.repeat(50_000)}`,
+    `# ${'#'.repeat(50_000)}`,
+    `# ${'# '.repeat(25_000)}x`,
+  ];
+
+  it.each(hostile.map((h, i) => [i, h] as const))(
+    'case %i stays under 200 ms',
+    async (_i, md) => {
+      const t0 = performance.now();
+      await codeOf(extractFileText({ name: 'a.md', bytes: utf8(md) }));
+      expect(performance.now() - t0).toBeLessThan(200);
+    }
+  );
+
+  it('normalizes Unicode spaces in the extracted text', async () => {
+    const out = await extractFileText({
+      name: 'a.txt',
+      bytes: utf8(`a${EM}${EM}b\u00a0\u00a0c`),
+    });
+    expect(out.text).toBe('a b c');
+  });
+
+  it('keeps the Markdown title behaviour for normal files', async () => {
+    const title = async (md: string) =>
+      (await extractFileText({ name: 'doc.md', bytes: utf8(md) })).title;
+    expect(await title('texto\n\n# Guia ##\n\n## Outro')).toBe('Guia');
+    expect(await title('## só h2\n\ntexto')).toBe('doc');
+    expect(await title('#semespaco\n\ntexto')).toBe('doc');
+  });
+});
+
+describe('extractPdfText — pathological PDFs', () => {
+  it('refuses a PDF over the page cap with file_too_complex', async () => {
+    const pdf = buildBlankPdf(MAX_PDF_PAGES + 1);
+    expect(await codeOf(extractPdfText(pdf))).toBe('file_too_complex');
+    expect(await codeOf(extractFileText({ name: 'a.pdf', bytes: pdf }))).toBe(
+      'file_too_complex'
+    );
+  });
+
+  it('accepts a PDF at the page cap (blank pages are reported as empty text)', async () => {
+    expect(
+      await codeOf(
+        extractFileText({ name: 'a.pdf', bytes: buildBlankPdf(MAX_PDF_PAGES) })
+      )
+    ).toBe('empty_text');
+  });
+
+  it('stops as soon as the accumulated text passes the limit (text_too_long)', async () => {
+    const bytes = fixture('politica-trocas.pdf');
+    expect(await codeOf(extractPdfText(bytes, { maxChars: 20 }))).toBe(
+      'text_too_long'
+    );
+  });
+
+  it('stops at the deadline, checked between pages (file_too_complex)', async () => {
+    const bytes = fixture('politica-trocas.pdf');
+    expect(await codeOf(extractPdfText(bytes, { timeoutMs: -1 }))).toBe(
+      'file_too_complex'
+    );
+  });
+
+  it('reads the real PDF page by page with the default limits', async () => {
+    const text = await extractPdfText(fixture('politica-trocas.pdf'));
+    expect(text).toContain('Política de Trocas e Devoluções');
   });
 });

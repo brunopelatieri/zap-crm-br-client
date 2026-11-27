@@ -6,6 +6,8 @@
 // whether the account is on OpenAI or Anthropic.
 // ============================================================
 
+import type { ToolsConfig } from './tools/types';
+
 export type AiProvider = 'openai' | 'anthropic' | 'openrouter';
 
 /** All providers, in the order the settings screen lists them. */
@@ -89,6 +91,9 @@ export interface AiConfig {
   embeddingsTarget: EmbeddingsTarget | null;
   /** Provider options (privacy filter etc.). */
   providerOptions: AiProviderOptions;
+  /** Per-tool on/off and allow-lists (`tools_config`, migration 105,
+   *  SPEC 089 D-16). Absent = every tool off. */
+  toolsConfig?: ToolsConfig;
 }
 
 /** A single conversation turn in the shape both providers accept. */
@@ -96,6 +101,67 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
+
+// ------------------------------------------------------------
+// Tool calling (SPEC 089 F4, D-15): provider-neutral turns. Each adapter
+// translates these to its own wire format (`tools`/`tool_calls` on the
+// OpenAI-compatible APIs, `tool_use`/`tool_result` on Anthropic).
+// ------------------------------------------------------------
+
+/** The JSON Schema subset the tool catalog uses for its inputs. */
+export interface JsonSchemaObject {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+/** A tool as the model sees it: name, description, input schema. */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  parameters: JsonSchemaObject;
+}
+
+/**
+ * One tool call the model asked for. `id` is opaque (its format varies by
+ * provider: `toolu_…`, `call_…`, F0 §1.3); `arguments` is the raw JSON
+ * text, parsed and validated by the engine, never by the adapter.
+ */
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/**
+ * A turn in the engine's history. The leading run of plain user/assistant
+ * turns is the conversation transcript; after it come the loop's own
+ * turns: an assistant turn carrying `toolCalls`, then one `tool` turn per
+ * call, possibly repeated.
+ */
+export type AgentMessage =
+  | { role: 'user'; content: string }
+  | {
+      role: 'assistant';
+      content: string;
+      toolCalls?: ToolCall[];
+      /** Opaque provider data that must be echoed back on the next call
+       *  (OpenRouter `reasoning_details`). Only the adapter that produced
+       *  it reads it. */
+      providerState?: unknown;
+    }
+  | {
+      role: 'tool';
+      toolCallId: string;
+      name: string;
+      /** Already wrapped and truncated by the engine (data, not instructions). */
+      content: string;
+      isError?: boolean;
+    };
+
+/** Why the provider stopped, normalized across providers. */
+export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'other';
 
 /**
  * Token counts for one provider call, normalized across OpenAI
@@ -111,10 +177,60 @@ export interface AiUsage {
   costUsd?: number;
 }
 
-/** Raw text + usage a provider adapter returns before handoff parsing. */
+/**
+ * Raw text + usage a provider adapter returns before handoff parsing.
+ * `text` may be empty only when `toolCalls` is not (a pure tool step);
+ * a step with neither is an `empty_response` error in the adapter.
+ */
 export interface ProviderResult {
   text: string;
   usage: AiUsage | null;
+  /** Tool calls the model asked for (empty/absent = a final answer). */
+  toolCalls?: ToolCall[];
+  finishReason?: FinishReason;
+  /** See `AgentMessage` (assistant) `providerState`. */
+  providerState?: unknown;
+}
+
+/** One tool call the engine handled, for the playground and the usage log. */
+export interface ToolCallTrace {
+  /** 1-based model call that asked for it. */
+  step: number;
+  name: string;
+  /** Parsed arguments when they were valid JSON, else the raw text (cut). */
+  arguments: unknown;
+  status: 'ok' | 'error' | 'simulated';
+  /** Stable code when `status` is `error`. */
+  error?: string;
+  durationMs: number;
+  /**
+   * Risk of the tool that was OFFERED under this name (built-in or the
+   * account's HTTP tool). Absent for a name that was not offered.
+   */
+  risk?: 'read' | 'write';
+  /**
+   * The call failed AFTER it may have taken effect elsewhere (an HTTP
+   * request that was sent and then failed, F6). Treated like a write that
+   * landed by whoever has to decide whether a human must be told.
+   */
+  outcomeUnknown?: true;
+}
+
+/** Spend of a turn that ended in an error (see `AiError.partial`). */
+export interface PartialTurn {
+  usage: AiUsage | null;
+  steps: number;
+  toolCalls: ToolCallTrace[];
+}
+
+/**
+ * What an agent turn had already spent when it threw, for ANY error (the
+ * loop attaches it to whatever it rethrows, not only to `AiError`).
+ */
+export function partialOf(err: unknown): PartialTurn | undefined {
+  if (err === null || typeof err !== 'object') return undefined;
+  const p = (err as { partial?: unknown }).partial;
+  return p && typeof p === 'object' ? (p as PartialTurn) : undefined;
 }
 
 /** Outcome of a generation call. */
@@ -123,8 +239,22 @@ export interface GenerateResult {
   text: string;
   /** True when the model asked to hand off to a human (auto-reply mode). */
   handoff: boolean;
-  /** Provider token usage for this call, or null when unavailable. */
+  /** Provider token usage, summed over every model call of the turn, or
+   *  null when unavailable. */
   usage: AiUsage | null;
+  /** Model calls made (1 without tools). */
+  steps?: number;
+  /** Tool calls handled in the turn (absent without tools). */
+  toolCalls?: ToolCallTrace[];
+  /** Knowledge excerpts surfaced by `search_knowledge` calls (D-14). */
+  toolSources?: KnowledgeSource[];
+  /** Set when the turn ran without tools because the model rejected them. */
+  toolsDisabled?: 'unsupported';
+  /** Why a tool turn stopped without an answer (`step_limit`: 4 steps used;
+   *  `handoff`: the model called `handoff_to_human`). */
+  stopReason?: 'answer' | 'step_limit' | 'handoff';
+  /** Set with `stopReason: 'handoff'`: what the model wrote for the team. */
+  handoffRequest?: { reason: string; summary: string };
 }
 
 /**
@@ -135,6 +265,12 @@ export interface GenerateResult {
 export class AiError extends Error {
   readonly code: string;
   readonly status: number;
+  /**
+   * What an agent turn had already spent when it failed (SPEC 089 F5): the
+   * tokens, steps and tool calls of the calls that DID happen, so the caller
+   * can still record the usage and the quota stays honest.
+   */
+  partial?: PartialTurn;
   constructor(message: string, opts: { code?: string; status?: number } = {}) {
     super(message);
     this.name = 'AiError';
