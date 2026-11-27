@@ -7,6 +7,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit';
 import { loadAiConfig } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { callProvider } from '@/lib/ai/generate';
 import { AiError } from '@/lib/ai/types';
 
@@ -35,7 +36,7 @@ export async function POST() {
     );
     if (!limit.success) return rateLimitResponse(limit);
 
-    const config = await loadAiConfig(supabase, accountId, {
+    const config = await loadAiConfig(supabaseAdmin(), accountId, {
       requireActive: false,
     }).catch((err) => {
       console.error('[ai/tools/test] loadAiConfig error:', err);

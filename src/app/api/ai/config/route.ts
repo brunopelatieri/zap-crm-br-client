@@ -24,6 +24,7 @@ import {
   serializeProviderOptions,
 } from '@/lib/ai/provider-options';
 import { promptChanged, recordPromptVersion } from '@/lib/ai/prompt-versions';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -46,12 +47,15 @@ export async function GET() {
       return NextResponse.json({ configured: false, feature_in_plan: false });
     }
 
+    // P-14 (migração 111): o `authenticated` não lê mais as colunas cifradas
+    // (`api_key`, `embeddings_api_key`) — nem o viewer, nem o admin. A leitura
+    // abaixo traz só o que a tela precisa; a presença das chaves vem de uma
+    // segunda consulta de service role, filtrada pela conta da sessão, que
+    // devolve só booleanos.
     const { data, error } = await supabase
       .from('ai_configs')
-      // `api_key` is selected only to derive `has_key` — it is stripped
-      // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key, embeddings_provider, provider_options'
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_provider, provider_options'
       )
       .eq('account_id', accountId)
       .maybeSingle();
@@ -65,13 +69,25 @@ export async function GET() {
     }
 
     if (!data) return NextResponse.json({ configured: false });
-    // The keys are selected only to derive the has_* flags; neither is
-    // returned to the client.
-    const { api_key, embeddings_api_key, provider_options, ...safe } = data;
+
+    const { data: keys, error: keysErr } = await supabaseAdmin()
+      .from('ai_configs')
+      .select('api_key, embeddings_api_key')
+      .eq('account_id', accountId)
+      .maybeSingle();
+    if (keysErr) {
+      console.error('[ai/config GET] key presence error:', keysErr.code);
+      return NextResponse.json(
+        { error: 'Failed to load AI configuration' },
+        { status: 500 }
+      );
+    }
+
+    const { provider_options, ...safe } = data;
     return NextResponse.json({
       configured: true,
-      has_key: !!api_key,
-      has_embeddings_key: !!embeddings_api_key,
+      has_key: !!keys?.api_key,
+      has_embeddings_key: !!keys?.embeddings_api_key,
       deny_data_collection:
         parseProviderOptions(provider_options).denyDataCollection,
       ...safe,
@@ -174,7 +190,9 @@ export async function POST(request: Request) {
         : undefined;
 
     // Reuse the stored key when the form didn't send a fresh one.
-    const { data: existing } = await supabase
+    // `api_key` só se lê com service role (P-14, migração 111); a conta vem
+    // da sessão já validada por `requireRole('admin')`.
+    const { data: existing } = await supabaseAdmin()
       .from('ai_configs')
       .select(
         'id, provider, model, api_key, system_prompt, embeddings_provider, provider_options'

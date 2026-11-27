@@ -7,6 +7,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit';
 import { loadEmbeddingsTarget } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { INDEXING_STALE_MINUTES } from '@/lib/ai/ingest/limits';
 import { scheduleIndexing } from '@/lib/ai/ingest/route-helpers';
 
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
 
     // If a key is configured but can't be decrypted, don't quietly do a
     // lexical-only pass and report success. Stop and tell the admin.
-    const { corrupt } = await loadEmbeddingsTarget(supabase, accountId);
+    const { corrupt } = await loadEmbeddingsTarget(supabaseAdmin(), accountId);
     if (corrupt) {
       return NextResponse.json(
         {

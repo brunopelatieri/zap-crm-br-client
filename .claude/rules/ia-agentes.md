@@ -7,7 +7,7 @@ paths:
 
 # IA — rascunho, auto-reply e provedores
 
-- A chave do provedor é da conta e fica criptografada (`encryption.ts`); a rota de configuração nunca a devolve e ninguém a loga.
+- A chave do provedor é da conta e fica criptografada (`encryption.ts`); a rota de configuração nunca a devolve e ninguém a loga. As colunas cifradas de `ai_configs` só se leem com `supabaseAdmin()` (111): `loadAiConfig`/`loadEmbeddingsTarget` recebem o cliente de service role.
 - O auto-reply só responde quando todas as condições valem: conta não bloqueada (primeira checagem), IA configurada, nenhuma automação ativa de mensagem/palavra-chave, conversa sem agente atribuído, `ai_autoreply_disabled` falso, teto e limite de taxa. Qualquer uma falsa = deixa para o humano.
 - O teto por conversa é reivindicado atomicamente por `claim_ai_reply_slot`; nunca "ler o contador e depois enviar".
 - Handoff: sentinela `[[HANDOFF]]` e resumo determinístico (`handoff.ts`), sem segunda chamada ao LLM.

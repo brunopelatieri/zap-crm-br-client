@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { loadEmbeddingsTarget } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import {
   countExamples,
   createManualExample,
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
     const limit = Number(url.searchParams.get('limit') ?? 50);
     const offset = Number(url.searchParams.get('offset') ?? 0);
 
-    const { target } = await loadEmbeddingsTarget(g.supabase, g.accountId);
+    const { target } = await loadEmbeddingsTarget(supabaseAdmin(), g.accountId);
     const [list, counts] = await Promise.all([
       listExamples(
         g.supabase,
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     if (!body) return badRequest('Invalid JSON body.');
 
-    const { target } = await loadEmbeddingsTarget(g.supabase, g.accountId);
+    const { target } = await loadEmbeddingsTarget(supabaseAdmin(), g.accountId);
     const example = await createManualExample(
       g.supabase,
       {

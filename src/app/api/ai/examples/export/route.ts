@@ -1,4 +1,5 @@
 import { loadAiConfig } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { exportDataset } from '@/lib/ai/tuning/export';
 import {
   tuningErrorResponse,
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
 
     let systemPrompt: string | null = null;
     if (new URL(request.url).searchParams.get('include_system') === '1') {
-      const config = await loadAiConfig(g.supabase, g.accountId, {
+      const config = await loadAiConfig(supabaseAdmin(), g.accountId, {
         requireActive: false,
       }).catch(() => null);
       systemPrompt = config?.systemPrompt ?? null;

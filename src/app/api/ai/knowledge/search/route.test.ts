@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   rateOk: true,
   target: { target: null as unknown, corrupt: false },
   search: vi.fn(),
+  loadTarget: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/account', async (importOriginal) => {
@@ -42,7 +43,12 @@ vi.mock('@/lib/rate-limit', async (importOriginal) => ({
 }));
 
 vi.mock('@/lib/ai/config', () => ({
-  loadEmbeddingsTarget: vi.fn(async () => h.target),
+  loadEmbeddingsTarget: h.loadTarget,
+}));
+
+// P-14 (migração 111): a chave cifrada só se lê com service role.
+vi.mock('@/lib/ai/admin-client', () => ({
+  supabaseAdmin: () => ({ admin: true }),
 }));
 
 vi.mock('@/lib/ai/knowledge', () => ({ searchKnowledge: h.search }));
@@ -76,6 +82,7 @@ beforeEach(() => {
   h.inPlan = true;
   h.rateOk = true;
   h.target = { target: { provider: 'openai', apiKey: 'sk' }, corrupt: false };
+  h.loadTarget.mockReset().mockImplementation(async () => h.target);
   h.search.mockReset().mockResolvedValue({
     hits: [HIT],
     searchFailed: false,
@@ -137,6 +144,13 @@ describe('POST /api/ai/knowledge/search', () => {
     });
     const body = await (await call({ query: 'prazo' })).json();
     expect(body.embedding_failed).toBe(true);
+  });
+
+  it('loads the embeddings key with the service-role client, never the RLS one (P-14, migration 111)', async () => {
+    await call({ query: 'prazo' });
+    expect(h.loadTarget).toHaveBeenCalledTimes(1);
+    expect(h.loadTarget.mock.calls[0][0]).toEqual({ admin: true });
+    expect(h.loadTarget.mock.calls[0][1]).toBe('acct-1');
   });
 
   it('lets the admin try another distance ceiling for this call only', async () => {

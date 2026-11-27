@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { loadEmbeddingsTarget } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { embedPendingExamples } from '@/lib/ai/tuning/examples';
 import {
   tuningErrorResponse,
@@ -21,7 +22,7 @@ export async function POST() {
     const g = await tuningGuard('ai-examples-reindex');
     if (!g.ok) return g.response;
     const { target, corrupt } = await loadEmbeddingsTarget(
-      g.supabase,
+      supabaseAdmin(),
       g.accountId
     );
     if (corrupt) {

@@ -66,7 +66,7 @@ export async function POST(request: Request) {
       caseIds = body.case_ids as string[];
     }
 
-    const config = await loadAiConfig(g.supabase, g.accountId, {
+    const config = await loadAiConfig(supabaseAdmin(), g.accountId, {
       requireActive: false,
     }).catch((err) => {
       console.error('[ai/eval] loadAiConfig error:', err);

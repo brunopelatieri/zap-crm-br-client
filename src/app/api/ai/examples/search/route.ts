@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { loadEmbeddingsTarget } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { searchExamples } from '@/lib/ai/tuning/examples';
 import { maskAndLimit } from '@/lib/ai/tuning/mask';
 import {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
       maxDistance = n;
     }
 
-    const { target } = await loadEmbeddingsTarget(g.supabase, g.accountId);
+    const { target } = await loadEmbeddingsTarget(supabaseAdmin(), g.accountId);
     const result = await searchExamples(
       g.supabase,
       g.accountId,

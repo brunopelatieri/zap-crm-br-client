@@ -12,21 +12,42 @@ const h = vi.hoisted(() => ({
   role: 'admin' as 'admin' | 'agent',
   tables: {} as Record<string, Row[]>,
   writes: [] as { table: string; op: 'insert' | 'update'; payload: Row }[],
+  selects: [] as { rls: boolean; table: string; cols: string | undefined }[],
   validate: vi.fn(),
   models: vi.fn(),
   inPlan: true,
 }));
 
-function fakeSupabase() {
+// P-14 (migração 111): o cliente com RLS (`rls: true`, o do usuário) não lê as
+// colunas cifradas de `ai_configs`; o de service role (`rls: false`) lê.
+const SECRET_COLUMNS = ['api_key', 'embeddings_api_key'];
+
+function fakeSupabase(rls = true) {
   const from = (table: string) => {
     const filters: [string, unknown][] = [];
     let limitN: number | null = null;
+    let selected: string[] | null = null;
     const rows = () =>
       (h.tables[table] ?? []).filter((r) =>
         filters.every(([k, v]) => r[k] === v)
       );
+    const project = (r: Row | undefined): Row | null => {
+      if (!r) return null;
+      if (!selected) return r;
+      return Object.fromEntries(
+        Object.entries(r).filter(([k]) => selected!.includes(k))
+      );
+    };
+    const denied = () =>
+      rls &&
+      table === 'ai_configs' &&
+      (!selected || selected.some((c) => SECRET_COLUMNS.includes(c)));
     const chain: Record<string, unknown> = {
-      select: () => chain,
+      select: (cols?: string) => {
+        h.selects.push({ rls, table, cols });
+        selected = cols ? cols.split(',').map((c) => c.trim()) : null;
+        return chain;
+      },
       eq: (k: string, v: unknown) => {
         filters.push([k, v]);
         return chain;
@@ -37,7 +58,15 @@ function fakeSupabase() {
         return chain;
       },
       maybeSingle: () =>
-        Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        denied()
+          ? Promise.resolve({
+              data: null,
+              error: {
+                code: '42501',
+                message: 'permission denied for table ai_configs',
+              },
+            })
+          : Promise.resolve({ data: project(rows()[0]), error: null }),
       insert: (payload: Row) => {
         h.writes.push({ table, op: 'insert', payload });
         return Promise.resolve({ error: null });
@@ -76,6 +105,10 @@ vi.mock('@/lib/auth/account', async (importOriginal) => {
     getCurrentAccount: vi.fn(async () => ctx()),
   };
 });
+
+vi.mock('@/lib/ai/admin-client', () => ({
+  supabaseAdmin: () => fakeSupabase(false),
+}));
 
 vi.mock('@/lib/whatsapp/encryption', () => ({
   encrypt: (s: string) => `enc(${s})`,
@@ -129,6 +162,7 @@ beforeEach(() => {
   h.inPlan = true;
   h.tables = {};
   h.writes = [];
+  h.selects = [];
   h.validate.mockReset().mockResolvedValue(undefined);
   h.models.mockReset();
   __resetRateLimitForTests();
@@ -312,6 +346,35 @@ describe('GET /api/ai/config', () => {
     expect(JSON.stringify(body)).not.toContain('sk-emb');
     expect(body).not.toHaveProperty('api_key');
     expect(body).not.toHaveProperty('provider_options');
+  });
+
+  it('never selects the cipher columns with the RLS client (P-14, migration 111)', async () => {
+    h.role = 'agent'; // any member may read the config screen data
+    h.tables.ai_configs = [
+      { ...CONFIG_ROW, embeddings_api_key: 'enc(sk-emb)' },
+    ];
+    const res = await getConfig();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ has_key: true, has_embeddings_key: true });
+
+    const configSelects = h.selects.filter((q) => q.table === 'ai_configs');
+    const rls = configSelects.filter((q) => q.rls);
+    expect(rls.length).toBeGreaterThan(0);
+    for (const q of rls) {
+      expect(q.cols).toBeDefined(); // nunca select('*')
+      expect(q.cols).not.toMatch(/api_key/);
+    }
+    // a presença das chaves vem de UMA leitura de service role
+    expect(configSelects.filter((q) => !q.rls)).toEqual([
+      { rls: false, table: 'ai_configs', cols: 'api_key, embeddings_api_key' },
+    ]);
+  });
+
+  it('reports has_key false when the account has no embeddings key', async () => {
+    h.tables.ai_configs = [CONFIG_ROW];
+    const body = await (await getConfig()).json();
+    expect(body).toMatchObject({ has_key: true, has_embeddings_key: false });
   });
 });
 

@@ -50,8 +50,10 @@ function isMissingToolsConfig(error: unknown): boolean {
  * (mismatched `ENCRYPTION_KEY`), so that distinct failure surfaces
  * rather than looking like "not configured".
  *
- * Works with any client: pass the RLS-scoped SSR client from a
- * dashboard route, or the service-role admin client from the webhook.
+ * `db` DEVE ser o cliente de service role (`supabaseAdmin()`): desde a
+ * migração 111 (P-14) `authenticated` não tem SELECT em `api_key` nem em
+ * `embeddings_api_key`, então o cliente com RLS recebe `42501`. Filtre
+ * sempre por `accountId` já validado pela sessão (ver `requireRole`).
  */
 export async function loadAiConfig(
   db: SupabaseClient,
@@ -130,6 +132,8 @@ export async function loadAiConfig(
  * if the assistant's master switch is currently off. On OpenRouter with
  * no own embeddings key, the chat key is reused (SPEC 089 D-3).
  *
+ * `db` deve ser o cliente de service role (mesma regra de `loadAiConfig`).
+ *
  * Returns `{ target, corrupt }`: `target` is null when there's no usable
  * key; `corrupt` distinguishes "a key is set but can't be decrypted" so
  * callers can warn rather than silently indexing lexical-only.
@@ -143,7 +147,16 @@ export async function loadEmbeddingsTarget(
     .select('provider, api_key, embeddings_api_key, embeddings_provider')
     .eq('account_id', accountId)
     .maybeSingle();
-  if (error || !data) return { target: null, corrupt: false };
+  if (error) {
+    // Não é silencioso: `42501` aqui quer dizer que o chamador passou o
+    // cliente com RLS (`authenticated` não lê as chaves cifradas desde a
+    // 111) e a busca semântica cairia em lexical sem aviso.
+    console.error(
+      `[ai config] embeddings target for account ${accountId} not loaded (code ${(error as { code?: string }).code ?? 'unknown'}) — pass the service-role client.`
+    );
+    return { target: null, corrupt: false };
+  }
+  if (!data) return { target: null, corrupt: false };
 
   const row = data as Pick<
     AiConfigRow,

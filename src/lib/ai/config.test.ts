@@ -6,7 +6,7 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (v: string) => `plain:${v}`,
 }));
 
-import { loadAiConfig } from './config';
+import { loadAiConfig, loadEmbeddingsTarget } from './config';
 
 function dbReturning(row: Record<string, unknown> | null): SupabaseClient {
   const chain = {
@@ -116,5 +116,29 @@ describe('loadAiConfig tools_config (SPEC 089 F4, migration 105)', () => {
     await expect(
       loadAiConfig(chain as unknown as SupabaseClient, 'acct')
     ).rejects.toMatchObject({ code: '42501' });
+  });
+});
+
+describe('loadEmbeddingsTarget with a client that cannot read the keys (P-14, migration 111)', () => {
+  it('logs the error code instead of silently degrading to lexical search', async () => {
+    const db = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () =>
+              Promise.resolve({
+                data: null,
+                error: { code: '42501', message: 'permission denied' },
+              }),
+          }),
+        }),
+      }),
+    } as unknown as SupabaseClient;
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const out = await loadEmbeddingsTarget(db, 'acct-9');
+    expect(out).toEqual({ target: null, corrupt: false });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(String(spy.mock.calls[0][0])).toContain('42501');
+    spy.mockRestore();
   });
 });

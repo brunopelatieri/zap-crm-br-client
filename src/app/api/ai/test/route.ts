@@ -8,6 +8,7 @@ import {
 } from '@/lib/rate-limit';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { validateAiCredentials } from '@/lib/ai/validate';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { AI_PROVIDERS, AiError, type AiProvider } from '@/lib/ai/types';
 
 /**
@@ -21,7 +22,7 @@ import { AI_PROVIDERS, AiError, type AiProvider } from '@/lib/ai/types';
  */
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId, userId } = await requireRole('admin');
+    const { accountId, userId } = await requireRole('admin');
     // SPEC 089 D-20: ai_enabled em modo estrito (chave ausente = bloqueado).
     await requireAiFeature(accountId);
 
@@ -51,7 +52,8 @@ export async function POST(request: Request) {
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : '';
     let apiKeyPlain = rawKey;
     if (!apiKeyPlain) {
-      const { data: existing } = await supabase
+      // Service role: `api_key` não é legível por `authenticated` (P-14, 111).
+      const { data: existing } = await supabaseAdmin()
         .from('ai_configs')
         .select('api_key')
         .eq('account_id', accountId)

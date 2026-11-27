@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { loadEmbeddingsTarget } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { deleteExample, updateExample } from '@/lib/ai/tuning/examples';
 import {
   UUID_RE,
@@ -29,7 +30,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const body = await readJson(request);
     if (!body) return badRequest('Invalid JSON body.');
 
-    const { target } = await loadEmbeddingsTarget(g.supabase, g.accountId);
+    const { target } = await loadEmbeddingsTarget(supabaseAdmin(), g.accountId);
     const example = await updateExample(
       g.supabase,
       {

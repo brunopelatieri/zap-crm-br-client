@@ -7,6 +7,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit';
 import { loadAiConfig } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { composeAgentTurn } from '@/lib/ai/compose';
 import { generateReply } from '@/lib/ai/generate';
 import { turnSources } from '@/lib/ai/sources';
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const config = await loadAiConfig(supabase, accountId, {
+    const config = await loadAiConfig(supabaseAdmin(), accountId, {
       requireActive: false,
     }).catch((err) => {
       console.error('[ai/playground] loadAiConfig error:', err);

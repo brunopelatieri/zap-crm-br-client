@@ -7,6 +7,7 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit';
 import { loadEmbeddingsTarget } from '@/lib/ai/config';
+import { supabaseAdmin } from '@/lib/ai/admin-client';
 import { KNOWLEDGE_MAX_DISTANCE, KNOWLEDGE_TOP_K } from '@/lib/ai/defaults';
 import { searchKnowledge } from '@/lib/ai/knowledge';
 import { buildLexicalQuery, buildRetrievalQuery } from '@/lib/ai/query';
@@ -57,7 +58,10 @@ export async function POST(request: Request) {
 
     // A key that is set but unreadable is reported, not hidden: the search
     // then runs on words only and the screen says why.
-    const { target, corrupt } = await loadEmbeddingsTarget(supabase, accountId);
+    const { target, corrupt } = await loadEmbeddingsTarget(
+      supabaseAdmin(),
+      accountId
+    );
 
     const search = await searchKnowledge(
       supabase,
