@@ -1,0 +1,469 @@
+-- ============================================================
+-- cron-jobs.sql — agenda os três pingers de cron do ZAP CRM BR
+-- usando o Supabase Cron (pg_cron + pg_net).
+--
+-- ⚠️ ISTO NÃO É UMA MIGRAÇÃO. Não numere, não coloque em
+--    `supabase/migrations/`, não rode em CI.
+--
+--    As migrações descrevem o SCHEMA da aplicação e valem igual em
+--    todo ambiente e em todo fork. Este arquivo descreve a
+--    CONFIGURAÇÃO DE UM AMBIENTE: carrega a URL pública daquele deploy
+--    e o segredo daquele operador. Versionado como migração, ele faria
+--    o fork de qualquer pessoa agendar chamadas para o domínio de
+--    outra — e, pior, o segredo viraria texto no git.
+--
+--    Por isso o arquivo tem duas partes: a PARTE 1 você edita e roda
+--    uma vez por projeto; a PARTE 2 é copiar e colar sem tocar em nada.
+--
+-- Onde rodar: SQL Editor do painel do Supabase, no projeto que o SEU
+-- deploy de produção usa (confira o `NEXT_PUBLIC_SUPABASE_URL` do
+-- ambiente). Rodar no projeto errado cria um cron que funciona e não
+-- serve para nada.
+--
+-- O que estes jobs fazem
+--
+--   /api/broadcasts/cron   — dispara campanhas AGENDADAS que venceram
+--                            (SPEC 044 §6.3 e §6.6). Sem ele, um
+--                            agendamento fica em `scheduled` para
+--                            sempre: nada mais no app olha para
+--                            `broadcasts.scheduled_at`.
+--   /api/automations/cron  — retoma automações paradas em passos de
+--                            espera (Wait).
+--   /api/flows/cron        — encerra execuções de fluxo abandonadas.
+--
+-- Idempotente: `cron.schedule` com um nome que já existe SOBRESCREVE o
+-- job anterior, e a parte 1 apaga o segredo antigo antes de recriar.
+-- Rodar duas vezes não duplica nada.
+-- ============================================================
+
+
+-- ============================================================
+-- PARTE 1 — EDITE ESTES DOIS VALORES E RODE
+--
+-- Os dois vão para o Supabase Vault (extensão `supabase_vault`, já
+-- instalada), não para dentro do comando do job. O motivo é concreto:
+-- o comando de um job fica legível em texto puro em `cron.job.command`,
+-- e uma tabela que qualquer futuro `select * from cron.job` expõe não é
+-- lugar para segredo. No Vault ele fica cifrado em repouso e o job o lê
+-- no instante da execução.
+--
+-- ⚠️ NÃO commite este arquivo depois de preencher. Substitua os valores
+--    no editor do painel, rode, e descarte.
+-- ============================================================
+
+-- URL pública do app, SEM barra no final.
+--   Ex.: https://crm.seudominio.com
+-- Segredo: o MESMO valor de `AUTOMATION_CRON_SECRET` configurado nas
+-- variáveis de ambiente do deploy. Se ainda não existe, gere um com
+--   openssl rand -hex 32
+-- e configure-o no painel do host ANTES de rodar isto — sem a variável
+-- no servidor, as três rotas respondem 503 por segurança.
+
+DO $$
+DECLARE
+  v_app_url    TEXT := 'https://SUBSTITUA-PELO-SEU-DOMINIO.com';
+  v_cron_secret TEXT := 'SUBSTITUA-PELO-AUTOMATION_CRON_SECRET';
+BEGIN
+  IF v_app_url LIKE '%SUBSTITUA%' OR v_cron_secret LIKE '%SUBSTITUA%' THEN
+    RAISE EXCEPTION
+      'Edite v_app_url e v_cron_secret na PARTE 1 antes de rodar este script.';
+  END IF;
+
+  IF right(v_app_url, 1) = '/' THEN
+    RAISE EXCEPTION 'v_app_url nao pode terminar com barra: %', v_app_url;
+  END IF;
+
+  -- Reexecutar o script troca os valores em vez de falhar com nome
+  -- duplicado — é o que permite rotacionar o segredo rodando de novo.
+  DELETE FROM vault.secrets WHERE name IN ('zapcrm_app_url', 'zapcrm_cron_secret');
+
+  PERFORM vault.create_secret(v_app_url, 'zapcrm_app_url',
+    'ZAP CRM BR: URL publica do app, usada pelos jobs de cron.');
+  PERFORM vault.create_secret(v_cron_secret, 'zapcrm_cron_secret',
+    'ZAP CRM BR: valor de AUTOMATION_CRON_SECRET, enviado no header x-cron-secret.');
+END;
+$$;
+
+
+-- ============================================================
+-- PARTE 2 — COPIE E COLE SEM EDITAR
+-- ============================================================
+
+-- ── Extensões ────────────────────────────────────────────────
+-- pg_cron  → o agendador (cria o schema `cron`).
+-- pg_net   → HTTP assíncrono de dentro do Postgres (cria o schema
+--            `net`). É beta segundo a própria Supabase; para um pinger
+--            de 5 em 5 minutos isso é aceitável — se uma execução
+--            falhar, a próxima acontece em minutos e o app não perde
+--            estado (o claim de cada rota é idempotente).
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+GRANT USAGE ON SCHEMA cron TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA cron TO postgres;
+
+-- Falha cedo e com mensagem legível se o pg_net tiver sido instalado em
+-- outro schema (o painel às vezes usa `extensions`), em vez de deixar o
+-- job quebrar silenciosamente a cada 5 minutos.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+     WHERE p.proname = 'http_get'
+       AND p.pronamespace = 'net'::regnamespace
+  ) THEN
+    RAISE EXCEPTION
+      'net.http_get() nao encontrado. Confira onde o pg_net foi instalado: SELECT extnamespace::regnamespace FROM pg_extension WHERE extname = ''pg_net'';';
+  END IF;
+END;
+$$;
+
+-- ── Os três jobs ─────────────────────────────────────────────
+--
+-- Cadência de 5 minutos: a granularidade do agendamento na interface é
+-- de minuto, e alguns minutos de atraso num disparo em massa não mudam
+-- nada. Menos que isso só aumentaria requisições ociosas.
+--
+-- `timeout_milliseconds` = 20 s porque a rota de broadcasts faz várias
+-- consultas antes de responder (resolve audiência, confere cota,
+-- persiste destinatários) — o default de 2 s do pg_net cortaria a
+-- espera e registraria falha numa execução que deu certo. Vale saber: o
+-- timeout corta apenas a ESPERA pela resposta; o trabalho no servidor
+-- segue até o fim, e o claim de status impede disparo duplicado.
+
+SELECT cron.schedule(
+  'zapcrm-broadcasts-cron',
+  '*/5 * * * *',
+  $job$
+  SELECT net.http_get(
+    url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+           || '/api/broadcasts/cron',
+    headers := jsonb_build_object(
+      'x-cron-secret',
+      (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+    ),
+    timeout_milliseconds := 20000
+  );
+  $job$
+);
+
+SELECT cron.schedule(
+  'zapcrm-automations-cron',
+  '*/5 * * * *',
+  $job$
+  SELECT net.http_get(
+    url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+           || '/api/automations/cron',
+    headers := jsonb_build_object(
+      'x-cron-secret',
+      (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+    ),
+    timeout_milliseconds := 20000
+  );
+  $job$
+);
+
+SELECT cron.schedule(
+  'zapcrm-flows-cron',
+  '*/5 * * * *',
+  $job$
+  SELECT net.http_get(
+    url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+           || '/api/flows/cron',
+    headers := jsonb_build_object(
+      'x-cron-secret',
+      (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+    ),
+    timeout_milliseconds := 20000
+  );
+  $job$
+);
+
+
+-- ============================================================
+-- CONFERÊNCIA — rode depois, separadamente
+-- ============================================================
+
+-- 1) Os três jobs existem e estão ativos?
+--
+-- SELECT jobname, schedule, active FROM cron.job
+--  WHERE jobname LIKE 'zapcrm-%' ORDER BY jobname;
+
+-- 2) As últimas execuções deram certo? (espere 5 min pela primeira)
+--
+-- SELECT j.jobname, d.status, d.return_message, d.start_time
+--   FROM cron.job_run_details d
+--   JOIN cron.job j ON j.jobid = d.jobid
+--  WHERE j.jobname LIKE 'zapcrm-%'
+--  ORDER BY d.start_time DESC
+--  LIMIT 10;
+--
+-- `status = 'succeeded'` aqui significa que o SQL rodou — não que o app
+-- respondeu 200. A resposta HTTP de verdade está no passo 3.
+
+-- 3) O app respondeu o quê?
+--
+-- SELECT status_code, content, created
+--   FROM net._http_response
+--  ORDER BY created DESC
+--  LIMIT 10;
+--
+-- Esperado: 200 com um corpo como {"dispatched":0,"postponed":0,"failed":0}.
+--   401 → o segredo do Vault não bate com o do servidor.
+--   503 → `AUTOMATION_CRON_SECRET` não está configurado no deploy.
+--   404 → a URL do Vault está errada (barra sobrando? domínio errado?).
+
+
+-- ============================================================
+-- DESFAZER
+-- ============================================================
+--
+-- SELECT cron.unschedule('zapcrm-broadcasts-cron');
+-- SELECT cron.unschedule('zapcrm-automations-cron');
+-- SELECT cron.unschedule('zapcrm-flows-cron');
+-- DELETE FROM vault.secrets WHERE name IN ('zapcrm_app_url', 'zapcrm_cron_secret');
+
+
+-- ============================================================
+-- OPCIONAL — purga do log de webhook de entrada (SPEC 055 D-13)
+--
+-- `webhook_ingest_logs` (migração 065) não tem purga automática: a
+-- migração cria só a FUNÇÃO (`purge_webhook_ingest_logs`), porque
+-- agendar algo que assume pg_cron instalado reproduziria exatamente o
+-- silêncio que a memória do projeto já registrou uma vez (o pg_cron
+-- não está instalado em todo projeto Supabase deste app). Sem este
+-- job, a tabela só CRESCE — aceitável, é uma linha por FALHA de
+-- validação, não por requisição.
+--
+-- Diferente dos três pingers acima, este job roda inteiramente dentro
+-- do Postgres — sem pg_net, sem Vault, sem segredo — porque a purga é
+-- uma função SQL local, não uma chamada HTTP à app. Descomente e rode
+-- separadamente, no MESMO projeto Supabase onde a migração 065 já foi
+-- aplicada.
+--
+-- CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+-- GRANT USAGE ON SCHEMA cron TO postgres;
+--
+-- SELECT cron.schedule(
+--   'zapcrm-webhook-ingest-logs-purge',
+--   '0 3 * * *',                          -- diário, às 03:00 (fuso do banco)
+--   $job$ SELECT public.purge_webhook_ingest_logs(90); $job$
+-- );
+--
+-- Conferir depois:
+--   SELECT jobname, schedule, active FROM cron.job
+--    WHERE jobname = 'zapcrm-webhook-ingest-logs-purge';
+--
+-- Desfazer:
+--   SELECT cron.unschedule('zapcrm-webhook-ingest-logs-purge');
+
+
+-- ============================================================
+-- OPCIONAL — varredura de retenção de mensagens em horário fixo
+-- (SPEC 060 §6, porta 2)
+--
+-- A porta PADRÃO já existe sem nenhuma ação sua: a fase 4 de
+-- `/api/automations/cron` roda a varredura de retenção a cada vez que o
+-- pinger de 5 min acima passa, respeitando
+-- `MESSAGE_RETENTION_INTERVAL_HOURS` (padrão 6h) por dentro. Se isso já
+-- basta, PARE AQUI — não precisa deste bloco.
+--
+-- Descomente e rode só se quiser a limpeza num horário PRÓPRIO (ex.:
+-- sempre às 03:00, fora do horário de pico), ignorando o intervalo
+-- configurado — é o que `/api/messages/retention/cron` faz
+-- (`ignoreInterval: true`). Mesmo `x-cron-secret`
+-- (`AUTOMATION_CRON_SECRET`) das outras rotas, mesmos segredos do Vault
+-- já criados na PARTE 1 acima — nenhum segredo novo a gerenciar.
+--
+-- Continua nascendo desligado no nível que importa: sem
+-- `MESSAGE_RETENTION_ENABLED` no servidor, a rota responde
+-- `{"skipped":"disabled"}` e não apaga nada, com ou sem este job.
+--
+-- CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+-- CREATE EXTENSION IF NOT EXISTS pg_net;
+-- GRANT USAGE ON SCHEMA cron TO postgres;
+--
+-- SELECT cron.schedule(
+--   'zapcrm-retention-cron',
+--   '0 3 * * *',                          -- diário, às 03:00 (fuso do banco)
+--   $job$
+--   SELECT net.http_get(
+--     url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+--            || '/api/messages/retention/cron',
+--     headers := jsonb_build_object(
+--       'x-cron-secret',
+--       (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+--     ),
+--     timeout_milliseconds := 20000
+--   );
+--   $job$
+-- );
+--
+-- Conferir depois:
+--   SELECT jobname, schedule, active FROM cron.job
+--    WHERE jobname = 'zapcrm-retention-cron';
+--
+-- Desfazer:
+--   SELECT cron.unschedule('zapcrm-retention-cron');
+
+
+-- ============================================================
+-- OPCIONAL — vencimento de plano em horário fixo (SPEC 062 §8, F9)
+--
+-- A porta PADRÃO já existe sem nenhuma ação sua: a fase 5 de
+-- `/api/automations/cron` roda a varredura de vencimento a cada vez
+-- que o pinger de 5 min acima passa. Diferente da retenção, não tem
+-- intervalo configurável nem interruptor de `.env` — uma conta só
+-- entra em escopo quando `current_period_end` está preenchido, então
+-- rodar a fase 5 a cada 5 minutos não tem custo de "varredura demais":
+-- os ramos que mudam estado (vencido → past_due, cancelamento
+-- efetivado) só disparam uma vez por natureza (ver
+-- `src/lib/plans/lifecycle.ts`), e os que só avisam usam
+-- `platform_audit_log` como dedupe. Se isso já basta, PARE AQUI — não
+-- precisa deste bloco.
+--
+-- Descomente e rode só se quiser a varredura num horário PRÓPRIO,
+-- separado do pinger de 5 min (ex.: só de madrugada) — é o que
+-- `/api/plans/lifecycle/cron` faz. Mesmo `x-cron-secret`
+-- (`AUTOMATION_CRON_SECRET`), mesmos segredos do Vault já criados na
+-- PARTE 1 acima — nenhum segredo novo a gerenciar.
+--
+-- CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+-- CREATE EXTENSION IF NOT EXISTS pg_net;
+-- GRANT USAGE ON SCHEMA cron TO postgres;
+--
+-- SELECT cron.schedule(
+--   'zapcrm-plan-lifecycle-cron',
+--   '0 4 * * *',                          -- diário, às 04:00 (fuso do banco)
+--   $job$
+--   SELECT net.http_get(
+--     url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+--            || '/api/plans/lifecycle/cron',
+--     headers := jsonb_build_object(
+--       'x-cron-secret',
+--       (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+--     ),
+--     timeout_milliseconds := 20000
+--   );
+--   $job$
+-- );
+--
+-- Conferir depois:
+--   SELECT jobname, schedule, active FROM cron.job
+--    WHERE jobname = 'zapcrm-plan-lifecycle-cron';
+--
+-- Desfazer:
+--   SELECT cron.unschedule('zapcrm-plan-lifecycle-cron');
+
+
+-- ============================================================
+-- OPCIONAL — purga da outbox de notificações do sistema
+-- (SPEC 063 §2.2, §8, F8)
+--
+-- `system_notifications` (migração 070) não tem purga automática, no
+-- mesmo espírito de `webhook_ingest_logs` acima: a migração cria só a
+-- FUNÇÃO (`purge_system_notifications`). Sem este job, a tabela só
+-- CRESCE — aceitável no curto prazo, mas ela guarda uma linha por
+-- evento de sistema (troca de plano, bloqueio, vencimento, quota
+-- estourada) em TODA conta, então cresce mais rápido que
+-- `webhook_ingest_logs`.
+--
+-- Roda inteiramente dentro do Postgres — sem pg_net, sem Vault, sem
+-- segredo — porque a purga é uma função SQL local, não uma chamada
+-- HTTP à app. Só apaga linhas JÁ RESOLVIDAS (nenhum canal em
+-- `pending`) mais velhas que o prazo — uma linha pendente de 6 meses é
+-- sintoma para investigar em `/admin/notifications`, não lixo para
+-- varrer.
+--
+-- Descomente e rode separadamente, no MESMO projeto Supabase onde a
+-- migração 070 já foi aplicada.
+--
+-- CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+-- GRANT USAGE ON SCHEMA cron TO postgres;
+--
+-- SELECT cron.schedule(
+--   'zapcrm-system-notifications-purge',
+--   '0 3 * * *',                          -- diário, às 03:00 (fuso do banco)
+--   $job$ SELECT public.purge_system_notifications(90); $job$
+-- );
+--
+-- Conferir depois:
+--   SELECT jobname, schedule, active FROM cron.job
+--    WHERE jobname = 'zapcrm-system-notifications-purge';
+--
+-- Desfazer:
+--   SELECT cron.unschedule('zapcrm-system-notifications-purge');
+
+
+-- ============================================================
+-- OPCIONAL — checagem de números via instância QRCode (SPEC 069 §7.1, R2/R3/R6)
+--
+-- A cada 5 min, mesma cadência dos três pingers principais — é a
+-- granularidade que a fila de checagem pede e o hábito que o operador
+-- já tem. Reusa os MESMOS segredos do Vault da PARTE 1 acima
+-- (`zapcrm_app_url`, `zapcrm_cron_secret`); não crie segredo novo.
+--
+-- Sem este job, `contact_check_queue` só cresce e nunca esvazia — a
+-- checagem fica presa em silêncio, exatamente a armadilha do AGENTS.md.
+-- ============================================================
+-- SELECT cron.schedule(
+--   'zapcrm-contact-check-cron',
+--   '*/5 * * * *',
+--   $job$
+--   SELECT net.http_get(
+--     url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+--            || '/api/contacts/check/cron',
+--     headers := jsonb_build_object(
+--       'x-cron-secret',
+--       (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+--     ),
+--     timeout_milliseconds := 30000
+--   );
+--   $job$
+-- );
+--
+-- Conferir depois:
+--   SELECT jobname, schedule, active FROM cron.job
+--    WHERE jobname = 'zapcrm-contact-check-cron';
+--
+-- Desfazer:
+--   SELECT cron.unschedule('zapcrm-contact-check-cron');
+
+
+-- ============================================================
+-- OPCIONAL — captação de contatos da agenda da instância (SPEC 069 §7.2, R5)
+--
+-- '0 0-5 * * *' está em UTC — o fuso do BANCO, não o do Brasil. A
+-- janela REAL é reconferida pela rota, no código, em
+-- EVOLUTION_HARVEST_TIMEZONE (padrão America/Sao_Paulo): se o seu
+-- Supabase não está em UTC-3 quando "madrugada" importa, ajuste o
+-- range do cron abaixo para que os dois fusos coincidam — senão o cron
+-- acorda no horário certo (segundo o Postgres) e a rota devolve
+-- "outside_window" o tempo todo, porque para ELA ainda não é madrugada.
+-- ============================================================
+-- SELECT cron.schedule(
+--   'zapcrm-contact-harvest-cron',
+--   '0 0-5 * * *',
+--   $job$
+--   SELECT net.http_get(
+--     url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_app_url')
+--            || '/api/contacts/harvest/cron',
+--     headers := jsonb_build_object(
+--       'x-cron-secret',
+--       (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'zapcrm_cron_secret')
+--     ),
+--     timeout_milliseconds := 60000
+--   );
+--   $job$
+-- );
+--
+-- Conferir depois:
+--   SELECT jobname, schedule, active FROM cron.job
+--    WHERE jobname = 'zapcrm-contact-harvest-cron';
+--
+-- Desfazer:
+--   SELECT cron.unschedule('zapcrm-contact-harvest-cron');
+--
+-- ⚠️ Memória do projeto: `pg_cron` nunca foi instalado no `vn`. Sem
+--    ele, os dois recursos acima ficam presos em silêncio. Confira
+--    `SELECT * FROM cron.job` antes de suspeitar de bug de código.
